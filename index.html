@@ -383,28 +383,58 @@ async function authSendMagicLink(email){
 
 async function loadMyProfile(){
   if(!sb) return null;
-  const { data: { user } } = await sb.auth.getUser();
-  if(!user) return null;
+  let user;
+  try {
+    const r = await sb.auth.getUser();
+    user = r.data?.user;
+  } catch(e){
+    console.warn('auth.getUser упал:', e.message);
+    return null;
+  }
+  if(!user){
+    console.log('Сессии нет, пользователь не авторизован');
+    return null;
+  }
+  console.log('✓ Авторизован как:', user.email);
 
-  /* Сначала пытаемся загрузить существующий профиль */
-  let { data, error } = await sb.from('profiles').select('*').eq('id', user.id).maybeSingle();
+  let data, error;
+  try {
+    const r = await sb.from('profiles').select('*').eq('id', user.id).maybeSingle();
+    data = r.data; error = r.error;
+  } catch(e){
+    console.warn('Запрос профиля упал:', e.message);
+    return null;
+  }
 
-  /* Если профиля нет — создаём его (вместо триггера, который не работает) */
+  if(error){
+    console.warn('Ошибка загрузки профиля:', error.message);
+    return null;
+  }
+
   if(!data){
-    const insert = await sb.from('profiles').insert({
-      id: user.id,
-      role: 'student',
-      full_name: user.user_metadata?.full_name || user.email.split('@')[0],
-      email: user.email,
-      s_type: 'гость',
-      s_status: 'pending',
-      bee: 0
-    }).select().single();
-    if(insert.error){
-      console.warn('Не удалось создать профиль:', insert.error.message);
+    console.log('Профиля нет, создаём…');
+    try {
+      const r = await sb.from('profiles').insert({
+        id: user.id,
+        role: 'student',
+        full_name: user.user_metadata?.full_name || user.email.split('@')[0],
+        email: user.email,
+        s_type: 'гость',
+        s_status: 'pending',
+        bee: 0
+      }).select().single();
+      if(r.error){
+        console.warn('Не удалось создать профиль:', r.error.message);
+        return null;
+      }
+      data = r.data;
+      console.log('✓ Профиль создан');
+    } catch(e){
+      console.warn('Создание профиля упало:', e.message);
       return null;
     }
-    data = insert.data;
+  } else {
+    console.log('✓ Профиль загружен:', data.role, data.email);
   }
 
   MY_PROFILE = data;
@@ -423,21 +453,30 @@ async function authSignOut(){
 /* При загрузке страницы пытаемся восстановить сессию */
 async function restoreSession(){
   STATE.authLoading = true;
+  render();   /* Показать «Загрузка…» сразу, до сетевых вызовов */
+
   if(!sb){
     STATE.authLoading = false;
     STATE.authMode = 'demo';
     render();
     return;
   }
-  const profile = await loadMyProfile();
-  STATE.authLoading = false;
-  if(profile){
-    /* Маппим роль из БД на view */
-    if(profile.role === 'teacher') STATE.view = 'teacher';
-    else if(profile.role === 'curator') STATE.view = 'curator';
-    else STATE.view = 'student';
-  } else {
+
+  try {
+    const profile = await loadMyProfile();
+    STATE.authLoading = false;
+    if(profile){
+      if(profile.role === 'teacher') STATE.view = 'teacher';
+      else if(profile.role === 'curator') STATE.view = 'curator';
+      else STATE.view = 'student';
+    } else {
+      STATE.view = 'login';
+    }
+  } catch(e) {
+    console.warn('Не удалось восстановить сессию:', e);
+    STATE.authLoading = false;
     STATE.view = 'login';
+    STATE.authError = 'Ошибка соединения с базой: ' + (e.message || 'неизвестная');
   }
   render();
 }
