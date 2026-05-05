@@ -489,6 +489,24 @@ async function restoreSession(){
     return;
   }
 
+  /* Если в URL есть токен — Supabase обрабатывает его асинхронно.
+     Не пытаемся читать профиль сразу — ждём событие SIGNED_IN. */
+  const hash = window.location.hash || '';
+  if(hash.includes('access_token=')){
+    console.log('🔑 Обнаружен access_token в URL — ждём обработку Supabase…');
+    /* Защитный таймаут — если не сработало за 8с, показываем вход */
+    setTimeout(() => {
+      if(STATE.authLoading){
+        console.warn('Обработка токена не завершилась за 8с');
+        STATE.authLoading = false;
+        STATE.view = 'login';
+        STATE.authError = 'Не удалось обработать ссылку входа. Попробуйте запросить новую.';
+        render();
+      }
+    }, 8000);
+    return;  /* выходим, ждём onAuthStateChange */
+  }
+
   /* Защита от зависания: если Supabase не отвечает за 5 секунд — показываем экран входа */
   const timeoutId = setTimeout(() => {
     if(STATE.authLoading){
@@ -522,13 +540,29 @@ async function restoreSession(){
 
 /* Слушаем изменения сессии (вход через magic link, выход) */
 if(sb){
-  sb.auth.onAuthStateChange(async (event) => {
-    if(event === 'SIGNED_IN'){
-      const profile = await loadMyProfile();
-      if(profile){
-        if(profile.role === 'teacher') STATE.view = 'teacher';
-        else if(profile.role === 'curator') STATE.view = 'curator';
-        else STATE.view = 'student';
+  sb.auth.onAuthStateChange(async (event, session) => {
+    console.log('🔄 Auth event:', event, 'session:', !!session);
+    if(event === 'SIGNED_IN' || (event === 'INITIAL_SESSION' && session)){
+      STATE.authLoading = false;
+      STATE.authError = null;
+      try {
+        const profile = await loadMyProfile();
+        if(profile){
+          if(profile.role === 'teacher') STATE.view = 'teacher';
+          else if(profile.role === 'curator') STATE.view = 'curator';
+          else STATE.view = 'student';
+          /* Чистим URL от токена для красоты */
+          if(window.location.hash.includes('access_token')){
+            try { history.replaceState(null, '', window.location.pathname); } catch(_){}
+          }
+        } else {
+          STATE.view = 'login';
+          STATE.authError = 'Не удалось загрузить профиль. Попробуйте перезагрузить страницу.';
+        }
+      } catch(e){
+        console.warn('Ошибка загрузки профиля:', e);
+        STATE.view = 'login';
+        STATE.authError = 'Ошибка: ' + (e.message || 'неизвестная');
       }
       render();
     } else if(event === 'SIGNED_OUT'){
