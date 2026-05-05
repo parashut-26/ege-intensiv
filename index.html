@@ -451,9 +451,36 @@ async function authSignOut(){
 }
 
 /* При загрузке страницы пытаемся восстановить сессию */
+/* Проверяем, нет ли в URL ошибки от Supabase auth (например, otp_expired) */
+function checkAuthErrorInUrl(){
+  const hash = window.location.hash || '';
+  if(!hash.includes('error=') && !hash.includes('error_code=')) return null;
+  const params = new URLSearchParams(hash.slice(1));
+  const code = params.get('error_code') || '';
+  const desc = (params.get('error_description') || '').replace(/\+/g, ' ');
+  let friendly = 'Не удалось войти';
+  if(code === 'otp_expired') friendly = '⏰ Ссылка для входа устарела. Magic link живёт 1 час — получите новую.';
+  else if(code) friendly = '⚠ ' + decodeURIComponent(desc);
+  /* Очищаем URL, чтобы при перезагрузке ошибки не было */
+  try { history.replaceState(null, '', window.location.pathname); } catch(_){}
+  return friendly;
+}
+
 async function restoreSession(){
   STATE.authLoading = true;
   render();   /* Показать «Загрузка…» сразу, до сетевых вызовов */
+
+  /* Если URL содержит ошибку от Supabase — сразу показываем её, не ждём сети */
+  const urlErr = checkAuthErrorInUrl();
+  if(urlErr){
+    STATE.authLoading = false;
+    STATE.authMode = 'live';
+    STATE.authStage = 'idle';
+    STATE.authError = urlErr;
+    STATE.view = 'login';
+    render();
+    return;
+  }
 
   if(!sb){
     STATE.authLoading = false;
