@@ -377,6 +377,8 @@ const STATE = {
   testOpen: null,
   essayOpen: null,
   essayBy: null,           // 'curator' | 'teacher' — кто проверяет
+  essayDraftOpen: false,   // открыта форма сдачи сочинения у ученика
+  essayDraftText: '',      // черновик текста
   newStudentForm: false,
   curatorPermsFor: null,   // id куратора — открыта модалка прав
   variantMode: false,      // сборка случайного варианта
@@ -1126,6 +1128,39 @@ function materialOpenUrl(m){
   if(m.external_url) return m.external_url;
   if(!sb || !m.storage_path) return '#';
   return sb.storage.from('materials').getPublicUrl(m.storage_path).data.publicUrl;
+}
+
+/* =======================================================================
+   СЧЁТЧИК СЛОВ для сочинений (правила Ольги: «всё-таки» = 1, «всё же» = 2,
+   цифры и знаки не считаются, инициалы с фамилией = 1 слово, минимум 150). */
+function countEssayWords(text){
+  if(!text || !text.trim()) return 0;
+  let t = ' ' + text + ' ';
+  /* 1) Инициалы (А. С. Пушкин / А.С.Пушкин) — превращаем всю группу в один токен */
+  t = t.replace(/(?:[А-ЯЁ]\s*\.\s*){1,3}\s*[А-ЯЁ][а-яёА-ЯЁ\-]+/g, ' Инициал ');
+  /* 2) Цифры — заменяем пробелом */
+  t = t.replace(/\d+/g, ' ');
+  /* 3) Знаки препинания, кроме дефисов внутри слов и неразрывного пробела */
+  t = t.replace(/[^\wа-яёА-ЯЁ\-\s]/g, ' ');
+  /* 4) Дефис в начале/конце слова — пробел */
+  t = t.replace(/(^|\s)-+|-+(\s|$)/g, ' ');
+  /* 5) Разделяем на слова */
+  const words = t.split(/\s+/).filter(w => w && /[а-яёА-ЯЁA-Za-z]/.test(w));
+  return words.length;
+}
+
+/* Сохранение черновика сочинения в БД (таблица essays). */
+async function submitEssay(text){
+  if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
+  const wc = countEssayWords(text);
+  const inserted = await restRequest('POST', '/essays', {
+    student_id: MY_PROFILE.id,
+    format: 'typed',
+    body_text: text,
+    word_count: wc,
+    status: 'submitted'
+  }, { prefer: 'return=representation' });
+  return Array.isArray(inserted) ? inserted[0] : inserted;
 }
 
 /* Загрузить файл в Storage + создать запись в materials.
@@ -2378,7 +2413,7 @@ function taskAction(t, locked){
     }, '⚡ Пройти');
   if(t.kind === 'essay')
     return el('button', { class:'btn btn-p btn-sm',
-      onclick: () => showToast('Откроется встроенный редактор или загрузка фото')
+      onclick: () => { STATE.essayDraftOpen = true; render(); }
     }, '✍️ Сдать');
   if(t.kind === 'webinar')
     return el('button', { class:'btn btn-secondary btn-sm',
@@ -2711,8 +2746,9 @@ function modalTest(taskN){
   /* CAPS-слова на 3+ буквы кириллицей подсвечиваем жёлтым (наследие из вариантов
      с задания 5) — это поведение оставляем для задания 5. Для остальных полагаемся
      на **bold** в самих данных. */
+  /* Минимум 2 буквы — чтобы подсвечивались короткие местоимения ЕЁ, ИХ, ЕМУ. */
   const highlightCaps = (htmlSafe) => htmlSafe.replace(
-    /([А-ЯЁ]{3,})/g, '<b style="background:#FEF9C3;padding:1px 4px;border-radius:3px">$1</b>'
+    /([А-ЯЁ]{2,})/g, '<b style="background:#FEF9C3;padding:1px 4px;border-radius:3px">$1</b>'
   );
 
   const body = el('div', { class:'modal-body' });
@@ -3574,7 +3610,93 @@ function modalStudentDetail(){
 /* =======================================================================
    ONBOARDING — спросить имя у только что зарегистрированного пользователя
    ======================================================================= */
-function modalOnboarding(){
+/* =======================================================================
+   УЧЕНИК · СДАЧА СОЧИНЕНИЯ (форма с текстом + счётчик слов)
+   ======================================================================= */
+function modalEssayDraft(){
+  const close = () => { STATE.essayDraftOpen = false; render(); };
+
+  const textArea = el('textarea', {
+    placeholder: 'Введи свой текст сочинения. Минимум 150 слов, иначе работа не зачтётся (правило ФИПИ).',
+    style:{ width:'100%', minHeight:'320px', padding:'14px', borderRadius:'10px',
+            border:'1px solid var(--border-2)', fontSize:'14px', lineHeight:'1.6',
+            fontFamily:'inherit', resize:'vertical' }
+  }, STATE.essayDraftText || '');
+
+  const wcEl = el('span', null, '0');
+  const wcStatus = el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }}, '');
+  const updateCount = () => {
+    const n = countEssayWords(textArea.value);
+    STATE.essayDraftText = textArea.value;
+    wcEl.textContent = n;
+    if(n === 0){ wcStatus.textContent = ''; wcStatus.style.color = 'var(--ink-3)'; }
+    else if(n < 150){
+      wcStatus.textContent = '< 150: работа не зачтётся (нужно ещё ' + (150 - n) + ')';
+      wcStatus.style.color = 'var(--red)';
+    } else {
+      wcStatus.textContent = '✓ норма';
+      wcStatus.style.color = 'var(--green)';
+    }
+  };
+  textArea.addEventListener('input', updateCount);
+  setTimeout(updateCount, 0);
+
+  const submitBtn = el('button', { class:'btn btn-p',
+    onclick: async () => {
+      const text = textArea.value.trim();
+      if(text.length < 50){ showToast('Текст слишком короткий'); return; }
+      const wc = countEssayWords(text);
+      if(wc < 150){
+        if(!confirm('У тебя ' + wc + ' слов из 150 — по правилам ФИПИ работа за < 150 слов не оценивается. Всё равно сдать?')) return;
+      }
+      submitBtn.disabled = true;
+      submitBtn.textContent = '⏳ Сдаём…';
+      try {
+        await submitEssay(text);
+        STATE.essayDraftOpen = false;
+        STATE.essayDraftText = '';
+        showToast('✓ Сочинение сдано · ' + wc + ' слов');
+        render();
+      } catch(e){
+        console.error('submitEssay упал:', e);
+        showToast('⚠ ' + e.message);
+        submitBtn.disabled = false;
+        submitBtn.textContent = '✓ Сдать на проверку';
+      }
+    }
+  }, '✓ Сдать на проверку');
+
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        '✍️ Задание 27'),
+      el('h2', { style:{ marginTop:'4px' }}, 'Сочинение по тексту')),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const body = el('div', { class:'modal-body' },
+    el('div', { class:'card', style:{ background:'var(--p-soft)', border:'1px solid var(--p-2)', marginBottom:'14px' }},
+      el('h4', null, '📝 Что нужно сделать'),
+      el('p', { style:{ color:'var(--ink-2)', marginTop:'6px', fontSize:'13px', lineHeight:'1.5' }},
+        'Сформулируй проблему текста, прокомментируй её двумя примерами с пояснением, укажи позицию автора, выскажи своё отношение и обоснуй пример-аргумент. Минимум 150 слов.')),
+    el('div', { style:{ marginBottom:'10px', display:'flex', justifyContent:'space-between', alignItems:'baseline' }},
+      el('h4', null, '🖋 Твой текст'),
+      el('span', { style:{ fontSize:'13px', color:'var(--ink-2)' }},
+        '🐝 Слов: ', el('b', null, wcEl), ' · ', wcStatus)),
+    textArea);
+
+  const foot = el('div', { class:'modal-foot' },
+    el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }},
+      'После сдачи учитель проверит работу по К1–К10 и пришлёт результат с комментариями.'),
+    el('div', { style:{ display:'flex', gap:'8px' }},
+      el('button', { class:'btn btn-secondary', onclick: close }, 'Сохранить как черновик'),
+      submitBtn));
+
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+  }, el('div', { class:'modal', style:{ maxWidth:'780px' }}, head, body, foot));
+}
+
+function modalOnboardingName(){
   const close = () => { STATE._onboardingDismissed = true; render(); };
   const head = el('div', { class:'modal-head' },
     el('div', null,
@@ -4558,7 +4680,7 @@ function questionPreview(q, idx, taskN){
   if(q.sentences && !q.match){
     const sentList = el('div', { style:{ marginBottom:'10px', display:'flex', flexDirection:'column', gap:'6px' }});
     q.sentences.forEach((s, si) => {
-      const html = s.replace(/[А-ЯЁ]{3,}/g, m => '<b style="background:#FEF9C3;padding:1px 4px;border-radius:3px">' + m + '</b>');
+      const html = s.replace(/[А-ЯЁ]{2,}/g, m => '<b style="background:#FEF9C3;padding:1px 4px;border-radius:3px">' + m + '</b>');
       sentList.append(el('div', {
         html: '<span style="color:var(--ink-3);font-size:11px;font-weight:700;margin-right:6px">' + (si+1) + ')</span>' + html,
         style:{ padding:'8px 12px', background:'#fff', borderRadius:'8px', borderLeft:'3px solid var(--p-2)', fontSize:'13px', lineHeight:'1.5' }
@@ -5227,13 +5349,14 @@ function render(){
     const needsName = !MY_PROFILE.full_name
       || MY_PROFILE.full_name === emailPrefix
       || MY_PROFILE.full_name === 'Гость';
-    if(needsName) root.append(modalOnboarding());
+    if(needsName) root.append(modalOnboardingName());
   }
   if(STATE.attendanceOpen) root.append(modalAttendance());
   if(STATE.theoryOpen != null) root.append(modalTheory(STATE.theoryOpen));
   if(STATE.contentEditTaskN != null) root.append(modalEditTheory(STATE.contentEditTaskN));
   if(STATE.variantMode) root.append(modalVariantBuilder());
   if(STATE.showOnboarding) root.append(modalOnboarding());
+  if(STATE.essayDraftOpen) root.append(modalEssayDraft());
   if(STATE.chatOpen && STATE.view !== 'login') root.append(chatPanel(STATE.view));
   if(STATE.toast) root.append(el('div', { class:'toast' }, STATE.toast));
 
