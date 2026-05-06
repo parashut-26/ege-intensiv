@@ -757,7 +757,7 @@ async function restoreSession(){
         else STATE.view = 'student';
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        loadTheoryFromDb().then(() => render()).catch(() => {});
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb()]).then(() => render()).catch(() => {});
         return;
       } else {
         STATE.authLoading = false;
@@ -813,7 +813,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    loadTheoryFromDb().then(() => render()).catch(() => {});
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb()]).then(() => render()).catch(() => {});
   } else {
     STATE.view = 'login';
   }
@@ -1048,15 +1048,98 @@ const WEAK_TOPICS = [
   { name: 'Корни (зад. 9)', pct: 18, level: 'green', taskN: 9 },
 ];
 
-const MATERIALS = [
-  { name: 'Орфоэпический минимум 2026.pdf', tag: 'теория', size: '180 КБ', day: 1, taskN: 4 },
-  { name: 'Памятка по паронимам.pdf', tag: 'теория', size: '320 КБ', day: 1, taskN: 5 },
-  { name: 'Вариант №1.pdf', tag: 'вариант', size: '410 КБ', day: 1 },
-  { name: 'Разбор варианта №1.pdf', tag: 'разбор', size: '660 КБ', day: 1 },
-  { name: 'Тире и двоеточие — правила.pdf', tag: 'теория', size: '210 КБ', day: 2, taskN: 16 },
-  { name: 'Шаблон сочинения 27.docx', tag: 'теория', size: '45 КБ', day: 3 },
-  { name: 'Сборник аргументов из литературы.pdf', tag: 'теория', size: '1.2 МБ', day: 3 },
-];
+/* Список материалов наполняется из БД (таблица materials) при загрузке профиля.
+   Структура элемента: { id, name, taskN, tag, size, storage_path, external_url }.
+   storage_path — для загруженных файлов; external_url — для прикреплённых ссылок. */
+let MATERIALS = [];
+
+/* Форматирование размера файла */
+function formatSize(bytes){
+  if(!bytes) return '';
+  if(bytes < 1024) return bytes + ' Б';
+  if(bytes < 1024*1024) return Math.round(bytes/1024) + ' КБ';
+  return (bytes / (1024*1024)).toFixed(1) + ' МБ';
+}
+
+async function loadMaterialsFromDb(){
+  if(!sb) return;
+  try {
+    const arr = await restRequest('GET', '/materials?select=id,name,ege_task_n,day_id,tag,size_bytes,storage_path,external_url,uploaded_by,created_at&order=created_at.desc');
+    if(Array.isArray(arr)){
+      MATERIALS = arr.map(r => ({
+        id: r.id,
+        name: r.name,
+        taskN: r.ege_task_n,
+        day: r.day_id,
+        tag: r.tag,
+        size: formatSize(r.size_bytes),
+        size_bytes: r.size_bytes,
+        storage_path: r.storage_path,
+        external_url: r.external_url
+      }));
+      console.log('✓ Материалы загружены: ' + MATERIALS.length);
+    }
+  } catch(e){
+    console.warn('Не удалось загрузить материалы:', e.message);
+  }
+}
+
+/* Получить публичный URL файла по storage_path */
+function materialOpenUrl(m){
+  if(m.external_url) return m.external_url;
+  if(!sb || !m.storage_path) return '#';
+  return sb.storage.from('materials').getPublicUrl(m.storage_path).data.publicUrl;
+}
+
+/* Загрузить файл в Storage + создать запись в materials */
+async function uploadMaterial(file, taskN){
+  if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
+  /* Имя файла: безопасные символы — кириллицу храним как Url-encoded, спецы заменяем на _ */
+  const safeName = file.name.replace(/[^\w.\-А-Яа-яЁё ]+/g, '_');
+  const path = 'task' + (taskN || 0) + '/' + Date.now() + '_' + safeName;
+  /* Загрузка в Storage */
+  const { error: upErr } = await sb.storage.from('materials').upload(path, file, {
+    cacheControl: '3600', upsert: false,
+    contentType: file.type || 'application/octet-stream'
+  });
+  if(upErr) throw new Error('Storage: ' + upErr.message);
+  /* Запись в materials */
+  const inserted = await restRequest('POST', '/materials', {
+    name: file.name,
+    storage_path: path,
+    size_bytes: file.size,
+    ege_task_n: taskN || null,
+    tag: 'теория',
+    uploaded_by: MY_PROFILE.id
+  }, { prefer: 'return=representation' });
+  return Array.isArray(inserted) ? inserted[0] : inserted;
+}
+
+/* Прикрепить внешнюю ссылку */
+async function attachLink(name, url, taskN){
+  if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
+  const inserted = await restRequest('POST', '/materials', {
+    name: name,
+    external_url: url,
+    storage_path: null,
+    ege_task_n: taskN || null,
+    tag: 'теория',
+    uploaded_by: MY_PROFILE.id
+  }, { prefer: 'return=representation' });
+  return Array.isArray(inserted) ? inserted[0] : inserted;
+}
+
+/* Удалить материал */
+async function deleteMaterial(m){
+  if(!sb) throw new Error('нет авторизации');
+  /* Сначала из Storage (если файл) */
+  if(m.storage_path){
+    const { error } = await sb.storage.from('materials').remove([m.storage_path]);
+    if(error) console.warn('Не получилось удалить из Storage:', error.message);
+  }
+  /* Потом из БД */
+  await restRequest('DELETE', '/materials?id=eq.' + m.id, null, { prefer: 'return=minimal' });
+}
 
 const CHAT_GROUP = [
   { id:'m1', from: 's3', name: 'Настя', text: 'В задании 5 непонятно про паронимы — можно подсказать?', time: '10:42' },
@@ -2096,12 +2179,16 @@ function modalTheory(n){
         mats.length > 0 ? el('div', { class:'card', style:{ marginBottom:'14px' }},
           el('h4', null, '📎 Материалы по этому заданию'),
           el('div', { style:{ marginTop:'10px', display:'flex', flexDirection:'column', gap:'6px' }},
-            mats.map(m =>
-              el('div', { style:{ display:'flex', justifyContent:'space-between', padding:'8px 12px', background:'var(--bg)', borderRadius:'8px' }},
-                el('span', null, '📎 ' + m.name),
-                el('button', { class:'btn btn-secondary btn-sm',
-                  onclick: () => showToast('Откроется ' + m.name)
-                }, 'Открыть'))))) : null,
+            mats.map(m => {
+              const icon = m.external_url ? '🔗' : '📎';
+              const url = materialOpenUrl(m);
+              return el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 12px', background:'var(--bg)', borderRadius:'8px', gap:'8px' }},
+                el('span', { style:{ flex:'1', minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }},
+                  icon + ' ' + m.name,
+                  m.size ? el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'6px' }}, ' · ' + m.size) : null),
+                el('a', { href: url, target:'_blank', rel:'noopener', class:'btn btn-secondary btn-sm', style:{ textDecoration:'none' }},
+                  m.external_url ? 'Открыть ↗' : 'Открыть'));
+            }))) : null,
         hasQuiz ? (function(){
           const bankN = bankFor(n).length;
           const startWithLimit = (limit) => {
@@ -3859,21 +3946,80 @@ function modalEditTheory(n){
         })(),
 
         /* Материалы */
-        el('div', { class:'card', style:{ marginBottom:'14px' }},
-          el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }},
+        (function(){
+          const card = el('div', { class:'card', style:{ marginBottom:'14px' }});
+          const fileInput = el('input', { type:'file', style:{ display:'none' },
+            onchange: async (ev) => {
+              const file = ev.target.files[0];
+              if(!file) return;
+              const status = document.getElementById('mat-status-' + n);
+              if(status){ status.textContent = '⏳ Загружаю «' + file.name + '»…'; status.style.color = 'var(--ink-3)'; }
+              try {
+                await uploadMaterial(file, n);
+                await loadMaterialsFromDb();
+                showToast('✓ Файл «' + file.name + '» прикреплён к заданию ' + n);
+                render();
+              } catch(e){
+                console.error('Загрузка упала:', e);
+                showToast('⚠ Не загрузилось: ' + e.message);
+                if(status){ status.textContent = '⚠ ' + e.message; status.style.color = 'var(--red)'; }
+              } finally {
+                ev.target.value = '';
+              }
+            }
+          });
+          card.append(fileInput);
+          card.append(el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px', flexWrap:'wrap', gap:'8px' }},
             el('h4', null, '📎 Материалы по этому заданию (' + mats.length + ')'),
-            el('button', { class:'btn btn-y btn-sm',
-              onclick: () => showToast('Загрузить файл и привязать к заданию ' + n)
-            }, '⬆ Прикрепить файл')),
-          mats.length > 0
-            ? el('div', { style:{ display:'flex', flexDirection:'column', gap:'6px' }},
-                mats.map(m =>
-                  el('div', { style:{ display:'flex', justifyContent:'space-between', padding:'8px 12px', background:'var(--bg)', borderRadius:'8px' }},
-                    el('span', null, '📎 ' + m.name + ' · ' + m.size),
-                    el('button', { class:'btn-icon', style:{ color:'var(--red)' },
-                      onclick: () => showToast('Открепить файл')
-                    }, '✕'))))
-            : el('p', { style:{ color:'var(--ink-3)', fontSize:'13px' }}, 'Нет привязанных материалов. Загрузите PDF/DOC/видео.')),
+            el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }},
+              el('button', { class:'btn btn-y btn-sm',
+                onclick: () => fileInput.click()
+              }, '⬆ Прикрепить файл'),
+              el('button', { class:'btn btn-secondary btn-sm',
+                onclick: () => {
+                  const url = prompt('URL ссылки (например, на Padlet, Google Drive, Yandex Disk):');
+                  if(!url || !url.trim()) return;
+                  let cleanUrl = url.trim();
+                  if(!/^https?:\/\//i.test(cleanUrl)) cleanUrl = 'https://' + cleanUrl;
+                  const name = prompt('Название ссылки (что увидит ученик):', cleanUrl);
+                  if(!name || !name.trim()) return;
+                  attachLink(name.trim(), cleanUrl, n).then(() => loadMaterialsFromDb()).then(() => {
+                    showToast('✓ Ссылка прикреплена');
+                    render();
+                  }).catch(e => { console.error(e); showToast('⚠ ' + e.message); });
+                }
+              }, '🔗 Прикрепить ссылку'))));
+          card.append(el('div', { id:'mat-status-' + n, style:{ fontSize:'12px', marginBottom:'8px', minHeight:'14px' }}, ''));
+          if(mats.length > 0){
+            const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'6px' }});
+            mats.forEach(m => {
+              const row = el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 12px', background:'var(--bg)', borderRadius:'8px', gap:'8px' }});
+              const icon = m.external_url ? '🔗' : '📎';
+              const sizeOrUrl = m.external_url
+                ? el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, ' · ' + (m.external_url.length > 40 ? m.external_url.slice(0, 40) + '…' : m.external_url))
+                : (m.size ? el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, ' · ' + m.size) : null);
+              row.append(el('span', { style:{ flex:'1', minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }},
+                icon + ' ' + m.name, sizeOrUrl));
+              row.append(el('button', { class:'btn-icon', style:{ color:'var(--red)' },
+                onclick: async () => {
+                  if(!confirm('Удалить «' + m.name + '»?')) return;
+                  try {
+                    await deleteMaterial(m);
+                    await loadMaterialsFromDb();
+                    showToast('Удалено');
+                    render();
+                  } catch(e){ showToast('⚠ ' + e.message); }
+                }
+              }, '✕'));
+              list.append(row);
+            });
+            card.append(list);
+          } else {
+            card.append(el('p', { style:{ color:'var(--ink-3)', fontSize:'13px' }},
+              'Нет привязанных материалов. Загрузите PDF/DOC/PNG или прикрепите ссылку.'));
+          }
+          return card;
+        })(),
 
         /* Банк тестов */
         el('div', { class:'card', style:{ background:'var(--y-soft)', border:'1px solid var(--y-2)' }},
