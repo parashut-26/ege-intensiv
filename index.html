@@ -85,17 +85,19 @@ h1{font-size:28px;line-height:1.15} h2{font-size:22px} h3{font-size:17px} h4{fon
   .main{padding:14px}
   .tabs{padding:0 8px;-webkit-overflow-scrolling:touch}
   .tab{padding:12px 10px;font-size:13px}
-  .topbar{padding:8px 12px;flex-wrap:wrap;row-gap:8px}
-  .topbar .left{gap:8px;flex:1;min-width:0}
-  .topbar .right{gap:6px;flex-wrap:wrap;justify-content:flex-end}
-  /* Уменьшаем самую крупную плашку — название интенсива */
-  .role-pill{font-size:11px;padding:5px 10px}
-  /* Аватарную плашку прячем под аватар-кружок */
+  /* Шапка: левая группа на первой строке, правая (счётчик/аватар/кнопки) — на второй */
+  .topbar{padding:8px 12px;flex-wrap:wrap;row-gap:8px;align-items:flex-start}
+  .topbar .left{gap:8px;flex:1 0 100%;justify-content:flex-start;min-width:0}
+  .topbar .right{gap:6px;flex:1 0 100%;flex-wrap:wrap;justify-content:flex-end;align-items:center}
+  /* Если плашка интенсива слишком длинная — сжимаем шрифт и обрезаем по ширине */
+  .role-pill{font-size:12px;padding:5px 10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55vw}
+  /* В user-pill оставляем имя, но без подзаголовка «Ученик»/«Учитель» */
   .user-pill{padding:3px 10px 3px 3px}
-  .user-pill .who{font-size:11px}
+  .user-pill .who{font-size:11px;line-height:1.1}
   .user-pill .who b{font-size:12px}
-  /* Скрываем текстовые подписи на узких кнопках, оставляем иконку/первую букву */
-  .role-switch{font-size:10px;padding:5px 8px}
+  .user-pill .who span{display:none}
+  /* Кнопка «Сменить роль» сжимается, текст одной строкой */
+  .role-switch{font-size:11px;padding:5px 8px;white-space:nowrap}
   .bee-counter{font-size:12px;padding:4px 9px}
 }
 
@@ -391,6 +393,7 @@ const STATE = {
   attemptsByTask: {},   // кэш истории попыток ученика по taskN: { 5: [{...}, ...] }
   studentDetailOpen: null,        // id ученика — открыта детальная карточка у учителя
   studentAttempts: {},            // кэш попыток конкретного ученика: { studentId: [{...}, ...] }
+  _onboardingDismissed: false,    // ученик закрыл onboarding-модалку (не показывать снова в этой сессии)
   helpedMsgs: {},
   /* === Авторизация === */
   authMode: 'live',     // 'live' (реальный e-mail) | 'demo' (роли как раньше)
@@ -1875,9 +1878,16 @@ function shellHeader(role){
   const rolePill = el('span', { class:'role-pill ' + pillKind },
     '🐝', pillLabel);
 
-  const me = role === 'teacher' ? { name:COURSE.teacher, sub:COURSE.teacherSub, init:'ОА' }
-           : role === 'curator' ? { name:'София Малинина', sub:'Куратор', init:'СМ' }
-           : { name:ME_STUDENT.fullname, sub:'Ученик', init:'А' };
+  /* Если есть реальный профиль из БД — берём имя оттуда. Иначе — моковые персонажи. */
+  const profileName = MY_PROFILE && MY_PROFILE.full_name ? MY_PROFILE.full_name : null;
+  const profileInit = profileName
+    ? profileName.split(/\s+/).filter(Boolean).slice(0, 2).map(s => s[0]).join('').toUpperCase().slice(0, 2)
+    : null;
+  const me = role === 'teacher'
+    ? { name: profileName || COURSE.teacher,    sub: COURSE.teacherSub, init: profileInit || 'ОА' }
+    : role === 'curator'
+      ? { name: profileName || 'София Малинина', sub: 'Куратор',         init: profileInit || 'СМ' }
+      : { name: profileName || ME_STUDENT.fullname, sub: 'Ученик',        init: profileInit || 'А' };
 
   const right = el('div', { class:'right' });
   if(role === 'student') right.append(el('span', { class:'bee-counter' }, '🐝 ', el('b', null, ME_STUDENT.bee)));
@@ -1985,7 +1995,8 @@ function viewStudentHome(){
   wrap.append(
     el('h1', null,
       'Привет, ',
-      el('span', { style:{ color:'var(--p)' }}, ME_STUDENT.name + '!'),
+      el('span', { style:{ color:'var(--p)' }},
+        (MY_PROFILE && MY_PROFILE.full_name ? MY_PROFILE.full_name.split(/\s+/)[0] : ME_STUDENT.name) + '!'),
       ' 👋'),
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'24px' }},
       'Сегодня Краш-тест в самом разгаре. Поехали 🐝'),
@@ -2821,16 +2832,38 @@ function viewStudentProfile(){
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'20px' }},
       'Твои данные, уведомления и статус.'));
 
+  /* Реальные данные профиля если залогинены, иначе моки */
+  const realName = MY_PROFILE && MY_PROFILE.full_name ? MY_PROFILE.full_name : ME_STUDENT.fullname;
+  const realEmail = MY_PROFILE && MY_PROFILE.email ? MY_PROFILE.email : ME_STUDENT.email;
+  const realType = MY_PROFILE && MY_PROFILE.s_type ? MY_PROFILE.s_type : ME_STUDENT.type;
+  const realStatus = MY_PROFILE && MY_PROFILE.s_status ? MY_PROFILE.s_status : 'active';
+
   const main = el('div', { class:'card', style:{ marginBottom:'16px' }});
   main.append(
     el('div', { style:{ display:'flex', gap:'16px', alignItems:'center', marginBottom:'18px' }},
-      avatarChip(ME_STUDENT.fullname, ME_STUDENT.avatarColor, 56),
+      avatarChip(realName, ME_STUDENT.avatarColor, 56),
       el('div', null,
-        el('h2', null, ME_STUDENT.fullname),
-        el('div', { style:{ color:'var(--ink-2)' }}, ME_STUDENT.email),
+        el('h2', null, realName),
+        el('div', { style:{ color:'var(--ink-2)' }}, realEmail),
         el('div', { style:{ marginTop:'6px', display:'flex', gap:'8px' }},
-          chip('🐝 ' + ME_STUDENT.type, 'y'),
-          chip('● Активна', 'green')))),
+          chip('🐝 ' + realType, 'y'),
+          realStatus === 'pending' ? chip('● Ждёт одобрения', 'warn')
+            : realStatus === 'lagging' ? chip('● Отстаёт', 'red')
+            : chip('● Активна', 'green'),
+          el('button', { class:'btn-icon', title: 'Редактировать имя',
+            onclick: async () => {
+              const newName = prompt('Как тебя зовут? (Имя и Фамилия)', realName);
+              if(!newName || !newName.trim()) return;
+              if(MY_PROFILE){
+                try {
+                  await restRequest('PATCH', '/profiles?id=eq.' + MY_PROFILE.id, { full_name: newName.trim() }, { prefer: 'return=minimal' });
+                  MY_PROFILE.full_name = newName.trim();
+                  showToast('✓ Имя обновлено');
+                  render();
+                } catch(e){ showToast('⚠ ' + e.message); }
+              }
+            }
+          }, '✏️')))),
     el('h3', { style:{ marginBottom:'10px' }}, '🔔 Уведомления'),
     toggleRow('Открытие нового дня', true),
     toggleRow('Проверка моего сочинения', true),
@@ -3126,7 +3159,27 @@ function studentRow(s){
             }, '👁'),
             el('button', { class:'btn-icon', title:'Написать в чате',
               onclick: () => { STATE.chatOpen = true; STATE.chatChannel = 'dm'; render(); }
-            }, '💬'))));
+            }, '💬'),
+            el('button', { class:'btn-icon', title:'Сделать куратором',
+              style:{ background:'var(--teal-soft)', color:'var(--teal)' },
+              onclick: async () => {
+                if(!confirm('Сделать ' + s.name + ' куратором? У них появится доступ к спискам учеников и чатам.')) return;
+                /* Если это реальный профиль (UUID) — обновляем в БД */
+                if(/^[0-9a-f-]{36}$/i.test(s.id) && sb){
+                  try {
+                    await restRequest('PATCH', '/profiles?id=eq.' + s.id, { role: 'curator' }, { prefer: 'return=minimal' });
+                    showToast('✓ ' + s.name + ' теперь куратор');
+                  } catch(e){ showToast('⚠ ' + e.message); return; }
+                } else {
+                  /* Mock-ученик — просто перекидываем в массив CURATORS */
+                  CURATORS.push({ id: 'c-' + s.id, name: s.name, email: s.email, color: s.color || '#5EEAD4',
+                    perms: { addTasks:false, addMaterials:false, editTasks:false, manageDays:false, approveGuests:false }});
+                  const i = STUDENTS.indexOf(s); if(i >= 0) STUDENTS.splice(i, 1);
+                  showToast('✓ ' + s.name + ' теперь куратор (в текущей сессии)');
+                }
+                render();
+              }
+            }, '🤝'))));
 }
 
 /* =======================================================================
@@ -3250,6 +3303,72 @@ function modalStudentDetail(){
 
   return el('div', { class:'modal-bg', onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }},
     el('div', { class:'modal', style:{ maxWidth:'780px' }}, head, body, foot));
+}
+
+/* =======================================================================
+   ONBOARDING — спросить имя у только что зарегистрированного пользователя
+   ======================================================================= */
+function modalOnboarding(){
+  const close = () => { STATE._onboardingDismissed = true; render(); };
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        '🐝 Добро пожаловать!'),
+      el('h2', { style:{ marginTop:'4px' }}, 'Как тебя зовут?')),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const firstInput = el('input', {
+    type:'text', placeholder:'Анна', autofocus:'autofocus',
+    style:{ width:'100%', padding:'12px 14px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'15px' }
+  });
+  const lastInput = el('input', {
+    type:'text', placeholder:'Соколова',
+    style:{ width:'100%', padding:'12px 14px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'15px' }
+  });
+
+  const status = el('div', { style:{ fontSize:'12px', minHeight:'16px', color:'var(--ink-3)', marginTop:'6px' }}, '');
+
+  const save = async () => {
+    const first = firstInput.value.trim();
+    const last = lastInput.value.trim();
+    if(!first){ status.textContent = 'Имя обязательно'; status.style.color = 'var(--red)'; return; }
+    const fullName = (first + (last ? ' ' + last : '')).trim();
+    status.textContent = '⏳ Сохраняем…';
+    status.style.color = 'var(--ink-3)';
+    try {
+      await restRequest('PATCH', '/profiles?id=eq.' + MY_PROFILE.id, { full_name: fullName }, { prefer: 'return=minimal' });
+      MY_PROFILE.full_name = fullName;
+      STATE._onboardingDismissed = true;
+      showToast('✓ Привет, ' + first + '!');
+      render();
+    } catch(e){
+      status.textContent = '⚠ ' + e.message;
+      status.style.color = 'var(--red)';
+    }
+  };
+
+  const body = el('div', { class:'modal-body', style:{ padding:'24px' }});
+  body.append(
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'18px' }},
+      'Чтобы учитель и одноклассники увидели тебя по имени, а не по почте — скажи, как тебя зовут. Поменять можно позже в Профиле.'),
+    el('div', { style:{ marginBottom:'12px' }},
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', fontWeight:'700', textTransform:'uppercase', letterSpacing:'.08em', marginBottom:'6px' }}, 'Имя *'),
+      firstInput),
+    el('div', { style:{ marginBottom:'10px' }},
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', fontWeight:'700', textTransform:'uppercase', letterSpacing:'.08em', marginBottom:'6px' }}, 'Фамилия'),
+      lastInput),
+    status);
+
+  /* Сохранить по Enter */
+  firstInput.addEventListener('keypress', e => { if(e.key === 'Enter') lastInput.focus(); });
+  lastInput.addEventListener('keypress', e => { if(e.key === 'Enter') save(); });
+
+  const foot = el('div', { class:'modal-foot' },
+    el('button', { class:'btn btn-secondary', onclick: close }, 'Позже'),
+    el('button', { class:'btn btn-y', onclick: save }, 'Сохранить'));
+
+  return el('div', { class:'modal-bg', onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }},
+    el('div', { class:'modal', style:{ maxWidth:'440px' }}, head, body, foot));
 }
 
 function modalNewStudent(){
@@ -4742,6 +4861,15 @@ function render(){
   if(STATE.newStudentForm) root.append(modalNewStudent());
   if(STATE.curatorPermsFor) root.append(modalCuratorPerms());
   if(STATE.studentDetailOpen) root.append(modalStudentDetail());
+  /* Onboarding: если у профиля имя = префикс email (то есть дефолтное автогенерённое),
+     показываем форму с просьбой ввести имя. Только один раз. */
+  if(MY_PROFILE && !STATE._onboardingDismissed){
+    const emailPrefix = (MY_PROFILE.email || '').split('@')[0];
+    const needsName = !MY_PROFILE.full_name
+      || MY_PROFILE.full_name === emailPrefix
+      || MY_PROFILE.full_name === 'Гость';
+    if(needsName) root.append(modalOnboarding());
+  }
   if(STATE.attendanceOpen) root.append(modalAttendance());
   if(STATE.theoryOpen != null) root.append(modalTheory(STATE.theoryOpen));
   if(STATE.contentEditTaskN != null) root.append(modalEditTheory(STATE.contentEditTaskN));
