@@ -1094,9 +1094,12 @@ function materialOpenUrl(m){
 /* Загрузить файл в Storage + создать запись в materials */
 async function uploadMaterial(file, taskN){
   if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
-  /* Имя файла: безопасные символы — кириллицу храним как Url-encoded, спецы заменяем на _ */
-  const safeName = file.name.replace(/[^\w.\-А-Яа-яЁё ]+/g, '_');
-  const path = 'task' + (taskN || 0) + '/' + Date.now() + '_' + safeName;
+  /* Storage-ключ должен быть ASCII (Supabase отвергает кириллицу в путях).
+     В файле name остаётся оригинальное имя с кириллицей — оно будет показано ученику.
+     В Storage кладём по короткому ASCII-ключу с расширением. */
+  const ext = (file.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'bin'])[1].toLowerCase();
+  const path = 'task' + (taskN || 0) + '/' + Date.now() + '_' +
+               Math.random().toString(36).slice(2, 10) + '.' + ext;
   /* Загрузка в Storage */
   const { error: upErr } = await sb.storage.from('materials').upload(path, file, {
     cacheControl: '3600', upsert: false,
