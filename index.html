@@ -795,7 +795,7 @@ async function restoreSession(){
         else STATE.view = 'student';
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb()]).then(() => render()).catch(() => {});
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb()]).then(() => render()).catch(() => {});
         return;
       } else {
         STATE.authLoading = false;
@@ -851,7 +851,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb()]).then(() => render()).catch(() => {});
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb()]).then(() => render()).catch(() => {});
   } else {
     STATE.view = 'login';
   }
@@ -1161,6 +1161,33 @@ async function submitEssay(text){
     status: 'submitted'
   }, { prefer: 'return=representation' });
   return Array.isArray(inserted) ? inserted[0] : inserted;
+}
+
+/* Кэш сочинений из БД (для учительского/кураторского списка) */
+let DB_ESSAYS = [];
+
+async function loadEssaysFromDb(){
+  if(!sb) return;
+  try {
+    /* Берём сочинения и подтягиваем имя ученика из profiles через embed */
+    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,word_count,status,submitted_at,format,profiles(full_name,email)&order=submitted_at.desc&limit=200');
+    if(Array.isArray(arr)){
+      DB_ESSAYS = arr.map(e => ({
+        id: e.id,
+        studentId: e.student_id,
+        studentName: (e.profiles && e.profiles.full_name) || (e.profiles && e.profiles.email) || 'Ученик',
+        studentEmail: e.profiles && e.profiles.email,
+        text: e.body_text,
+        wordCount: e.word_count,
+        status: e.status,
+        submittedAt: e.submitted_at,
+        format: e.format
+      }));
+      console.log('✓ Сочинения загружены: ' + DB_ESSAYS.length);
+    }
+  } catch(e){
+    console.warn('Не удалось загрузить сочинения:', e.message);
+  }
 }
 
 /* Загрузить файл в Storage + создать запись в materials.
@@ -3342,17 +3369,52 @@ function essayRow(e, isCurator){
   else if(e.status === 'pre_checked') stChip = chip('🤝 проверено куратором', 'teal');
   else stChip = chip('готово', 'green');
 
+  /* Превью: для реальных DB-сочинений берём первые 80 символов body_text;
+     для моков — text + when. */
+  let preview;
+  if(e.text && e.text.length > 60){
+    preview = e.text.slice(0, 80).replace(/\s+/g, ' ') + '…';
+  } else {
+    preview = e.text || '';
+  }
+  /* Дата сдачи: реальная из submittedAt или мок-«2 ч. назад» */
+  let when = '';
+  if(e.submittedAt){
+    const d = new Date(e.submittedAt);
+    const today = new Date(); today.setHours(0,0,0,0);
+    const dStart = new Date(d); dStart.setHours(0,0,0,0);
+    const diff = Math.floor((today - dStart) / 86400000);
+    const t = d.toTimeString().slice(0,5);
+    if(diff === 0) when = 'сегодня в ' + t;
+    else if(diff === 1) when = 'вчера в ' + t;
+    else when = d.toLocaleDateString('ru-RU', { day:'numeric', month:'short' }) + ' в ' + t;
+  } else if(e.when){
+    when = e.when;
+  }
+
+  /* Пометка про <150 слов */
+  let wcWarn = null;
+  if(e.wordCount != null){
+    if(e.wordCount < 150){
+      wcWarn = el('span', { style:{ color:'var(--red)', fontWeight:'700', fontSize:'11px' }}, '⚠ ' + e.wordCount + ' слов');
+    } else {
+      wcWarn = el('span', { style:{ color:'var(--ink-3)', fontSize:'11px' }}, '🐝 ' + e.wordCount + ' слов');
+    }
+  }
+
   return el('div', {
     class:'card',
-    style:{ background:'var(--surface-soft)', padding:'12px 14px', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' },
+    style:{ background:'var(--surface-soft)', padding:'12px 14px', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px', gap:'10px' },
     onclick: () => { STATE.essayOpen = e.id; STATE.essayBy = isCurator ? 'curator' : 'teacher'; render(); }
   },
-    el('div', { style:{ display:'flex', gap:'10px', alignItems:'center', minWidth:0 }},
+    el('div', { style:{ display:'flex', gap:'10px', alignItems:'center', minWidth:0, flex:1 }},
       el('span', { style:{ fontSize:'20px' }}, '📝'),
-      el('div', { style:{ minWidth:0 }},
-        el('div', { style:{ fontWeight:'700' }}, e.studentName),
-        el('div', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
-          e.text + ' · ' + e.when + (e.preBy ? ' · 🤝 София: ' + e.preScore + '/22' : '')))),
+      el('div', { style:{ minWidth:0, flex:1 }},
+        el('div', { style:{ fontWeight:'700', display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }},
+          e.studentName,
+          wcWarn),
+        el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }},
+          preview + (when ? ' · ' + when : '') + (e.preBy ? ' · 🤝 София: ' + e.preScore + '/22' : '')))),
     stChip);
 }
 
@@ -3653,6 +3715,7 @@ function modalEssayDraft(){
       submitBtn.textContent = '⏳ Сдаём…';
       try {
         await submitEssay(text);
+        await loadEssaysFromDb();
         STATE.essayDraftOpen = false;
         STATE.essayDraftText = '';
         showToast('✓ Сочинение сдано · ' + wc + ' слов');
@@ -4018,17 +4081,40 @@ function viewTeacherPayments(){
    ======================================================================= */
 function viewTeacherEssays(){
   const wrap = el('div', { class:'fade-in' });
-  wrap.append(
-    el('h1', null, '📝 Сочинения'),
-    el('p', { style:{ color:'var(--ink-2)', marginBottom:'20px' }},
-      'Очередь работ на проверку. Кликните на сочинение, чтобы открыть форму проверки К1–К10.'),
-    el('div', { style:{ display:'flex', gap:'8px', marginBottom:'14px', flexWrap:'wrap' }},
-      chip('Новые ' + ESSAYS.filter(e => e.status === 'new').length, 'red'),
-      chip('🤝 От кураторов ' + ESSAYS.filter(e => e.status === 'pre_checked').length, 'teal'),
-      chip('В работе ' + ESSAYS.filter(e => e.status === 'in_progress').length, 'warn'),
-      chip('Готовы ' + ESSAYS.filter(e => e.status === 'done').length, 'green')));
+  /* Объединяем реальные (DB) сочинения и моки. Реальные — приоритетно, потому что у них
+     есть конкретный текст и word_count. Моки оставляем как «исторические» для UX-демо. */
+  const allEssays = [...DB_ESSAYS, ...ESSAYS.filter(m => !DB_ESSAYS.find(d => d.id === m.id))];
+  /* Маппинг статусов: в БД enum {draft, submitted, in_progress, pre_checked, done},
+     в моке — {new, pre_checked, in_progress, done}. submitted ≈ new. */
+  const norm = e => ({ ...e, status: e.status === 'submitted' ? 'new' : e.status });
+  const essays = allEssays.map(norm);
 
-  ESSAYS.forEach(e => wrap.append(essayRow(e, false)));
+  wrap.append(
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', flexWrap:'wrap', gap:'10px' }},
+      el('div', null,
+        el('h1', null, '📝 Сочинения'),
+        el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }},
+          'Очередь работ на проверку. Кликните на сочинение, чтобы открыть форму проверки К1–К10.')),
+      el('button', { class:'btn btn-secondary btn-sm',
+        onclick: async () => {
+          showToast('⏳ Обновляю список…');
+          await loadEssaysFromDb();
+          showToast('✓ Загружено: ' + DB_ESSAYS.length);
+          render();
+        }
+      }, '🔄 Обновить')),
+    el('div', { style:{ display:'flex', gap:'8px', marginBottom:'14px', flexWrap:'wrap' }},
+      chip('Новые ' + essays.filter(e => e.status === 'new').length, 'red'),
+      chip('🤝 От кураторов ' + essays.filter(e => e.status === 'pre_checked').length, 'teal'),
+      chip('В работе ' + essays.filter(e => e.status === 'in_progress').length, 'warn'),
+      chip('Готовы ' + essays.filter(e => e.status === 'done').length, 'green')));
+
+  if(!essays.length){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)', padding:'30px' }},
+      'Пока нет сданных сочинений. Когда ученики начнут сдавать — появятся здесь.'));
+    return wrap;
+  }
+  essays.forEach(e => wrap.append(essayRow(e, false)));
   return wrap;
 }
 
