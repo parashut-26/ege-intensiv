@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <style>
 :root{
   --bg:#FFFAF2; --surface:#FFFFFF; --surface-soft:#FFF7E0;
@@ -84,6 +85,16 @@ h1{font-size:28px;line-height:1.15} h2{font-size:22px} h3{font-size:17px} h4{fon
 
 /* ============ КАРТОЧКИ ============ */
 .card{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:20px;box-shadow:var(--shadow)}
+.theory-md h1, .theory-md h2, .theory-md h3, .theory-md h4{margin:14px 0 6px; color:var(--ink); font-weight:700}
+.theory-md h1{font-size:18px} .theory-md h2{font-size:16px; color:var(--p)} .theory-md h3{font-size:14px}
+.theory-md p{margin:6px 0}
+.theory-md ul, .theory-md ol{margin:6px 0 6px 18px; padding-left:6px}
+.theory-md li{margin:3px 0}
+.theory-md strong{color:var(--ink); font-weight:700}
+.theory-md em{color:var(--ink-2)}
+.theory-md blockquote{margin:8px 0; padding:8px 12px; border-left:3px solid var(--y); background:#FFFCF2; border-radius:8px; color:var(--ink)}
+.theory-md code{background:var(--bg); padding:2px 5px; border-radius:4px; font-size:90%}
+.theory-md hr{border:none; border-top:1px solid var(--border); margin:12px 0}
 .card-soft-y{background:var(--y-soft);border:1px solid var(--y-2)}
 .card-soft-p{background:var(--p-soft);border:1px solid var(--p-2)}
 .card-orange{background:linear-gradient(135deg,#FB923C 0%,#F97316 100%);color:#1f1f1f;border:0}
@@ -2066,9 +2077,22 @@ function modalTheory(n){
         }, '×')),
       el('div', { class:'modal-body' },
         el('div', { style:{ marginBottom:'14px' }}, chip(skillLabel, skillKind)),
-        el('div', { class:'card', style:{ marginBottom:'14px', background:'var(--surface-soft)' }},
-          el('h4', null, '📖 Что проверяется'),
-          el('p', { style:{ color:'var(--ink-2)', marginTop:'6px' }}, 'Тема: ' + t.topic + '. Здесь будет краткая теория от Ольги Александровны — выжимка, формулы и подводные камни.')),
+        (function(){
+          const card = el('div', { class:'card theory-md', style:{ marginBottom:'14px', background:'var(--surface-soft)' }},
+            el('h4', null, '📖 ' + t.topic));
+          const md = THEORY[n];
+          if(md && md.trim()){
+            const body = el('div', { style:{ marginTop:'8px', lineHeight:'1.55', color:'var(--ink)' }});
+            try {
+              body.innerHTML = window.marked ? window.marked.parse(md) : ('<pre>' + md.replace(/</g, '&lt;') + '</pre>');
+            } catch(e){ body.textContent = md; }
+            card.append(body);
+          } else {
+            card.append(el('p', { style:{ color:'var(--ink-2)', marginTop:'6px' }},
+              'Здесь будет краткая теория от Ольги Александровны — выжимка, формулы и подводные камни.'));
+          }
+          return card;
+        })(),
         mats.length > 0 ? el('div', { class:'card', style:{ marginBottom:'14px' }},
           el('h4', null, '📎 Материалы по этому заданию'),
           el('div', { style:{ marginTop:'10px', display:'flex', flexDirection:'column', gap:'6px' }},
@@ -3444,8 +3468,27 @@ function viewContentTheory(){
         el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginTop:'4px' }},
           'Тексты тем для каждого задания. То, что увидит ученик в карточке теории.')),
       el('button', { class:'btn btn-secondary',
-        onclick: () => showToast('Импорт теории из docx (массовая загрузка)')
-      }, '⬆ Импорт из Word')));
+        onclick: async () => {
+          showToast('⏳ Загружаю theory_import.json…');
+          try {
+            const resp = await fetch('./theory_import.json?ts=' + Date.now());
+            if(!resp.ok){ showToast('⚠ Файл theory_import.json не найден'); return; }
+            const data = await resp.json();
+            const entries = Object.entries(data);
+            if(!entries.length){ showToast('⚠ Файл пуст'); return; }
+            let ok = 0, fail = 0;
+            for(const [n, md] of entries){
+              try { await saveTheoryToDb(+n, md); ok++; }
+              catch(e){ console.warn('Не сохранилось задание', n, ':', e.message); fail++; }
+            }
+            showToast('✓ Импортировано: ' + ok + ' заданий' + (fail ? ' · ошибок: ' + fail : ''));
+            render();
+          } catch(e){
+            console.error('Импорт упал:', e);
+            showToast('⚠ Ошибка: ' + e.message);
+          }
+        }
+      }, '⬆ Импорт из theory_import.json')));
 
   const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(280px, 1fr))', gap:'12px' }});
   EGE_TASKS.forEach(t => {
