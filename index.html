@@ -1897,10 +1897,15 @@ function shellHeader(role){
       el('span', { class:'avatar' }, me.init),
       el('span', { class:'who' },
         el('b', null, me.name),
-        el('span', null, me.sub))),
-    el('button', { class:'role-switch',
+        el('span', null, me.sub))));
+  /* «Сменить роль» — это демо-фича для перепрыгивания между персонажами учитель/куратор/ученик.
+     Для залогиненных пользователей (MY_PROFILE есть) её скрываем — у реального пользователя одна роль. */
+  if(!MY_PROFILE){
+    right.append(el('button', { class:'role-switch',
       onclick: () => { STATE.view = role==='teacher' ? 'student' : role==='student' ? 'curator' : 'teacher'; render(); }
-    }, '↔ Сменить роль'),
+    }, '↔ Сменить роль'));
+  }
+  right.append(
     el('button', { class:'role-switch',
       onclick: () => {
         if(MY_PROFILE && sb){
@@ -3584,9 +3589,43 @@ function viewTeacherPayments(){
               el('td', null, s.paid ? s.paidMethod || '—' : '—'),
               el('td', { style:{ textAlign:'right' }},
                 s.paid
-                  ? el('button', { class:'btn-icon', title:'Редактировать', onclick: () => showToast('Редактирование оплаты') }, '✏️')
+                  ? el('div', { style:{ display:'flex', gap:'4px', justifyContent:'flex-end' }},
+                      el('button', { class:'btn-icon', title:'Редактировать оплату',
+                        onclick: () => {
+                          const amount = prompt('Сумма оплаты, ₽:', String(s.paidAmount || 0));
+                          if(amount === null) return;
+                          if(!/^\d+$/.test(amount.trim())){ showToast('Сумма должна быть числом'); return; }
+                          s.paidAmount = parseInt(amount.trim());
+                          const date = prompt('Дата (например, «28.05» или «28 мая»):', s.paidDate || '');
+                          if(date !== null) s.paidDate = date.trim();
+                          const method = prompt('Способ оплаты (СБП / карта / наличные / перевод):', s.paidMethod || 'СБП');
+                          if(method !== null) s.paidMethod = method.trim();
+                          showToast('✓ Оплата обновлена');
+                          render();
+                        }
+                      }, '✏️'),
+                      el('button', { class:'btn-icon', title:'Отметить как неоплачено', style:{ color:'var(--red)' },
+                        onclick: () => {
+                          if(!confirm('Снять отметку об оплате с ' + s.name + '?')) return;
+                          s.paid = false; delete s.paidAmount; delete s.paidDate; delete s.paidMethod;
+                          showToast('Оплата снята');
+                          render();
+                        }
+                      }, '✕'))
                   : el('button', { class:'btn btn-y btn-sm',
-                      onclick: () => { s.paid = true; s.paidAmount = 5000; s.paidDate = new Date().toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'}); s.paidMethod='СБП'; showToast('Оплата зафиксирована'); render(); }
+                      onclick: () => {
+                        const amount = prompt('Сумма оплаты, ₽:', '5000');
+                        if(amount === null) return;
+                        if(!/^\d+$/.test(amount.trim())){ showToast('Сумма должна быть числом'); return; }
+                        const method = prompt('Способ оплаты:', 'СБП');
+                        if(method === null) return;
+                        s.paid = true;
+                        s.paidAmount = parseInt(amount.trim());
+                        s.paidDate = new Date().toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'});
+                        s.paidMethod = method.trim() || 'СБП';
+                        showToast('✓ Оплата зафиксирована');
+                        render();
+                      }
                     }, 'Зафиксировать'))))))));
   return wrap;
 }
