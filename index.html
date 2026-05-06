@@ -1169,14 +1169,15 @@ let DB_ESSAYS = [];
 async function loadEssaysFromDb(){
   if(!sb) return;
   try {
-    /* Берём сочинения и подтягиваем имя ученика из profiles через embed */
-    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,word_count,status,submitted_at,format,profiles(full_name,email)&order=submitted_at.desc&limit=200');
+    /* Берём сочинения и подтягиваем имя ученика. У essays три FK к profiles
+       (student_id, pre_checked_by, finalized_by) — указываем явно через !essays_student_id_fkey. */
+    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,word_count,status,submitted_at,format,student:profiles!essays_student_id_fkey(full_name,email)&order=submitted_at.desc&limit=200');
     if(Array.isArray(arr)){
       DB_ESSAYS = arr.map(e => ({
         id: e.id,
         studentId: e.student_id,
-        studentName: (e.profiles && e.profiles.full_name) || (e.profiles && e.profiles.email) || 'Ученик',
-        studentEmail: e.profiles && e.profiles.email,
+        studentName: (e.student && e.student.full_name) || (e.student && e.student.email) || 'Ученик',
+        studentEmail: e.student && e.student.email,
         text: e.body_text,
         wordCount: e.word_count,
         status: e.status,
