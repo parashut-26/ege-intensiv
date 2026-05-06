@@ -4412,22 +4412,67 @@ function viewTeacherDays(){
         el('div', { style:{ display:'flex', justifyContent:'space-between', padding:'10px 12px', border:'1px solid var(--border)', borderRadius:'10px' }},
           el('div', null,
             el('div', { style:{ fontWeight:'700', fontSize:'13px' }}, (t.time || '') + ' · ' + t.title),
-            el('div', { style:{ fontSize:'12px', color:'var(--ink-3)' }}, t.kind + ' · ' + t.est)),
+            el('div', { style:{ fontSize:'12px', color:'var(--ink-3)' }}, t.kind + ' · ' + t.est + (t.maxBee ? ' · до ' + t.maxBee + '🐝' : ''))),
           el('div', { style:{ display:'flex', gap:'6px' }},
             el('button', { class:'btn btn-secondary btn-sm',
-              onclick: ev => { ev.preventDefault(); showToast('Откроется редактор'); }
+              onclick: ev => {
+                ev.preventDefault();
+                const newTitle = prompt('Название активности:', t.title);
+                if(newTitle === null) return;
+                if(newTitle.trim()) t.title = newTitle.trim();
+                const newTime = prompt('Время начала (например, «13:00» или «утро»):', t.time || '');
+                if(newTime !== null) t.time = newTime.trim();
+                const newKind = prompt('Тип (morning / webinar / review / essay):', t.kind || 'morning');
+                if(newKind !== null && /^(morning|webinar|review|essay)$/.test(newKind.trim())) t.kind = newKind.trim();
+                const newEst = prompt('Длительность (например, «15 мин», «1.5 ч»):', t.est || '');
+                if(newEst !== null) t.est = newEst.trim();
+                const newBee = prompt('Сколько пчёлок можно заработать (число):', String(t.maxBee || 0));
+                if(newBee !== null && /^\d+$/.test(newBee.trim())) t.maxBee = parseInt(newBee.trim());
+                showToast('✏️ Изменения сохранены в текущей сессии');
+                render();
+              }
             }, 'Редактировать'),
             el('button', { class:'btn btn-secondary btn-sm', style:{ color:'var(--red)' },
-              onclick: ev => { ev.preventDefault(); showToast('Подтвердите удаление'); }
+              onclick: ev => {
+                ev.preventDefault();
+                if(!confirm('Удалить «' + t.title + '»?')) return;
+                const i = d.tasks.indexOf(t);
+                if(i >= 0) d.tasks.splice(i, 1);
+                showToast('Удалено');
+                render();
+              }
             }, 'Удалить'))));
     });
     inner.append(
       el('button', { class:'btn btn-y btn-sm', style:{ alignSelf:'flex-start' },
-        onclick: ev => { ev.preventDefault(); showToast('Форма создания нового задания'); }
+        onclick: ev => {
+          ev.preventDefault();
+          const title = prompt('Название новой активности:');
+          if(!title || !title.trim()) return;
+          const kind = prompt('Тип (morning / webinar / review / essay):', 'morning');
+          if(!kind || !/^(morning|webinar|review|essay)$/.test(kind.trim())){
+            showToast('Тип должен быть одним из: morning, webinar, review, essay'); return;
+          }
+          const time = prompt('Время начала (например, «13:00» или «утро»):', '13:00');
+          const est = prompt('Длительность (например, «15 мин», «1.5 ч»):', '1 ч');
+          const maxBeeStr = prompt('Сколько пчёлок можно заработать (число):', '5');
+          d.tasks.push({
+            id: 't' + d.id + '-' + (d.tasks.length + 1),
+            title: title.trim(),
+            kind: kind.trim(),
+            time: (time || '').trim(),
+            est: (est || '').trim(),
+            maxBee: /^\d+$/.test((maxBeeStr || '').trim()) ? parseInt(maxBeeStr.trim()) : 5
+          });
+          showToast('✓ Задание добавлено в день ' + d.id);
+          render();
+        }
       }, '＋ Добавить задание'));
     det.append(inner);
     wrap.append(det);
   });
+  wrap.append(el('p', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'14px', fontStyle:'italic' }},
+    '💡 Изменения сейчас живут только в текущей сессии браузера. Постоянное хранение в БД (intensive_days / day_activities) — отдельная задача.'));
   return wrap;
 }
 
