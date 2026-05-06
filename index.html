@@ -2447,9 +2447,19 @@ function modalTest(taskN){
         const sel = q.multi ? (Array.isArray(ans) && ans.includes(idx)) : ans === idx;
         const isRight = q.multi ? q.a.includes(idx) : idx === q.a;
         let bg = 'var(--surface)', color = 'var(--ink)', border = '1px solid var(--border-2)';
+        let mark = '';   /* подсказка справа: ✓ или ✗ или «пропустила» */
         if(all){
-          if(isRight){ bg='var(--green-soft)'; color='#065F46'; border='1px solid var(--green)'; }
-          else if(sel){ bg='var(--red-soft)'; color='#991B1B'; border='1px solid var(--red)'; }
+          if(q.multi){
+            /* Различаем 4 случая, чтобы было видно, что именно ученик выбрал */
+            if(sel && isRight){ bg='var(--green-soft)'; color='#065F46'; border='1px solid var(--green)'; mark = '✓'; }
+            else if(sel && !isRight){ bg='var(--red-soft)'; color='#991B1B'; border='1px solid var(--red)'; mark = '✗'; }
+            else if(!sel && isRight){ bg='var(--y-soft)'; color='#854D0E'; border='1px dashed var(--y)'; mark = 'пропущено'; }
+            /* !sel && !isRight — нейтрально (правильно не выбрала), оставляем как есть */
+          } else {
+            /* single: правильный = зелёный, выбранный неправильный = красный */
+            if(isRight){ bg='var(--green-soft)'; color='#065F46'; border='1px solid var(--green)'; }
+            else if(sel){ bg='var(--red-soft)'; color='#991B1B'; border='1px solid var(--red)'; }
+          }
         } else if(sel){ bg='var(--y-soft)'; color='var(--ink)'; border='1px solid var(--y)'; }
         opts.append(el('button', {
           style:{ padding:'10px 14px', textAlign:'left', borderRadius:'10px', background:bg, color:color, border:border, fontWeight:'600', display:'flex', alignItems:'center', gap:'10px' },
@@ -2466,7 +2476,8 @@ function modalTest(taskN){
             }
             render();
           }
-        }, q.multi ? (sel ? '☑' : '☐') : (sel ? '●' : '○'), (idx + 1) + ') ' + opt));
+        }, q.multi ? (sel ? '☑' : '☐') : (sel ? '●' : '○'), (idx + 1) + ') ' + opt,
+          mark ? el('span', { style:{ marginLeft:'auto', fontSize: mark === 'пропущено' ? '11px' : '15px', fontWeight:'700', textTransform: mark === 'пропущено' ? 'uppercase' : 'none', letterSpacing: mark === 'пропущено' ? '.04em' : '0' }}, mark) : null));
       });
       block.append(opts);
     }
