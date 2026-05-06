@@ -373,6 +373,8 @@ const STATE = {
   testLimit: null,      // если задано — выбрана подборка из N случайных вопросов из QUIZ_BANK
   shuffledBank: null,   // кэш перемешанной подборки на время теста
   attemptsByTask: {},   // кэш истории попыток ученика по taskN: { 5: [{...}, ...] }
+  studentDetailOpen: null,        // id ученика — открыта детальная карточка у учителя
+  studentAttempts: {},            // кэш попыток конкретного ученика: { studentId: [{...}, ...] }
   helpedMsgs: {},
   /* === Авторизация === */
   authMode: 'live',     // 'live' (реальный e-mail) | 'demo' (роли как раньше)
@@ -598,6 +600,21 @@ async function loadMyAttempts(taskN){
     return Array.isArray(arr) ? arr : [];
   } catch(e){
     console.warn('loadMyAttempts упал:', e.message);
+    return [];
+  }
+}
+
+/* Загрузка попыток произвольного ученика — для учительской карточки. RLS позволяет
+   teacher и curator видеть всех. */
+async function loadStudentAttempts(studentId){
+  if(!sb) return [];
+  /* studentId должен быть UUID; если ID мокового вида ('s1', 's2') — пропускаем */
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(studentId)) return [];
+  try {
+    const arr = await restRequest('GET', '/attempts?student_id=eq.' + studentId + '&select=id,ege_task_n,score,max_score,bee_earned,created_at&order=created_at.desc&limit=200');
+    return Array.isArray(arr) ? arr : [];
+  } catch(e){
+    console.warn('loadStudentAttempts упал:', e.message);
     return [];
   }
 }
@@ -3089,11 +3106,134 @@ function studentRow(s){
             }, '✕'))
         : el('div', { style:{ display:'flex', gap:'4px', justifyContent:'flex-end' }},
             el('button', { class:'btn-icon', title:'Посмотреть карточку',
-              onclick: () => showToast('Откроется детальная карточка ученика')
+              onclick: () => { STATE.studentDetailOpen = s.id; render(); }
             }, '👁'),
             el('button', { class:'btn-icon', title:'Написать в чате',
               onclick: () => { STATE.chatOpen = true; STATE.chatChannel = 'dm'; render(); }
             }, '💬'))));
+}
+
+/* =======================================================================
+   УЧИТЕЛЬ · ДЕТАЛЬНАЯ КАРТОЧКА УЧЕНИКА (история попыток + слабые темы)
+   ======================================================================= */
+function modalStudentDetail(){
+  const sid = STATE.studentDetailOpen;
+  if(!sid) return null;
+  const s = STUDENTS.find(x => x.id === sid) || { id: sid, name: 'Ученик', email: '—', color: '#A78BFA' };
+
+  /* Подгрузка попыток ученика (асинхронно, при первом открытии) */
+  const cache = STATE.studentAttempts || (STATE.studentAttempts = {});
+  let list = cache[sid];
+  if(list === undefined && sb){
+    cache[sid] = null;
+    list = null;
+    loadStudentAttempts(sid).then(arr => { cache[sid] = arr; render(); });
+  }
+
+  /* Группировка попыток по заданиям + агрегаты */
+  const byTask = {};
+  let totalScore = 0, totalMax = 0;
+  if(Array.isArray(list)){
+    for(const a of list){
+      const t = a.ege_task_n;
+      if(!byTask[t]) byTask[t] = { attempts: [], score: 0, max: 0 };
+      byTask[t].attempts.push(a);
+      byTask[t].score += a.score || 0;
+      byTask[t].max += a.max_score || 0;
+      totalScore += a.score || 0;
+      totalMax += a.max_score || 0;
+    }
+  }
+  const totalAvg = totalMax ? Math.round(totalScore / totalMax * 100) : null;
+  /* Слабые темы: где средний балл < 70% и есть хотя бы 2 попытки */
+  const weakTopics = Object.entries(byTask)
+    .filter(([_, b]) => b.attempts.length >= 2 && b.score / b.max < 0.7)
+    .sort((a, b) => (a[1].score / a[1].max) - (b[1].score / b[1].max))
+    .slice(0, 5);
+
+  const close = () => { STATE.studentDetailOpen = null; render(); };
+
+  const head = el('div', { class:'modal-head' },
+    el('div', { style:{ display:'flex', alignItems:'center', gap:'14px' }},
+      avatarChip(s.name, s.color, 56),
+      el('div', null,
+        el('h2', { style:{ marginBottom:'2px' }}, s.name),
+        el('div', { style:{ color:'var(--ink-2)', fontSize:'13px' }}, s.email))),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const body = el('div', { class:'modal-body' });
+
+  /* Агрегаты */
+  body.append(el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(150px, 1fr))', gap:'10px', marginBottom:'14px' }},
+    kpiCard('Всего попыток', list ? list.length : '⏳', '', '🎯', 'var(--p-soft)'),
+    kpiCard('Средний балл', totalAvg != null ? totalAvg + '%' : '—', list && list.length ? 'по всем попыткам' : 'нет данных', '📊', 'var(--y-soft)'),
+    kpiCard('Заданий охвачено', Object.keys(byTask).length || '—', 'из 26', '📚', 'var(--green-soft)'),
+    kpiCard('Слабые темы', weakTopics.length, weakTopics.length ? '< 70% точности' : 'все ровно', '⚠', '#FEF3C7')));
+
+  /* Слабые темы */
+  if(weakTopics.length){
+    const weak = el('div', { class:'card', style:{ marginBottom:'14px', background:'#FFFBEB', border:'1px solid #FDE68A' }});
+    weak.append(el('h4', null, '⚠ Слабые места'));
+    weak.append(el('p', { style:{ fontSize:'12px', color:'var(--ink-2)', marginTop:'4px', marginBottom:'10px' }},
+      'Задания, где у ' + s.name.split(' ')[0] + ' средняя точность ниже 70%. Стоит вернуться к этим темам.'));
+    weakTopics.forEach(([taskN, b]) => {
+      const pct = Math.round(b.score / b.max * 100);
+      const topic = (EGE_TASKS.find(t => t.n == taskN) || {}).topic || '';
+      weak.append(el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 12px', background:'#fff', borderRadius:'8px', marginBottom:'6px', fontSize:'13px' }},
+        el('span', null, el('b', null, '№' + taskN), ' · ' + topic),
+        el('span', { style:{ fontWeight:'700', color: pct < 50 ? 'var(--red)' : 'var(--warn)' }}, pct + '% · ' + b.attempts.length + ' попыт.')));
+    });
+    body.append(weak);
+  }
+
+  /* История попыток по заданиям */
+  if(list === null){
+    body.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)' }},
+      '⏳ Загружаем попытки…'));
+  } else if(!list || !list.length){
+    body.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)' }},
+      'У этого ученика пока нет попыток в тренажёре.'));
+  } else {
+    const histCard = el('div', { class:'card' });
+    histCard.append(el('h4', null, '📈 История по заданиям'));
+    histCard.append(el('p', { style:{ fontSize:'12px', color:'var(--ink-2)', marginTop:'4px', marginBottom:'12px' }},
+      'Сгруппировано по номеру задания. Вторая колонка — все попытки с датой и результатом.'));
+    Object.entries(byTask).sort((a, b) => +a[0] - +b[0]).forEach(([taskN, b]) => {
+      const avg = Math.round(b.score / b.max * 100);
+      const topic = (EGE_TASKS.find(t => t.n == taskN) || {}).topic || '';
+      const block = el('div', { style:{ marginBottom:'12px', borderBottom:'1px solid var(--border)', paddingBottom:'10px' }});
+      block.append(el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }},
+        el('div', null,
+          el('b', null, 'Задание ' + taskN), ' · ',
+          el('span', { style:{ color:'var(--ink-2)' }}, topic)),
+        el('div', null,
+          el('span', { style:{ fontWeight:'700', color: avg >= 80 ? 'var(--green)' : avg >= 60 ? 'var(--ink)' : 'var(--red)' }}, avg + '%'),
+          el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'8px' }}, b.attempts.length + ' попыт.'))));
+      const fmt = ts => {
+        const d = new Date(ts);
+        return d.toLocaleDateString('ru-RU', { day:'numeric', month:'short' }) + ' · ' + d.toTimeString().slice(0, 5);
+      };
+      const aList = el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }});
+      b.attempts.slice(0, 10).forEach(a => {
+        const pct = a.max_score ? Math.round(a.score / a.max_score * 100) : 0;
+        const bg = pct >= 80 ? 'var(--green-soft)' : pct >= 60 ? 'var(--y-soft)' : 'var(--red-soft)';
+        aList.append(el('span', { style:{ fontSize:'11px', padding:'3px 8px', background:bg, borderRadius:'6px', color:'var(--ink)' }},
+          fmt(a.created_at) + ' · ' + a.score + '/' + a.max_score));
+      });
+      if(b.attempts.length > 10) aList.append(el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, '…и ещё ' + (b.attempts.length - 10)));
+      block.append(aList);
+      histCard.append(block);
+    });
+    body.append(histCard);
+  }
+
+  const foot = el('div', { class:'modal-foot' },
+    el('span', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
+      'Карточка ученика'),
+    el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть'));
+
+  return el('div', { class:'modal-bg', onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }},
+    el('div', { class:'modal', style:{ maxWidth:'780px' }}, head, body, foot));
 }
 
 function modalNewStudent(){
@@ -4540,6 +4680,7 @@ function render(){
   if(STATE.essayOpen) root.append(modalEssayReview(STATE.essayOpen));
   if(STATE.newStudentForm) root.append(modalNewStudent());
   if(STATE.curatorPermsFor) root.append(modalCuratorPerms());
+  if(STATE.studentDetailOpen) root.append(modalStudentDetail());
   if(STATE.attendanceOpen) root.append(modalAttendance());
   if(STATE.theoryOpen != null) root.append(modalTheory(STATE.theoryOpen));
   if(STATE.contentEditTaskN != null) root.append(modalEditTheory(STATE.contentEditTaskN));
