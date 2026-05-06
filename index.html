@@ -4123,7 +4123,8 @@ function viewTeacherEssays(){
    ФОРМА ПРОВЕРКИ СОЧИНЕНИЯ (К1–К10)
    ======================================================================= */
 function modalEssayReview(essayId){
-  const essay = ESSAYS.find(e => e.id === essayId);
+  /* Ищем сначала в реальных DB_ESSAYS, потом в моках */
+  const essay = DB_ESSAYS.find(e => e.id === essayId) || ESSAYS.find(e => e.id === essayId);
   if(!essay) return null;
 
   const k1 = STATE.scoresK.K1 ?? 1;
@@ -4150,18 +4151,20 @@ function modalEssayReview(essayId){
     return s + '/' + m;
   };
 
-  const wordCount = SAMPLE_ESSAY_TEXT.split(/\s+/).filter(Boolean).length;
+  /* Текст работы: для реального DB-сочинения используем essay.text, для мока — SAMPLE */
+  const essayText = essay.text || SAMPLE_ESSAY_TEXT;
+  const wordCount = essay.wordCount != null ? essay.wordCount : countEssayWords(essayText);
   const isCurator = STATE.essayBy === 'curator';
 
   /* Левая колонка */
   const leftCol = el('div', null);
   leftCol.append(
     el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'10px', flexWrap:'wrap' }},
+      el('div', { style:{ fontWeight:'700', fontSize:'14px' }}, '✍️ ' + (essay.studentName || 'Ученик')),
       chip('📝 текстовая сдача', 'p'),
       chip(wordCount + ' слов · ' + (wordCount >= 150 ? 'норма' : '< 150 — НЕ ЗАСЧИТЫВАЕТСЯ'),
-           wordCount >= 150 ? 'green' : 'red'),
-      el('button', { class:'btn-icon', title:'Также есть фото-вариант' }, '📷')),
-    el('div', { class:'essay-text' }, SAMPLE_ESSAY_TEXT),
+           wordCount >= 150 ? 'green' : 'red')),
+    el('div', { class:'essay-text', style:{ whiteSpace:'pre-wrap' }}, essayText),
     el('div', { class:'card', style:{ marginTop:'14px', background:'var(--p-soft)' }},
       el('h4', null, '🎤 Голосовые комментарии'),
       el('p', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'10px' }},
