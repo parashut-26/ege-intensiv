@@ -3694,50 +3694,128 @@ function viewContentTests(){
 
 function viewContentMaterials(){
   const wrap = el('div', null);
+
+  /* Скрытый file input для общей загрузки (без привязки к заданию) */
+  const fileInput = el('input', { type:'file', style:{ display:'none' },
+    onchange: async (ev) => {
+      const file = ev.target.files[0];
+      if(!file) return;
+      try {
+        const taskNStr = prompt('К какому заданию привязать (1–26)? Оставь пустым, если без привязки:');
+        const taskN = taskNStr && taskNStr.trim() ? parseInt(taskNStr.trim()) : null;
+        showToast('⏳ Загружаю «' + file.name + '»…');
+        await uploadMaterial(file, taskN);
+        await loadMaterialsFromDb();
+        showToast('✓ Файл «' + file.name + '» загружен');
+        render();
+      } catch(e){
+        console.error('Загрузка упала:', e);
+        showToast('⚠ ' + e.message);
+      } finally {
+        ev.target.value = '';
+      }
+    }
+  });
+  wrap.append(fileInput);
+
   wrap.append(
     el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'14px', flexWrap:'wrap', gap:'10px' }},
       el('div', null,
         el('h3', null, '📎 Материалы'),
         el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginTop:'4px' }},
-          'PDF, DOC, видео. Загруженные файлы появляются у учеников в Теории, Базе знаний и в дне интенсива.')),
-      el('button', { class:'btn btn-y',
-        onclick: () => showToast('Откроется загрузка файла (PDF, DOCX, MP4, до 50 МБ)')
-      }, '⬆ Загрузить файл')));
+          'PDF, DOC, изображения, видео + ссылки. Появляются у учеников в карточке соответствующего задания.')),
+      el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' }},
+        el('button', { class:'btn btn-y',
+          onclick: () => fileInput.click()
+        }, '⬆ Загрузить файл'),
+        el('button', { class:'btn btn-secondary',
+          onclick: async () => {
+            const url = prompt('URL ссылки:');
+            if(!url || !url.trim()) return;
+            let cleanUrl = url.trim();
+            if(!/^https?:\/\//i.test(cleanUrl)) cleanUrl = 'https://' + cleanUrl;
+            const name = prompt('Название ссылки:', extractDomain(cleanUrl));
+            if(!name || !name.trim()) return;
+            const taskNStr = prompt('К какому заданию привязать (1–26)? Оставь пустым, если без привязки:');
+            const taskN = taskNStr && taskNStr.trim() ? parseInt(taskNStr.trim()) : null;
+            try {
+              await attachLink(name.trim(), cleanUrl, taskN);
+              await loadMaterialsFromDb();
+              showToast('✓ Ссылка прикреплена');
+              render();
+            } catch(e){ console.error(e); showToast('⚠ ' + e.message); }
+          }
+        }, '🔗 Добавить ссылку'))));
 
-  const sizeUsed = 4.2;
-  const sizeMax = 1024;
+  /* Подсчёт использованного хранилища */
+  const totalBytes = MATERIALS.filter(m => m.storage_path).reduce((a, m) => a + (m.size_bytes || 0), 0);
+  const sizeMaxMB = 1024;     /* 1 ГБ — лимит free-tier Supabase */
+  const sizeUsedMB = totalBytes / (1024*1024);
   wrap.append(el('div', { class:'card', style:{ marginBottom:'14px' }},
     el('div', { style:{ display:'flex', justifyContent:'space-between', marginBottom:'8px' }},
       el('span', { style:{ fontSize:'13px', color:'var(--ink-2)' }}, 'Использовано хранилища'),
-      el('b', null, sizeUsed + ' МБ из ' + sizeMax + ' МБ')),
-    el('div', { class:'bar' }, el('i', { style:{ width: (sizeUsed / sizeMax * 100) + '%' }}))));
+      el('b', null, sizeUsedMB.toFixed(1) + ' МБ из ' + sizeMaxMB + ' МБ')),
+    el('div', { class:'bar' }, el('i', { style:{ width: Math.min(100, sizeUsedMB / sizeMaxMB * 100) + '%' }}))));
+
+  if(MATERIALS.length === 0){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)', padding:'30px' }},
+      'Пока нет загруженных материалов. Жми «⬆ Загрузить файл» или «🔗 Добавить ссылку»'));
+    return wrap;
+  }
 
   const list = el('div', { class:'card', style:{ padding:0, overflow:'hidden' }});
   list.append(el('table', { class:'table' },
     el('thead', null, el('tr', null,
-      el('th', null, 'Файл'),
+      el('th', null, 'Файл / Ссылка'),
       el('th', null, 'Тип'),
       el('th', null, 'Привязка'),
-      el('th', null, 'День'),
       el('th', null, 'Размер'),
       el('th', { style:{ textAlign:'right' }}, ''))),
-    el('tbody', null, MATERIALS.map(m =>
-      el('tr', null,
+    el('tbody', null, MATERIALS.map(m => {
+      const icon = m.external_url ? '🔗' : '📎';
+      return el('tr', null,
         el('td', null, el('div', { style:{ display:'flex', gap:'10px', alignItems:'center' }},
-          el('span', { style:{ fontSize:'18px' }}, '📎'),
-          el('span', { style:{ fontWeight:'600' }}, m.name))),
-        el('td', null, chip(m.tag, m.tag === 'теория' ? 'p' : m.tag === 'вариант' ? 'y' : 'red')),
+          el('span', { style:{ fontSize:'18px' }}, icon),
+          el('a', { href: materialOpenUrl(m), target:'_blank', rel:'noopener',
+            style:{ fontWeight:'600', color:'var(--ink)', textDecoration:'none' }}, m.name))),
+        el('td', null, chip(m.tag || 'теория', (m.tag === 'теория' || !m.tag) ? 'p' : m.tag === 'вариант' ? 'y' : 'red')),
         el('td', null, m.taskN ? chip('Задание ' + m.taskN, 'grey') : el('span', { style:{ color:'var(--ink-3)' }}, '—')),
-        el('td', null, 'День ' + m.day),
-        el('td', null, el('span', { style:{ color:'var(--ink-3)' }}, m.size)),
+        el('td', null, el('span', { style:{ color:'var(--ink-3)' }}, m.size || '—')),
         el('td', { style:{ textAlign:'right' }},
           el('div', { style:{ display:'flex', gap:'4px', justifyContent:'flex-end' }},
             el('button', { class:'btn-icon', title:'Редактировать',
-              onclick: () => showToast('Откроется редактор привязки и тегов')
+              onclick: async () => {
+                try {
+                  const ok = await editMaterial(m);
+                  if(!ok) return;
+                  /* Дополнительно для глобального списка предлагаем поменять привязку и тег */
+                  const newTaskNStr = prompt('Привязка к заданию (1–26, пусто — без привязки):', m.taskN || '');
+                  if(newTaskNStr !== null){
+                    const newTaskN = newTaskNStr.trim() ? parseInt(newTaskNStr.trim()) : null;
+                    await restRequest('PATCH', '/materials?id=eq.' + m.id, { ege_task_n: newTaskN }, { prefer: 'return=minimal' });
+                  }
+                  const newTag = prompt('Тег (теория / вариант / разбор / видео):', m.tag || 'теория');
+                  if(newTag !== null && newTag.trim()){
+                    await restRequest('PATCH', '/materials?id=eq.' + m.id, { tag: newTag.trim() }, { prefer: 'return=minimal' });
+                  }
+                  await loadMaterialsFromDb();
+                  showToast('✓ Изменения сохранены');
+                  render();
+                } catch(e){ console.error(e); showToast('⚠ ' + e.message); }
+              }
             }, '✏️'),
             el('button', { class:'btn-icon', style:{ color:'var(--red)' }, title:'Удалить',
-              onclick: () => showToast('Подтвердите удаление')
-            }, '🗑'))))))));
+              onclick: async () => {
+                if(!confirm('Удалить «' + m.name + '»?')) return;
+                try {
+                  await deleteMaterial(m);
+                  await loadMaterialsFromDb();
+                  showToast('Удалено');
+                  render();
+                } catch(e){ showToast('⚠ ' + e.message); }
+              }
+            }, '🗑'))));
+    }))));
   wrap.append(list);
   return wrap;
 }
