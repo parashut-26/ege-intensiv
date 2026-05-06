@@ -1144,6 +1144,32 @@ async function deleteMaterial(m){
   await restRequest('DELETE', '/materials?id=eq.' + m.id, null, { prefer: 'return=minimal' });
 }
 
+/* Редактирование: для файла — только название; для ссылки — название и URL */
+async function editMaterial(m){
+  if(!sb) throw new Error('нет авторизации');
+  const newName = prompt('Название (что увидит ученик):', m.name);
+  if(newName === null) return false;        /* пользователь отменил */
+  const trimmedName = newName.trim();
+  if(!trimmedName){ showToast('Название не может быть пустым'); return false; }
+  const patch = { name: trimmedName };
+  if(m.external_url){
+    const newUrl = prompt('URL ссылки:', m.external_url);
+    if(newUrl === null) return false;
+    let cleanUrl = newUrl.trim();
+    if(!cleanUrl){ showToast('URL не может быть пустым'); return false; }
+    if(!/^https?:\/\//i.test(cleanUrl)) cleanUrl = 'https://' + cleanUrl;
+    patch.external_url = cleanUrl;
+  }
+  await restRequest('PATCH', '/materials?id=eq.' + m.id, patch, { prefer: 'return=minimal' });
+  return true;
+}
+
+/* Извлечь домен из URL для дефолтного названия ссылки */
+function extractDomain(url){
+  try { return new URL(url).hostname.replace(/^www\./, ''); }
+  catch(_){ return url; }
+}
+
 const CHAT_GROUP = [
   { id:'m1', from: 's3', name: 'Настя', text: 'В задании 5 непонятно про паронимы — можно подсказать?', time: '10:42' },
   { id:'m2', from: 't',  name: 'Учитель', text: 'Настя, посмотри файл «Памятка по паронимам» в Теории, задание 5. Если останутся вопросы — пиши.', time: '10:48' },
@@ -3984,7 +4010,9 @@ function modalEditTheory(n){
                   if(!url || !url.trim()) return;
                   let cleanUrl = url.trim();
                   if(!/^https?:\/\//i.test(cleanUrl)) cleanUrl = 'https://' + cleanUrl;
-                  const name = prompt('Название ссылки (что увидит ученик):', cleanUrl);
+                  /* По умолчанию подставляем домен — короче и понятнее, чем длинный URL */
+                  const defaultName = extractDomain(cleanUrl);
+                  const name = prompt('Название ссылки (что увидит ученик):', defaultName);
                   if(!name || !name.trim()) return;
                   attachLink(name.trim(), cleanUrl, n).then(() => loadMaterialsFromDb()).then(() => {
                     showToast('✓ Ссылка прикреплена');
@@ -4001,9 +4029,26 @@ function modalEditTheory(n){
               const sizeOrUrl = m.external_url
                 ? el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, ' · ' + (m.external_url.length > 40 ? m.external_url.slice(0, 40) + '…' : m.external_url))
                 : (m.size ? el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, ' · ' + m.size) : null);
+              /* Если у ссылки в name случайно тот же URL — не показываем второй раз справа */
+              const showRightSide = m.external_url
+                ? (m.name !== m.external_url)
+                : !!m.size;
               row.append(el('span', { style:{ flex:'1', minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }},
-                icon + ' ' + m.name, sizeOrUrl));
+                icon + ' ' + m.name, showRightSide ? sizeOrUrl : null));
+              row.append(el('button', { class:'btn-icon', style:{ color:'var(--p)' },
+                title: 'Редактировать',
+                onclick: async () => {
+                  try {
+                    const ok = await editMaterial(m);
+                    if(!ok) return;
+                    await loadMaterialsFromDb();
+                    showToast('✓ Изменения сохранены');
+                    render();
+                  } catch(e){ console.error(e); showToast('⚠ ' + e.message); }
+                }
+              }, '✏️'));
               row.append(el('button', { class:'btn-icon', style:{ color:'var(--red)' },
+                title: 'Удалить',
                 onclick: async () => {
                   if(!confirm('Удалить «' + m.name + '»?')) return;
                   try {
