@@ -3585,19 +3585,39 @@ function viewContentTheory(){
           'Тексты тем для каждого задания. То, что увидит ученик в карточке теории.')),
       el('button', { class:'btn btn-secondary',
         onclick: async () => {
-          showToast('⏳ Загружаю theory_import.json…');
           try {
+            showToast('⏳ Загружаю theory_import.json…');
             const resp = await fetch('./theory_import.json?ts=' + Date.now());
             if(!resp.ok){ showToast('⚠ Файл theory_import.json не найден'); return; }
             const data = await resp.json();
             const entries = Object.entries(data);
             if(!entries.length){ showToast('⚠ Файл пуст'); return; }
-            let ok = 0, fail = 0;
+
+            /* Считаем, у скольких заданий уже есть теория в БД, чтобы предупредить */
+            const filled = entries.filter(([n]) => (THEORY[n] || '').trim().length > 0).length;
+            let mode = 'new';   /* 'new' = только пустые; 'all' = перезаписать всё */
+            if(filled > 0){
+              const choice = prompt(
+                'У ' + filled + ' из ' + entries.length + ' заданий теория уже сохранена в БД (возможно, ты её правила вручную).\\n\\n' +
+                'Что делать?\\n' +
+                '  «новые» — заполнить только пустые задания (твои правки сохранятся)\\n' +
+                '  «все» — перезаписать всё из файла (твои правки будут потеряны)\\n' +
+                '  Cancel — отменить импорт',
+                'новые'
+              );
+              if(choice === null) return;
+              const c = choice.trim().toLowerCase();
+              if(c === 'все' || c === 'all') mode = 'all';
+              else mode = 'new';
+            }
+
+            let ok = 0, skipped = 0, fail = 0;
             for(const [n, md] of entries){
+              if(mode === 'new' && (THEORY[n] || '').trim().length > 0){ skipped++; continue; }
               try { await saveTheoryToDb(+n, md); ok++; }
               catch(e){ console.warn('Не сохранилось задание', n, ':', e.message); fail++; }
             }
-            showToast('✓ Импортировано: ' + ok + ' заданий' + (fail ? ' · ошибок: ' + fail : ''));
+            showToast('✓ Сохранено: ' + ok + (skipped ? ' · пропущено: ' + skipped : '') + (fail ? ' · ошибок: ' + fail : ''));
             render();
           } catch(e){
             console.error('Импорт упал:', e);
