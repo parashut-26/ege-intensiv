@@ -84,28 +84,40 @@ serve(async (req) => {
     if (existingProfile) {
       userId = existingProfile.id;
     } else {
-      // Создаём auth-пользователя через admin API
+      // Создаём auth-пользователя. Триггер trg_auth_user_created автоматически
+      // создаст соответствующий profile (role='student').
       const { data: newUser, error: createErr } = await supabase.auth.admin.createUser({
         email,
         email_confirm: true,
       });
-      if (createErr) {
-        console.error('createUser error:', createErr);
-        throw createErr;
-      }
-      userId = newUser.user!.id;
 
-      // Создаём профиль
-      const { error: profileErr } = await supabase.from('profiles').insert({
-        id: userId,
-        email,
-        full_name: email.split('@')[0],
-        role: 'student',
-      });
-      if (profileErr) {
-        console.error('Profile insert error:', profileErr);
-        throw profileErr;
+      if (createErr) {
+        // Возможно пользователь уже есть в auth.users без profile.
+        // Попробуем найти его через admin API.
+        if (String(createErr.message || '').toLowerCase().includes('already')) {
+          const { data: list } = await supabase.auth.admin.listUsers({ page: 1, perPage: 200 });
+          const found = list.users.find((u: any) => u.email === email);
+          if (!found) throw createErr;
+          userId = found.id;
+        } else {
+          console.error('createUser error:', createErr);
+          throw createErr;
+        }
+      } else {
+        userId = newUser.user!.id;
       }
+
+      // На случай, если триггер не сработал — пробуем upsert профиля.
+      // Не перетираем существующий (ignoreDuplicates).
+      await supabase.from('profiles').upsert(
+        {
+          id: userId,
+          email,
+          full_name: email.split('@')[0],
+          role: 'student',
+        },
+        { onConflict: 'id', ignoreDuplicates: true }
+      );
     }
 
     // 4. Подписываем JWT (как Supabase Auth)
