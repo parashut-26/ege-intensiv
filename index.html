@@ -284,6 +284,23 @@ h1{font-size:28px;line-height:1.15} h2{font-size:22px} h3{font-size:17px} h4{fon
 @media(max-width:760px){.essay-grid{grid-template-columns:1fr}}
 .essay-text{padding:16px 18px;background:var(--surface-soft);border-radius:14px;border:1px solid var(--border);font-size:14px;line-height:1.6;max-height:50vh;overflow-y:auto;white-space:pre-wrap;font-family:'Manrope';position:relative}
 .essay-text mark{background:var(--y-soft);padding:1px 2px;border-radius:3px;cursor:pointer;border-bottom:2px solid var(--y)}
+.essay-text mark.err-orf  {background:#FCA5A5;color:#7F1D1D;border-bottom:2px solid #DC2626}
+.essay-text mark.err-pun  {background:#93C5FD;color:#1E3A8A;border-bottom:2px solid #2563EB}
+.essay-text mark.err-gram {background:#C4B5FD;color:#4C1D95;border-bottom:2px solid #7C3AED}
+.essay-text mark.err-rech {background:#86EFAC;color:#14532D;border-bottom:2px solid #16A34A}
+.essay-text mark.err-fact {background:#FDE68A;color:#78350F;border-bottom:2px solid #D97706}
+.essay-text mark.err-log  {background:#5EEAD4;color:#134E4A;border-bottom:2px solid #0D9488}
+.essay-text mark.err-eth  {background:#D1D5DB;color:#1F2937;border-bottom:2px solid #6B7280}
+.essay-text mark.err-other{background:#FED7AA;color:#7C2D12;border-bottom:2px solid #EA580C}
+.err-popup{position:absolute;z-index:120;background:#fff;border:1px solid var(--border-2);border-radius:14px;box-shadow:0 12px 36px rgba(0,0,0,.18);padding:12px;width:340px;max-width:95vw}
+.err-popup .kinds{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:10px}
+.err-popup .kind-btn{font-size:11px;padding:8px 4px;border:1px solid var(--border);border-radius:8px;background:#fff;cursor:pointer;text-align:center;line-height:1.2;transition:.1s}
+.err-popup .kind-btn.active{border-width:2px;font-weight:700}
+.err-popup textarea{width:100%;padding:8px;border-radius:8px;border:1px solid var(--border-2);font-size:13px;resize:vertical;min-height:54px;font-family:inherit}
+.err-popup .row{display:flex;gap:8px;justify-content:flex-end;margin-top:8px}
+.err-comments-list{max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
+.err-comments-list .item{display:flex;gap:8px;align-items:flex-start;padding:8px;border-radius:8px;background:var(--surface-soft);font-size:12px;line-height:1.4}
+.err-comments-list .frag{font-style:italic;color:var(--ink-2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}
 .criteria{display:flex;flex-direction:column;gap:8px}
 .crit{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:10px;background:var(--surface-soft);border:1px solid var(--border);gap:10px}
 .crit.locked{opacity:.5}
@@ -1199,6 +1216,103 @@ async function loadEssaysFromDb(){
   } catch(e){
     console.warn('Не удалось загрузить сочинения:', e.message);
   }
+}
+
+/* Категории ошибок для выделения в тексте сочинения */
+const ERR_KINDS = [
+  { id: 'orf',   crit: 'К7',  label: 'Орфо',   bg: '#FCA5A5' },
+  { id: 'pun',   crit: 'К8',  label: 'Пункт',  bg: '#93C5FD' },
+  { id: 'gram',  crit: 'К9',  label: 'Грамм',  bg: '#C4B5FD' },
+  { id: 'rech',  crit: 'К10', label: 'Речь',   bg: '#86EFAC' },
+  { id: 'fact',  crit: 'К4',  label: 'Факт',   bg: '#FDE68A' },
+  { id: 'log',   crit: 'К5',  label: 'Логика', bg: '#5EEAD4' },
+  { id: 'eth',   crit: 'К6',  label: 'Этика',  bg: '#D1D5DB' },
+  { id: 'other', crit: '—',   label: 'Другое', bg: '#FED7AA' },
+];
+function errKindMeta(id){ return ERR_KINDS.find(k => k.id === id) || ERR_KINDS[ERR_KINDS.length - 1]; }
+
+function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+/* Рендерит текст сочинения с подсветкой фрагментов из comments[].
+   comments: [{ id, start_pos, end_pos, kind, comment, fragment }]
+   opts.readonly: если true — клики только показывают тултип; иначе можно удалять */
+function renderEssayWithMarks(text, comments, opts){
+  opts = opts || {};
+  const wrap = el('div', { class: 'essay-text', style: { whiteSpace:'pre-wrap', position:'relative' }});
+  if(!text){ wrap.textContent = ''; return wrap; }
+  if(!comments || !comments.length){ wrap.textContent = text; return wrap; }
+  const sorted = comments
+    .filter(c => c.start_pos != null && c.end_pos != null && c.end_pos > c.start_pos && c.start_pos >= 0 && c.end_pos <= text.length)
+    .sort((a, b) => a.start_pos - b.start_pos);
+  let html = '';
+  let pos = 0;
+  for(const c of sorted){
+    if(c.start_pos < pos) continue; /* пропускаем пересекающиеся */
+    if(c.start_pos > pos) html += escHtml(text.slice(pos, c.start_pos));
+    const meta = errKindMeta(c.kind);
+    const tip = (meta.crit + ' · ' + meta.label + (c.comment ? ' — ' + c.comment : '')).replace(/"/g, '&quot;');
+    html += '<mark class="err-mark err-' + meta.id + '" data-id="' + (c.id != null ? c.id : '') + '" title="' + tip + '">' + escHtml(text.slice(c.start_pos, c.end_pos)) + '</mark>';
+    pos = c.end_pos;
+  }
+  if(pos < text.length) html += escHtml(text.slice(pos));
+  wrap.innerHTML = html;
+  return wrap;
+}
+
+/* Возвращает позицию (в символах) внутри textContent контейнера root */
+function getCharOffsetIn(root, node, offset){
+  let pos = 0;
+  let found = false;
+  function walk(n){
+    if(found) return;
+    if(n === node){
+      if(n.nodeType === Node.TEXT_NODE){ pos += offset; }
+      else {
+        for(let i = 0; i < offset; i++){
+          if(n.childNodes[i]) pos += (n.childNodes[i].textContent || '').length;
+        }
+      }
+      found = true;
+      return;
+    }
+    if(n.nodeType === Node.TEXT_NODE){ pos += n.textContent.length; }
+    else { for(const c of n.childNodes){ walk(c); if(found) return; }}
+  }
+  walk(root);
+  return found ? pos : -1;
+}
+
+/* Загрузить все комментарии-выделения для сочинения */
+async function loadEssayComments(essayId){
+  if(!sb) return [];
+  try {
+    const arr = await restRequest('GET', '/essay_comments?essay_id=eq.' + encodeURIComponent(essayId) + '&select=*&order=start_pos.asc');
+    return Array.isArray(arr) ? arr : [];
+  } catch(e){
+    console.warn('Не удалось загрузить комментарии:', e.message);
+    return [];
+  }
+}
+
+/* Сохранить новый комментарий-выделение */
+async function saveEssayComment(essayId, payload){
+  if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
+  const body = {
+    essay_id: essayId,
+    author_id: MY_PROFILE.id,
+    fragment: payload.fragment,
+    start_pos: payload.start_pos,
+    end_pos: payload.end_pos,
+    kind: payload.kind,
+    comment: payload.comment
+  };
+  const row = await restRequest('POST', '/essay_comments', body, { prefer: 'return=representation' });
+  return Array.isArray(row) ? row[0] : row;
+}
+
+async function deleteEssayComment(commentId){
+  if(!sb) return;
+  await restRequest('DELETE', '/essay_comments?id=eq.' + encodeURIComponent(commentId), null, { prefer: 'return=minimal' });
 }
 
 /* Загрузить существующую review (если куратор уже предпроверил — учитель увидит баллы) */
@@ -2521,7 +2635,15 @@ function taskAction(t, locked){
     if(myEssay){
       if(myEssay.status === 'done'){
         return el('button', { class:'btn btn-p btn-sm',
-          onclick: () => { STATE.studentEssayResultOpen = myEssay.id; render(); }
+          onclick: async () => {
+            /* Подтянем замечания учителя */
+            if(typeof myEssay.id === 'number' && sb && !myEssay.comments){
+              try { myEssay.comments = await loadEssayComments(myEssay.id); }
+              catch(e){ myEssay.comments = []; }
+            }
+            STATE.studentEssayResultOpen = myEssay.id;
+            render();
+          }
         }, '🐝 Результат: ' + (myEssay.finalScore != null ? myEssay.finalScore + '/22' : 'смотреть'));
       }
       if(myEssay.status === 'pre_checked')
@@ -3503,10 +3625,10 @@ function essayRow(e, isCurator){
       STATE.scoresK = {};
       STATE.errors = {};
       STATE.essayComment = '';
-      /* Подтянем существующую review (если есть — например, куратор уже предпроверил) */
+      /* Подтянем существующую review + комментарии-выделения */
       if(typeof e.id === 'number' && sb){
         try {
-          const r = await loadEssayReview(e.id);
+          const [r, cmts] = await Promise.all([loadEssayReview(e.id), loadEssayComments(e.id)]);
           if(r){
             ['k1','k2','k3','k4','k5','k6','k7','k8','k9','k10'].forEach(k => {
               if(r[k] != null) STATE.scoresK[k.toUpperCase()] = r[k];
@@ -3516,6 +3638,7 @@ function essayRow(e, isCurator){
             });
             if(r.general_comment) STATE.essayComment = r.general_comment;
           }
+          e.comments = cmts;
         } catch(err){ console.warn(err); }
       }
       render();
@@ -3906,6 +4029,39 @@ function modalEssayResult(essayId){
     el('button', { class:'x', onclick: close }, '×'));
 
   const body = el('div', { class:'modal-body' });
+
+  /* Полный текст работы с выделенными ошибками (если есть essay_comments) */
+  const textEl = renderEssayWithMarks(essay.text || '', essay.comments || [], { readonly: true });
+  textEl.addEventListener('click', ev => {
+    if(ev.target && ev.target.tagName === 'MARK'){
+      const cid = +ev.target.getAttribute('data-id');
+      const c = (essay.comments || []).find(x => x.id === cid);
+      if(c) showStudentCommentTooltip(c, ev.target);
+    }
+  });
+  /* Легенда цветов — только если есть выделения */
+  let legend = null;
+  if(essay.comments && essay.comments.length){
+    const usedKinds = [...new Set(essay.comments.map(c => c.kind))];
+    legend = el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'8px' }},
+      ...usedKinds.map(k => {
+        const m = errKindMeta(k);
+        return el('span', { style:{ fontSize:'11px', padding:'3px 8px', background: m.bg, color:'var(--ink)', borderRadius:'5px', fontWeight:'700' }},
+          m.crit + ' · ' + m.label);
+      }));
+  }
+  const textBlock = el('div', { class:'card', style:{ marginBottom:'12px' }},
+    el('h4', { style:{ marginBottom:'8px' }}, '📝 Твоя работа'),
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginBottom:'8px' }},
+      essay.wordCount + ' слов · сдано ' + (essay.submittedAt ? new Date(essay.submittedAt).toLocaleString('ru-RU', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : '—')),
+    legend,
+    (essay.comments && essay.comments.length)
+      ? el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'6px' }},
+          '💡 Кликни по выделенному фрагменту, чтобы прочитать замечание учителя.')
+      : null,
+    textEl);
+  body.append(textBlock);
+
   if(r.general_comment){
     body.append(el('div', { class:'card', style:{ background:'var(--p-soft)', border:'1px solid var(--p-2)', marginBottom:'10px' }},
       el('h4', null, '💬 Комментарий учителя'),
@@ -4331,30 +4487,37 @@ function modalEssayReview(essayId){
   const wordCount = essay.wordCount != null ? essay.wordCount : countEssayWords(essayText);
   const isCurator = STATE.essayBy === 'curator';
 
-  /* Левая колонка */
+  /* Левая колонка: текст + выделения */
   const leftCol = el('div', null);
+  const essayTextEl = renderEssayWithMarks(essayText, essay.comments || [], { readonly: false });
+  /* Обработка выделения: показываем popup с категорией + комментарием */
+  essayTextEl.addEventListener('mouseup', () => {
+    setTimeout(() => showErrPopup(essay, essayTextEl, essayText), 0);
+  });
+  /* Клик по существующему mark → показ popup с возможностью удалить */
+  essayTextEl.addEventListener('click', ev => {
+    if(ev.target && ev.target.tagName === 'MARK'){
+      const cid = +ev.target.getAttribute('data-id');
+      const c = (essay.comments || []).find(x => x.id === cid);
+      if(c) showExistingCommentPopup(essay, c, ev.target);
+    }
+  });
+
   leftCol.append(
     el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'10px', flexWrap:'wrap' }},
       el('div', { style:{ fontWeight:'700', fontSize:'14px' }}, '✍️ ' + (essay.studentName || 'Ученик')),
       chip('📝 текстовая сдача', 'p'),
       chip(wordCount + ' слов · ' + (wordCount >= 150 ? 'норма' : '< 150 — НЕ ЗАСЧИТЫВАЕТСЯ'),
            wordCount >= 150 ? 'green' : 'red')),
-    el('div', { class:'essay-text', style:{ whiteSpace:'pre-wrap' }}, essayText),
-    el('div', { class:'card', style:{ marginTop:'14px', background:'var(--p-soft)' }},
-      el('h4', null, '🎤 Голосовые комментарии'),
-      el('p', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'10px' }},
-        'Выделите фрагмент текста — рядом появится окошко с кнопкой записи голоса.'),
-      el('button', { class:'btn btn-secondary btn-sm',
-        onclick: ev => {
-          ev.target.classList.add('voice-rec');
-          ev.target.innerHTML = '<span class="pulse"></span>● Идёт запись… (демо)';
-          setTimeout(() => {
-            ev.target.classList.remove('voice-rec');
-            ev.target.classList.add('voice-saved');
-            ev.target.innerHTML = '🎙️ Запись 0:14 ▶';
-          }, 1500);
-        }
-      }, '🎤 Записать голос')));
+    el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
+      '💡 Выделите фрагмент текста, чтобы добавить комментарий-ошибку. Клик по подсветке — посмотреть/удалить.'),
+    essayTextEl,
+    /* Список комментариев */
+    (essay.comments && essay.comments.length)
+      ? el('div', { class:'card', style:{ marginTop:'12px', background:'var(--surface-soft)' }},
+          el('h4', { style:{ marginBottom:'8px' }}, '🏷 Замечания (' + essay.comments.length + ')'),
+          el('div', { class:'err-comments-list' }, essay.comments.map(c => commentItemRow(essay, c))))
+      : null);
 
   /* Правая колонка */
   const rightCol = el('div', null);
@@ -4449,6 +4612,157 @@ function modalEssayReview(essayId){
   return el('div', { class:'modal-bg',
     onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.essayOpen = null; STATE.essayBy = null; STATE.scoresK = {}; STATE.errors = {}; STATE.essayComment = ''; render(); }}
   }, modal);
+}
+
+/* Popup для нового замечания при выделении текста */
+function showErrPopup(essay, container, fullText){
+  /* Удалить уже открытые popup-ы */
+  document.querySelectorAll('.err-popup').forEach(n => n.remove());
+  const sel = window.getSelection();
+  if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+  const range = sel.getRangeAt(0);
+  if(!container.contains(range.startContainer) || !container.contains(range.endContainer)) return;
+
+  const startPos = getCharOffsetIn(container, range.startContainer, range.startOffset);
+  const endPos = getCharOffsetIn(container, range.endContainer, range.endOffset);
+  if(startPos < 0 || endPos < 0 || endPos <= startPos) return;
+  const fragment = fullText.slice(startPos, endPos);
+  if(fragment.length < 1 || fragment.length > 500) return;
+
+  /* Позиция popup-а — под выделенным фрагментом */
+  const rect = range.getBoundingClientRect();
+  const containerRect = container.getBoundingClientRect();
+  const popup = el('div', { class:'err-popup' });
+  /* Привязываем popup к body чтобы не мешать селекту */
+  popup.style.left = Math.max(8, Math.min(window.innerWidth - 360, rect.left)) + 'px';
+  popup.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+  popup.style.position = 'absolute';
+
+  let chosenKind = 'orf';
+  const kindBtns = ERR_KINDS.map(k => el('button', {
+    class: 'kind-btn' + (k.id === chosenKind ? ' active' : ''),
+    style: { background: k.bg, borderColor: k.bg },
+    onclick: ev => {
+      chosenKind = k.id;
+      popup.querySelectorAll('.kind-btn').forEach(b => b.classList.remove('active'));
+      ev.currentTarget.classList.add('active');
+    }
+  }, k.crit + ' ' + k.label));
+
+  const ta = el('textarea', { placeholder: 'Комментарий (например: «нужна запятая перед союзом и»)' });
+  const status = el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, '');
+  const cancelBtn = el('button', { class:'btn btn-secondary btn-sm',
+    onclick: () => popup.remove() }, 'Отмена');
+  const saveBtn = el('button', { class:'btn btn-p btn-sm',
+    onclick: async () => {
+      saveBtn.disabled = true; status.textContent = '⏳';
+      try {
+        const row = await saveEssayComment(essay.id, {
+          fragment, start_pos: startPos, end_pos: endPos, kind: chosenKind, comment: ta.value.trim() || ''
+        });
+        essay.comments = essay.comments || [];
+        if(row) essay.comments.push(row);
+        popup.remove();
+        sel.removeAllRanges();
+        render();
+      } catch(e){
+        status.textContent = '⚠ ' + e.message;
+        saveBtn.disabled = false;
+      }
+    }
+  }, '✓ Сохранить');
+
+  popup.append(
+    el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'6px' }},
+      'Фрагмент: «' + (fragment.length > 60 ? fragment.slice(0, 60) + '…' : fragment) + '»'),
+    el('div', { class:'kinds' }, ...kindBtns),
+    ta,
+    el('div', { class:'row' }, status, cancelBtn, saveBtn));
+  document.body.append(popup);
+  setTimeout(() => ta.focus(), 50);
+
+  /* Закрыть по клику вне */
+  const closer = (ev) => {
+    if(!popup.contains(ev.target) && !container.contains(ev.target)){
+      popup.remove();
+      document.removeEventListener('mousedown', closer);
+    }
+  };
+  setTimeout(() => document.addEventListener('mousedown', closer), 100);
+}
+
+/* Tooltip для ученика — только просмотр замечания */
+function showStudentCommentTooltip(c, markEl){
+  document.querySelectorAll('.err-popup').forEach(n => n.remove());
+  const meta = errKindMeta(c.kind);
+  const rect = markEl.getBoundingClientRect();
+  const popup = el('div', { class:'err-popup', style:{ width:'320px' }});
+  popup.style.left = Math.max(8, Math.min(window.innerWidth - 340, rect.left)) + 'px';
+  popup.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+  popup.append(
+    el('div', { style:{ fontSize:'12px', fontWeight:'700', marginBottom:'4px',
+      padding:'4px 8px', background: meta.bg, borderRadius:'6px', display:'inline-block' }},
+      meta.crit + ' · ' + meta.label),
+    el('div', { style:{ fontSize:'13px', marginTop:'6px', whiteSpace:'pre-wrap' }},
+      c.comment || '(без комментария)'),
+    el('div', { class:'row' },
+      el('button', { class:'btn btn-secondary btn-sm', onclick: () => popup.remove() }, 'Закрыть')));
+  document.body.append(popup);
+  const closer = (ev) => { if(!popup.contains(ev.target)){ popup.remove(); document.removeEventListener('mousedown', closer); }};
+  setTimeout(() => document.addEventListener('mousedown', closer), 100);
+}
+
+/* Popup для просмотра/удаления существующего замечания */
+function showExistingCommentPopup(essay, c, markEl){
+  document.querySelectorAll('.err-popup').forEach(n => n.remove());
+  const meta = errKindMeta(c.kind);
+  const rect = markEl.getBoundingClientRect();
+  const popup = el('div', { class:'err-popup', style:{ width:'320px' }});
+  popup.style.left = Math.max(8, Math.min(window.innerWidth - 340, rect.left)) + 'px';
+  popup.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+  popup.append(
+    el('div', { style:{ fontSize:'12px', fontWeight:'700', marginBottom:'4px',
+      padding:'4px 8px', background: meta.bg, borderRadius:'6px', display:'inline-block' }},
+      meta.crit + ' · ' + meta.label),
+    el('div', { style:{ fontSize:'13px', marginTop:'6px', whiteSpace:'pre-wrap' }},
+      c.comment || '(без комментария)'),
+    el('div', { class:'row' },
+      el('button', { class:'btn btn-secondary btn-sm', onclick: () => popup.remove() }, 'Закрыть'),
+      el('button', { class:'btn btn-secondary btn-sm', style:{ background:'var(--red-soft)', color:'var(--red)' },
+        onclick: async () => {
+          if(!confirm('Удалить замечание?')) return;
+          try {
+            await deleteEssayComment(c.id);
+            essay.comments = (essay.comments || []).filter(x => x.id !== c.id);
+            popup.remove();
+            render();
+          } catch(e){ alert('⚠ ' + e.message); }
+        }}, '🗑 Удалить')));
+  document.body.append(popup);
+  const closer = (ev) => { if(!popup.contains(ev.target)){ popup.remove(); document.removeEventListener('mousedown', closer); }};
+  setTimeout(() => document.addEventListener('mousedown', closer), 100);
+}
+
+/* Строка в списке замечаний */
+function commentItemRow(essay, c){
+  const meta = errKindMeta(c.kind);
+  return el('div', { class:'item' },
+    el('span', { style:{ fontSize:'11px', fontWeight:'700', padding:'2px 6px', background: meta.bg, borderRadius:'5px', whiteSpace:'nowrap' }},
+      meta.crit),
+    el('div', { style:{ flex:1, minWidth:0 }},
+      el('span', { class:'frag' }, '«' + (c.fragment || '') + '»'),
+      el('div', null, c.comment || el('span', { style:{ color:'var(--ink-3)' }}, '(без комментария)'))),
+    el('button', { class:'btn-icon', title:'Удалить',
+      style:{ background:'var(--red-soft)', color:'var(--red)' },
+      onclick: async () => {
+        if(!confirm('Удалить замечание?')) return;
+        try {
+          await deleteEssayComment(c.id);
+          essay.comments = (essay.comments || []).filter(x => x.id !== c.id);
+          render();
+        } catch(e){ alert('⚠ ' + e.message); }
+      }
+    }, '×'));
 }
 
 function sectionBlock(sec, lockK2K3){
