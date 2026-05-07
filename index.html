@@ -1201,17 +1201,18 @@ async function submitEssay(opts){
   return Array.isArray(inserted) ? inserted[0] : inserted;
 }
 
-/* Загрузить фото сочинения в Storage. Возвращает publicUrl. */
+/* Загрузить фото сочинения в Storage. Возвращает publicUrl.
+   Использует отдельный бакет 'essays' (публичный — иначе ученик не может читать своё). */
 async function uploadEssayPhoto(file){
   if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
   const ext = (file.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'jpg'])[1].toLowerCase();
-  const path = 'essays/' + MY_PROFILE.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
-  const { error: upErr } = await sb.storage.from('materials').upload(path, file, {
+  const path = MY_PROFILE.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
+  const { error: upErr } = await sb.storage.from('essays').upload(path, file, {
     cacheControl: '3600', upsert: false,
     contentType: file.type || 'image/jpeg'
   });
   if(upErr) throw new Error('Storage: ' + upErr.message);
-  return sb.storage.from('materials').getPublicUrl(path).data.publicUrl;
+  return sb.storage.from('essays').getPublicUrl(path).data.publicUrl;
 }
 
 /* Кэш сочинений из БД (для учительского/кураторского списка) */
