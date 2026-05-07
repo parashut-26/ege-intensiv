@@ -420,6 +420,7 @@ const STATE = {
   scoresK: {}, errors: {}, essayComment: '', essayVoiceUrl: null,
   studentEssayResultOpen: null,
   sampleOpen: null,
+  sampleEditOpen: null,  // 'new' | id — открыта форма добавления/редактирования образца
   testAnswers: {},
   testChecked: false,
   testShuffle: null,    // если задано — открыт тренажёр случайных пар (число вопросов)
@@ -1251,12 +1252,15 @@ function makeVoiceRecorder(initialUrl, onChange){
     if(observer){ try { observer.disconnect(); } catch(e){} observer = null; }
   };
 
+  let _everMounted = false;
   const refresh = () => {
-    /* Если виджет уже не в DOM — отменяем всё и выходим */
-    if(!document.body.contains(wrap)){
+    /* Первый refresh может быть до append() — это нормально, разрешаем.
+       После того, как виджет хоть раз был в DOM — следим за его удалением. */
+    if(_everMounted && !document.body.contains(wrap)){
       forceAbort();
       return;
     }
+    if(document.body.contains(wrap)) _everMounted = true;
     wrap.innerHTML = '';
     const recBtn = el('button', { type:'button', class: isRecording ? 'btn btn-sm' : 'btn btn-secondary btn-sm',
       style: isRecording ? { background:'var(--red)', color:'#fff' } : {},
@@ -3052,6 +3056,174 @@ function sampleCard(s){
       el('div', { class:'score ' + lvlClass }, s.score + '/' + s.maxScore)),
     el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'10px' }}, s.short),
     el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', fontFamily:'monospace' }}, s.breakdown));
+}
+
+/* =======================================================================
+   ФОРМА ДОБАВЛЕНИЯ / РЕДАКТИРОВАНИЯ ОБРАЗЦА СОЧИНЕНИЯ
+   ======================================================================= */
+function modalEssaySampleEdit(){
+  const isNew = STATE.sampleEditOpen === 'new';
+  const existing = isNew ? null : SAMPLES.find(x => x.id === STATE.sampleEditOpen);
+  const close = () => { STATE.sampleEditOpen = null; render(); };
+
+  /* Поля */
+  const inAuthor = el('input', { type:'text', placeholder:'Автор (например: София Малинина или Ученик ФИПИ #2)',
+    style:{ width:'100%', padding:'10px', borderRadius:'10px', border:'1px solid var(--border-2)' }});
+  if(existing && existing.author) inAuthor.value = existing.author;
+
+  const inTitle = el('input', { type:'text', placeholder:'Тема / проблема исходного текста',
+    style:{ width:'100%', padding:'10px', borderRadius:'10px', border:'1px solid var(--border-2)' }});
+  if(existing && existing.title) inTitle.value = existing.title;
+
+  const inShort = el('input', { type:'text', placeholder:'Короткое описание (одна строка): чем хороша/плоха работа',
+    style:{ width:'100%', padding:'10px', borderRadius:'10px', border:'1px solid var(--border-2)' }});
+  if(existing && existing.short) inShort.value = existing.short;
+
+  const inText = el('textarea', { placeholder:'Текст работы. Поддерживается **жирный** и переводы строк.',
+    style:{ width:'100%', minHeight:'180px', padding:'12px', borderRadius:'10px', border:'1px solid var(--border-2)',
+            fontFamily:'inherit', fontSize:'14px', lineHeight:'1.5', resize:'vertical' }},
+    existing && existing.text || '');
+
+  /* Поля баллов К1-К10 */
+  const kInputs = {};
+  CRIT.forEach(c => {
+    kInputs[c.id] = el('input', { type:'number', min:'0', max: String(c.max),
+      style:{ width:'56px', padding:'6px', borderRadius:'8px', border:'1px solid var(--border-2)', textAlign:'center', fontWeight:'700' }});
+    if(existing && existing.kBreakdown && existing.kBreakdown[c.id] != null){
+      kInputs[c.id].value = existing.kBreakdown[c.id];
+    } else {
+      kInputs[c.id].value = c.max;
+    }
+  });
+  const totalEl = el('span', { style:{ fontWeight:'800', fontSize:'18px' }});
+  const recalcTotal = () => {
+    let t = 0;
+    CRIT.forEach(c => { t += +kInputs[c.id].value || 0; });
+    totalEl.textContent = t + ' / 22';
+  };
+  CRIT.forEach(c => kInputs[c.id].addEventListener('input', recalcTotal));
+  recalcTotal();
+
+  const kBlock = el('div', { class:'card', style:{ background:'var(--surface-soft)', marginBottom:'12px' }},
+    el('h4', { style:{ marginBottom:'10px' }}, '📊 Баллы по критериям'));
+  ['Содержание', 'Речь', 'Грамотность'].forEach(sec => {
+    kBlock.append(el('div', { style:{ fontSize:'11px', textTransform:'uppercase', letterSpacing:'.05em', color:'var(--ink-3)', fontWeight:'700', marginTop:'8px', marginBottom:'4px' }}, sec));
+    const row = el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(180px, 1fr))', gap:'6px' }});
+    CRIT.filter(c => c.sec === sec).forEach(c => {
+      row.append(el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'6px 10px', background:'#fff', borderRadius:'8px', border:'1px solid var(--border)' }},
+        el('span', { style:{ fontSize:'12px' }}, c.id + ' · max ' + c.max),
+        kInputs[c.id]));
+    });
+    kBlock.append(row);
+  });
+  kBlock.append(el('div', { style:{ marginTop:'10px', textAlign:'right', fontSize:'12px', color:'var(--ink-2)' }}, 'Итого: ', totalEl));
+
+  const inComments = el('textarea', { placeholder:'Разбор экспертов: что хорошо, что плохо, что разобрать с учениками. **Жирный** работает.',
+    style:{ width:'100%', minHeight:'150px', padding:'12px', borderRadius:'10px', border:'1px solid var(--border-2)',
+            fontFamily:'inherit', fontSize:'13px', lineHeight:'1.6', resize:'vertical' }},
+    existing && existing.comments || '');
+
+  /* Загрузка фото-страниц */
+  const photosState = (existing && existing.photoUrls) ? existing.photoUrls.slice() : [];
+  const photosEl = el('div', { style:{ display:'flex', gap:'10px', flexWrap:'wrap', marginTop:'8px' }});
+  const photoStatus = el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', minHeight:'18px' }}, '');
+  const renderPhotos = () => {
+    photosEl.innerHTML = '';
+    photosState.forEach((url, idx) => {
+      photosEl.append(el('div', { class:'photo-thumb' },
+        el('img', { src: url }),
+        el('button', { class:'x', onclick: () => { photosState.splice(idx, 1); renderPhotos(); }}, '×')));
+    });
+  };
+  renderPhotos();
+  const fileInput = el('input', { type:'file', accept:'image/*', multiple:'multiple', style:{ display:'none' }});
+  fileInput.addEventListener('change', async ev => {
+    const files = Array.from(ev.target.files || []);
+    if(!files.length) return;
+    photoStatus.textContent = '⏳ Заливаем ' + files.length + '…';
+    photoStatus.style.color = 'var(--ink-3)';
+    let ok = 0, fail = 0;
+    for(const f of files){
+      try { photosState.push(await uploadEssayPhoto(f)); ok++; renderPhotos(); }
+      catch(e){ console.error(e); fail++; }
+    }
+    photoStatus.textContent = '✓ Загружено: ' + ok + (fail ? ' · ⚠ ' + fail : '');
+    photoStatus.style.color = fail ? 'var(--red)' : 'var(--green)';
+    fileInput.value = '';
+  });
+
+  const status = el('div', { style:{ fontSize:'12px', minHeight:'16px' }}, '');
+  const saveBtn = el('button', { class:'btn btn-p',
+    onclick: async () => {
+      const author = inAuthor.value.trim();
+      const title = inTitle.value.trim();
+      const text = inText.value.trim();
+      if(!title){ status.style.color = 'var(--red)'; status.textContent = 'Тема обязательна'; return; }
+      if(!text && !photosState.length){ status.style.color = 'var(--red)'; status.textContent = 'Нужен текст или хотя бы одно фото'; return; }
+      const kBreakdown = {};
+      let total = 0;
+      CRIT.forEach(c => { const v = +kInputs[c.id].value || 0; kBreakdown[c.id] = v; total += v; });
+      const level = total >= 18 ? 'high' : total >= 12 ? 'medium' : 'low';
+      const payload = {
+        author_name: author || null,
+        title: title,
+        text: text || null,
+        photo_urls: photosState.length ? photosState : null,
+        score: total,
+        max_score: 22,
+        level: level,
+        short: inShort.value.trim() || null,
+        k_breakdown: kBreakdown,
+        comments: inComments.value.trim() || null
+      };
+      saveBtn.disabled = true; status.style.color = 'var(--ink-3)'; status.textContent = '⏳ Сохраняем…';
+      try {
+        if(isNew){
+          await restRequest('POST', '/essay_samples', payload, { prefer: 'return=minimal' });
+        } else {
+          await restRequest('PATCH', '/essay_samples?id=eq.' + existing.id, payload, { prefer: 'return=minimal' });
+        }
+        await loadEssaySamplesFromDb();
+        STATE.sampleEditOpen = null;
+        showToast('✓ Образец сохранён · ' + total + '/22');
+        render();
+      } catch(e){
+        console.error(e);
+        status.style.color = 'var(--red)'; status.textContent = '⚠ ' + e.message;
+        saveBtn.disabled = false;
+      }
+    }
+  }, isNew ? '✓ Создать образец' : '✓ Сохранить изменения');
+
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        isNew ? 'Новый образец' : 'Редактировать образец'),
+      el('h2', { style:{ marginTop:'4px' }}, isNew ? '➕ Добавить образец сочинения' : '✏️ ' + (existing.author || 'Образец'))),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const body = el('div', { class:'modal-body' },
+    el('h4', null, '📝 Автор и тема'),
+    el('div', { style:{ display:'flex', flexDirection:'column', gap:'8px', marginTop:'8px', marginBottom:'14px' }},
+      inAuthor, inTitle, inShort),
+    el('h4', null, '🖋 Текст работы'),
+    el('div', { style:{ marginTop:'8px', marginBottom:'14px' }}, inText),
+    el('h4', null, '📸 Фото-страницы (опционально)'),
+    el('div', { style:{ marginTop:'8px', marginBottom:'14px' }},
+      el('button', { class:'btn btn-secondary btn-sm', onclick: () => fileInput.click() }, '📷 Добавить фото'),
+      fileInput, photoStatus, photosEl),
+    kBlock,
+    el('h4', null, '🎓 Разбор экспертов'),
+    el('div', { style:{ marginTop:'8px' }}, inComments));
+
+  const foot = el('div', { class:'modal-foot' },
+    status,
+    el('div', { style:{ display:'flex', gap:'8px' }},
+      el('button', { class:'btn btn-secondary', onclick: close }, 'Отмена'),
+      saveBtn));
+
+  return el('div', { class:'modal-bg', onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }},
+    el('div', { class:'modal', style:{ maxWidth:'820px' }}, head, body, foot));
 }
 
 /* =======================================================================
@@ -5812,7 +5984,7 @@ function viewContentSamples(){
           onclick: () => showToast('Импорт сочинений из PDF (массово)')
         }, '⬆ Импорт из PDF'),
         el('button', { class:'btn btn-y',
-          onclick: () => showToast('Откроется форма: текст + К1–К10 + комментарий')
+          onclick: () => { STATE.sampleEditOpen = 'new'; render(); }
         }, '➕ Добавить образец'))));
 
   SAMPLES.forEach(s => {
@@ -5829,6 +6001,9 @@ function viewContentSamples(){
           s._db ? el('button', { class:'btn-icon', title:'Открыть',
             onclick: ev => { ev.stopPropagation(); STATE.sampleOpen = s.id; render(); }
           }, '👁') : null,
+          s._db ? el('button', { class:'btn-icon', title:'Редактировать',
+            onclick: ev => { ev.stopPropagation(); STATE.sampleEditOpen = s.id; render(); }
+          }, '✏️') : null,
           s._db ? el('button', { class:'btn-icon', style:{ color:'var(--red)' }, title:'Удалить',
             onclick: async ev => {
               ev.stopPropagation();
@@ -6613,6 +6788,7 @@ function render(){
   if(STATE.essayDraftOpen) root.append(modalEssayDraft());
   if(STATE.studentEssayResultOpen != null) root.append(modalEssayResult(STATE.studentEssayResultOpen));
   if(STATE.sampleOpen != null) root.append(modalEssaySample(STATE.sampleOpen));
+  if(STATE.sampleEditOpen != null) root.append(modalEssaySampleEdit());
   if(STATE.chatOpen && STATE.view !== 'login') root.append(chatPanel(STATE.view));
   if(STATE.toast) root.append(el('div', { class:'toast' }, STATE.toast));
 
