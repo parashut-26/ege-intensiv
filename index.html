@@ -5302,30 +5302,50 @@ function modalOnboardingName(){
 }
 
 function modalNewStudent(){
+  const close = () => { STATE.newStudentForm = false; render(); };
+  const inName = el('input', { placeholder:'Имя и фамилия',
+    style:{ padding:'12px 14px', borderRadius:'12px', border:'1px solid var(--border-2)' }});
+  const inEmail = el('input', { type:'email', placeholder:'e-mail',
+    style:{ padding:'12px 14px', borderRadius:'12px', border:'1px solid var(--border-2)' }});
+  const status = el('div', { style:{ fontSize:'12px', minHeight:'16px' }}, '');
+  const saveBtn = el('button', { class:'btn btn-y',
+    onclick: async () => {
+      const fullName = inName.value.trim();
+      const email = inEmail.value.trim().toLowerCase();
+      if(!fullName){ status.style.color = 'var(--red)'; status.textContent = 'Нужно имя'; return; }
+      if(!email.includes('@')){ status.style.color = 'var(--red)'; status.textContent = 'Нужен корректный e-mail'; return; }
+      saveBtn.disabled = true;
+      status.style.color = 'var(--ink-3)'; status.textContent = '⏳ Создаём профиль…';
+      try {
+        const result = await importStudents([{ full_name: fullName, email }]);
+        const r = result.results[0];
+        if(r.status === 'error') throw new Error(r.message || 'Не удалось создать');
+        await loadStudentsFromDb();
+        STATE.newStudentForm = false;
+        showToast('✓ ' + fullName + ' добавлен' + (r.status === 'updated' ? ' (обновлён)' : ''));
+        render();
+      } catch(e){
+        status.style.color = 'var(--red)'; status.textContent = '⚠ ' + e.message;
+        saveBtn.disabled = false;
+      }
+    }
+  }, 'Создать');
+
   return el('div', { class:'modal-bg',
-    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.newStudentForm = false; render(); }}
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
   },
     el('div', { class:'modal', style:{ maxWidth:'460px' }},
       el('div', { class:'modal-head' },
-        el('h3', null, '＋ Добавить ученика «свой»'),
-        el('button', { class:'x', onclick: () => { STATE.newStudentForm = false; render(); }}, '×')),
+        el('h3', null, '＋ Добавить ученика'),
+        el('button', { class:'x', onclick: close }, '×')),
       el('div', { class:'modal-body' },
         el('p', { style:{ color:'var(--ink-2)', marginBottom:'12px', fontSize:'13px' }},
-          'Введите имя и e-mail. На указанную почту придёт ссылка для входа. Аккаунт сразу активен — без одобрения.'),
+          'Введите имя и e-mail. После сохранения ученик сможет зайти на платформу через «Имя + e-mail».'),
         el('div', { style:{ display:'flex', flexDirection:'column', gap:'12px' }},
-          el('input', { placeholder:'Имя и фамилия',
-            style:{ padding:'12px 14px', borderRadius:'12px', border:'1px solid var(--border-2)' }}),
-          el('input', { type:'email', placeholder:'e-mail',
-            style:{ padding:'12px 14px', borderRadius:'12px', border:'1px solid var(--border-2)' }}),
-          el('input', { type:'number', placeholder:'Сумма оплаты, ₽ (можно позже)',
-            style:{ padding:'12px 14px', borderRadius:'12px', border:'1px solid var(--border-2)' }}))),
+          inName, inEmail, status)),
       el('div', { class:'modal-foot' },
-        el('button', { class:'btn btn-secondary',
-          onclick: () => { STATE.newStudentForm = false; render(); }
-        }, 'Отмена'),
-        el('button', { class:'btn btn-y',
-          onclick: () => { STATE.newStudentForm = false; showToast('Приглашение отправлено на почту 🐝'); }
-        }, 'Создать и пригласить'))));
+        el('button', { class:'btn btn-secondary', onclick: close }, 'Отмена'),
+        saveBtn)));
 }
 
 /* =======================================================================
