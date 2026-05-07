@@ -369,7 +369,18 @@ h1{font-size:28px;line-height:1.15} h2{font-size:22px} h3{font-size:17px} h4{fon
 /* =======================================================================
    ПОДКЛЮЧЕНИЕ К SUPABASE
    ======================================================================= */
-const SUPABASE_URL = 'https://hyczawwuehrqsqqosgub.supabase.co';
+/* Используем api.zebrus.online (Cloudflare Worker proxy) — supabase.co режется
+   мобильными операторами и некоторыми домашними провайдерами в РФ.
+   Worker пробрасывает все запросы на настоящий hyczawwuehrqsqqosgub.supabase.co. */
+const SUPABASE_URL = 'https://api.zebrus.online';
+const SUPABASE_DIRECT_URL = 'https://hyczawwuehrqsqqosgub.supabase.co';
+
+/* Подменяет прямой URL Supabase на наш прокси-домен. Нужно для отображения
+   старых ссылок (photo_urls, voice_url), сохранённых до перехода. */
+function proxifyUrl(u){
+  if(!u || typeof u !== 'string') return u;
+  return u.replace(SUPABASE_DIRECT_URL, SUPABASE_URL);
+}
 const SUPABASE_KEY = 'sb_publishable_lDyKoPpFywtZg3fG-SQS8Q_AxqsvljL';
 
 /* Клиент создаётся при загрузке страницы. Если SDK не загрузился —
@@ -1568,7 +1579,7 @@ function makeVoiceRecorder(initialUrl, onChange){
       wrap.append(el('span', { style:{ color:'var(--red)', fontSize:'12px', fontWeight:'700' }},
         '● ' + Math.floor(sec/60) + ':' + String(sec%60).padStart(2,'0')));
     } else if(currentUrl){
-      wrap.append(el('audio', { controls:'controls', src: currentUrl, style:{ height:'32px', maxWidth:'180px' }}));
+      wrap.append(el('audio', { controls:'controls', src: proxifyUrl(currentUrl), style:{ height:'32px', maxWidth:'180px' }}));
       wrap.append(el('button', { type:'button', class:'btn-icon', title:'Убрать запись',
         style:{ background:'var(--red-soft)', color:'var(--red)' },
         onclick: () => { setUrl(null); refresh(); }
@@ -1761,7 +1772,7 @@ function renderPhotosWithPins(photos, comments, opts){
   photos.forEach((url, idx) => {
     const pageWrap = el('div', { class: 'essay-photo' + (opts.readonly ? '' : ' editable') });
     pageWrap.dataset.page = String(idx);
-    const img = el('img', { src: url, alt: 'фото ' + (idx+1) });
+    const img = el('img', { src: proxifyUrl(url), alt: 'фото ' + (idx+1) });
     img.addEventListener('dragstart', ev => ev.preventDefault());
     pageWrap.append(img,
       el('span', { class:'page-num' }, 'стр. ' + (idx + 1)));
@@ -3638,7 +3649,7 @@ function modalEssaySampleEdit(){
     photosEl.innerHTML = '';
     photosState.forEach((url, idx) => {
       photosEl.append(el('div', { class:'photo-thumb' },
-        el('img', { src: url }),
+        el('img', { src: proxifyUrl(url) }),
         el('button', { class:'x', onclick: () => { photosState.splice(idx, 1); renderPhotos(); }}, '×')));
     });
   };
@@ -5055,7 +5066,7 @@ function modalEssayDraft(){
     photoList.innerHTML = '';
     STATE.essayDraftPhotos.forEach((p, idx) => {
       const thumb = el('div', { class:'photo-thumb' },
-        el('img', { src: p.url, alt: 'фото ' + (idx+1) }),
+        el('img', { src: proxifyUrl(p.url), alt: 'фото ' + (idx+1) }),
         el('button', { class:'x', title:'Удалить', onclick: () => {
           STATE.essayDraftPhotos.splice(idx, 1);
           renderThumbs();
@@ -6078,7 +6089,7 @@ function showStudentCommentTooltip(c, markEl){
     vu
       ? el('div', { style:{ marginTop:'8px' }},
           el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'4px' }}, '🎤 Голос учителя:'),
-          el('audio', { controls:'controls', src: vu, style:{ width:'100%', height:'36px' }}))
+          el('audio', { controls:'controls', src: proxifyUrl(vu), style:{ width:'100%', height:'36px' }}))
       : null,
     el('div', { class:'row' },
       el('button', { class:'btn btn-secondary btn-sm', onclick: () => popup.remove() }, 'Закрыть')));
@@ -6105,7 +6116,7 @@ function showExistingCommentPopup(essay, c, markEl){
       txtT || (vuT ? '' : '(без комментария)')),
     vuT
       ? el('div', { style:{ marginTop:'8px' }},
-          el('audio', { controls:'controls', src: vuT, style:{ width:'100%', height:'36px' }}))
+          el('audio', { controls:'controls', src: proxifyUrl(vuT), style:{ width:'100%', height:'36px' }}))
       : null,
     el('div', { class:'row' },
       el('button', { class:'btn btn-secondary btn-sm', onclick: () => popup.remove() }, 'Закрыть'),
