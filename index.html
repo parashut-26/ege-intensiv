@@ -3737,33 +3737,36 @@ function essayRow(e, isCurator){
     }
   }
 
+  const openReview = async () => {
+    STATE.essayOpen = e.id;
+    STATE.essayBy = isCurator ? 'curator' : 'teacher';
+    STATE.scoresK = {};
+    STATE.errors = {};
+    STATE.essayComment = '';
+    if(typeof e.id === 'number' && sb){
+      try {
+        const [r, cmts] = await Promise.all([loadEssayReview(e.id), loadEssayComments(e.id)]);
+        if(r){
+          ['k1','k2','k3','k4','k5','k6','k7','k8','k9','k10'].forEach(k => {
+            if(r[k] != null) STATE.scoresK[k.toUpperCase()] = r[k];
+          });
+          ['k7_errors','k8_errors','k9_errors','k10_errors'].forEach(k => {
+            if(r[k] != null) STATE.errors[k.replace('_errors','').toUpperCase()] = r[k];
+          });
+          if(r.general_comment) STATE.essayComment = r.general_comment;
+        }
+        e.comments = cmts;
+      } catch(err){ console.warn(err); }
+    }
+    render();
+  };
+  /* Только для проверенных работ — показ как у ученика */
+  const canPreviewAsStudent = e.status === 'done' || e.status === 'pre_checked';
+
   return el('div', {
     class:'card',
     style:{ background:'var(--surface-soft)', padding:'12px 14px', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px', gap:'10px' },
-    onclick: async () => {
-      STATE.essayOpen = e.id;
-      STATE.essayBy = isCurator ? 'curator' : 'teacher';
-      STATE.scoresK = {};
-      STATE.errors = {};
-      STATE.essayComment = '';
-      /* Подтянем существующую review + комментарии-выделения */
-      if(typeof e.id === 'number' && sb){
-        try {
-          const [r, cmts] = await Promise.all([loadEssayReview(e.id), loadEssayComments(e.id)]);
-          if(r){
-            ['k1','k2','k3','k4','k5','k6','k7','k8','k9','k10'].forEach(k => {
-              if(r[k] != null) STATE.scoresK[k.toUpperCase()] = r[k];
-            });
-            ['k7_errors','k8_errors','k9_errors','k10_errors'].forEach(k => {
-              if(r[k] != null) STATE.errors[k.replace('_errors','').toUpperCase()] = r[k];
-            });
-            if(r.general_comment) STATE.essayComment = r.general_comment;
-          }
-          e.comments = cmts;
-        } catch(err){ console.warn(err); }
-      }
-      render();
-    }
+    onclick: openReview
   },
     el('div', { style:{ display:'flex', gap:'10px', alignItems:'center', minWidth:0, flex:1 }},
       el('span', { style:{ fontSize:'20px' }}, '📝'),
@@ -3773,7 +3776,21 @@ function essayRow(e, isCurator){
           wcWarn),
         el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }},
           preview + (when ? ' · ' + when : '') + (e.preBy ? ' · 🤝 София: ' + e.preScore + '/22' : '')))),
-    stChip);
+    el('div', { style:{ display:'flex', gap:'6px', alignItems:'center' }},
+      stChip,
+      canPreviewAsStudent
+        ? el('button', { class:'btn-icon', title:'Посмотреть как ученик',
+            style:{ background:'var(--p-soft)', color:'var(--p)' },
+            onclick: async (ev) => {
+              ev.stopPropagation();
+              if(typeof e.id === 'number' && sb && !e.comments){
+                try { e.comments = await loadEssayComments(e.id); }
+                catch(err){ e.comments = []; }
+              }
+              STATE.studentEssayResultOpen = e.id;
+              render();
+            }}, '👁')
+        : null));
 }
 
 /* =======================================================================
