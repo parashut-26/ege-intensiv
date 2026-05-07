@@ -1549,10 +1549,25 @@ function getCharOffsetIn(root, node, offset){
 async function loadEssayComments(essayId){
   if(!sb) return [];
   try {
-    const arr = await restRequest('GET', '/essay_comments?essay_id=eq.' + encodeURIComponent(essayId) + '&select=*&order=start_pos.asc');
-    return Array.isArray(arr) ? arr : [];
+    /* Без order — иначе для фото-комментариев (start_pos = null) PostgREST может выдать NULLS-проблемы.
+       Сортируем уже на клиенте: сначала текстовые по start_pos, потом фото-пины по странице/y. */
+    const arr = await restRequest('GET', '/essay_comments?essay_id=eq.' + encodeURIComponent(essayId) + '&select=*');
+    if(!Array.isArray(arr)) return [];
+    arr.sort((a, b) => {
+      const aHasText = a.start_pos != null;
+      const bHasText = b.start_pos != null;
+      if(aHasText && !bHasText) return -1;
+      if(!aHasText && bHasText) return 1;
+      if(aHasText) return a.start_pos - b.start_pos;
+      const ap = (a.photo_anchor && a.photo_anchor.page) || 0;
+      const bp = (b.photo_anchor && b.photo_anchor.page) || 0;
+      if(ap !== bp) return ap - bp;
+      return ((a.photo_anchor && a.photo_anchor.y) || 0) - ((b.photo_anchor && b.photo_anchor.y) || 0);
+    });
+    console.log('✓ Замечаний загружено для сочинения ' + essayId + ': ' + arr.length);
+    return arr;
   } catch(e){
-    console.warn('Не удалось загрузить комментарии:', e.message);
+    console.warn('✗ Не удалось загрузить комментарии:', e.message);
     return [];
   }
 }
