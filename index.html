@@ -387,6 +387,7 @@ const STATE = {
   theoryOpen: null,        // номер задания
   attendanceOpen: false,   // открыта модалка посещаемости
   scoresK: {}, errors: {}, essayComment: '',
+  studentEssayResultOpen: null,
   testAnswers: {},
   testChecked: false,
   testShuffle: null,    // если задано — открыт тренажёр случайных пар (число вопросов)
@@ -1171,19 +1172,28 @@ async function loadEssaysFromDb(){
   try {
     /* Берём сочинения и подтягиваем имя ученика. У essays три FK к profiles
        (student_id, pre_checked_by, finalized_by) — указываем явно через !essays_student_id_fkey. */
-    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,word_count,status,submitted_at,format,student:profiles!essays_student_id_fkey(full_name,email)&order=submitted_at.desc&limit=200');
+    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,word_count,status,submitted_at,format,student:profiles!essays_student_id_fkey(full_name,email),review:essay_reviews(total,general_comment,is_pre_check,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10)&order=submitted_at.desc&limit=200');
     if(Array.isArray(arr)){
-      DB_ESSAYS = arr.map(e => ({
-        id: e.id,
-        studentId: e.student_id,
-        studentName: (e.student && e.student.full_name) || (e.student && e.student.email) || 'Ученик',
-        studentEmail: e.student && e.student.email,
-        text: e.body_text,
-        wordCount: e.word_count,
-        status: e.status,
-        submittedAt: e.submitted_at,
-        format: e.format
-      }));
+      DB_ESSAYS = arr.map(e => {
+        const r = e.review && (Array.isArray(e.review) ? e.review[0] : e.review);
+        const obj = {
+          id: e.id,
+          studentId: e.student_id,
+          studentName: (e.student && e.student.full_name) || (e.student && e.student.email) || 'Ученик',
+          studentEmail: e.student && e.student.email,
+          text: e.body_text,
+          wordCount: e.word_count,
+          status: e.status,
+          submittedAt: e.submitted_at,
+          format: e.format
+        };
+        if(r){
+          obj.review = r;
+          if(r.is_pre_check) obj.preScore = r.total;
+          else { obj.finalScore = r.total; obj.finalComment = r.general_comment; }
+        }
+        return obj;
+      });
       console.log('✓ Сочинения загружены: ' + DB_ESSAYS.length);
     }
   } catch(e){
@@ -2504,10 +2514,26 @@ function taskAction(t, locked){
     return el('button', { class:'btn btn-y btn-sm',
       onclick: () => { STATE.testOpen = 4; STATE.testAnswers = {}; STATE.testChecked = false; render(); }
     }, '⚡ Пройти');
-  if(t.kind === 'essay')
+  if(t.kind === 'essay'){
+    /* Уже сдал? Тогда кнопка меняется по статусу */
+    const myId = MY_PROFILE && MY_PROFILE.id;
+    const myEssay = myId ? DB_ESSAYS.find(x => x.studentId === myId) : null;
+    if(myEssay){
+      if(myEssay.status === 'done'){
+        return el('button', { class:'btn btn-p btn-sm',
+          onclick: () => { STATE.studentEssayResultOpen = myEssay.id; render(); }
+        }, '🐝 Результат: ' + (myEssay.finalScore != null ? myEssay.finalScore + '/22' : 'смотреть'));
+      }
+      if(myEssay.status === 'pre_checked')
+        return chip('🤝 куратор проверил', 'teal');
+      if(myEssay.status === 'in_progress')
+        return chip('📝 учитель проверяет', 'warn');
+      return chip('📝 на проверке', 'p');
+    }
     return el('button', { class:'btn btn-p btn-sm',
       onclick: () => { STATE.essayDraftOpen = true; render(); }
     }, '✍️ Сдать');
+  }
   if(t.kind === 'webinar')
     return el('button', { class:'btn btn-secondary btn-sm',
       onclick: () => showToast('🎯 Засчитано как «Я на уроке» (+3 🐝)')
@@ -3430,10 +3456,10 @@ function weakTopicRow(t){
 
 function essayRow(e, isCurator){
   let stChip;
-  if(e.status === 'new') stChip = chip('новое', 'red');
+  if(e.status === 'new' || e.status === 'submitted') stChip = chip('новое', 'red');
   else if(e.status === 'in_progress') stChip = chip('в работе', 'warn');
-  else if(e.status === 'pre_checked') stChip = chip('🤝 проверено куратором', 'teal');
-  else stChip = chip('готово', 'green');
+  else if(e.status === 'pre_checked') stChip = chip('🤝 куратор: ' + (e.preScore != null ? e.preScore + '/22' : 'проверено'), 'teal');
+  else stChip = chip('✓ ' + (e.finalScore != null ? e.finalScore + '/22' : 'готово'), 'green');
 
   /* Превью: для реальных DB-сочинений берём первые 80 символов body_text;
      для моков — text + when. */
@@ -3845,6 +3871,58 @@ function modalEssayDraft(){
   return el('div', { class:'modal-bg',
     onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
   }, el('div', { class:'modal', style:{ maxWidth:'780px' }}, head, body, foot));
+}
+
+/* =======================================================================
+   УЧЕНИК · РЕЗУЛЬТАТ ПРОВЕРКИ СОЧИНЕНИЯ (К1–К10 + комментарий учителя)
+   ======================================================================= */
+function modalEssayResult(essayId){
+  const essay = DB_ESSAYS.find(e => e.id === essayId);
+  if(!essay || !essay.review) return null;
+  const r = essay.review;
+  const close = () => { STATE.studentEssayResultOpen = null; render(); };
+
+  /* Список баллов по К1-К10 */
+  const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'6px', marginTop:'10px' }});
+  CRIT.forEach(c => {
+    const v = r[c.id.toLowerCase()];
+    const sec = c.sec;
+    const colorMap = { 'Содержание':'var(--p-soft)', 'Речь':'var(--y-soft)', 'Грамотность':'var(--green-soft)' };
+    list.append(el('div', {
+      style:{ display:'flex', justifyContent:'space-between', alignItems:'center',
+              padding:'10px 12px', background:colorMap[sec] || 'var(--surface-soft)', borderRadius:'10px' }
+    },
+      el('div', null,
+        el('div', { style:{ fontWeight:'700', fontSize:'13px' }}, c.id + ' · ' + c.name),
+        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, sec)),
+      el('div', { style:{ fontWeight:'800', fontSize:'15px' }}, (v != null ? v : 0) + ' / ' + c.max)));
+  });
+
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        'Результат проверки · сочинение'),
+      el('h2', { style:{ marginTop:'4px' }}, '🐝 ' + (r.total != null ? r.total : 0) + ' / 22 баллов')),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const body = el('div', { class:'modal-body' });
+  if(r.general_comment){
+    body.append(el('div', { class:'card', style:{ background:'var(--p-soft)', border:'1px solid var(--p-2)', marginBottom:'10px' }},
+      el('h4', null, '💬 Комментарий учителя'),
+      el('p', { style:{ marginTop:'6px', whiteSpace:'pre-wrap', lineHeight:'1.5', fontSize:'14px' }}, r.general_comment)));
+  }
+  body.append(
+    el('h4', { style:{ marginTop:'4px' }}, '📊 Баллы по критериям'),
+    list);
+
+  const foot = el('div', { class:'modal-foot' },
+    el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }},
+      'Оценка по критериям ФИПИ К1–К10'),
+    el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть'));
+
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+  }, el('div', { class:'modal', style:{ maxWidth:'620px' }}, head, body, foot));
 }
 
 function modalOnboardingName(){
@@ -4297,9 +4375,8 @@ function modalEssayReview(essayId){
       el('textarea', {
         placeholder: isCurator ? 'Куратор: ваш предварительный комментарий — учитель сможет его дополнить.' : 'Аня, отличная работа над комментарием…',
         style:{ width:'100%', padding:'10px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'80px', resize:'vertical', marginTop:'8px' },
-        value: STATE.essayComment || '',
         oninput: ev => { STATE.essayComment = ev.target.value; }
-      }),
+      }, STATE.essayComment || ''),
       el('button', { class:'btn btn-secondary btn-sm', style:{ marginTop:'8px' },
         onclick: () => showToast('Запись голоса для общего комментария')
       }, '🎤 Записать голос')));
@@ -5575,6 +5652,7 @@ function render(){
   if(STATE.variantMode) root.append(modalVariantBuilder());
   if(STATE.showOnboarding) root.append(modalOnboarding());
   if(STATE.essayDraftOpen) root.append(modalEssayDraft());
+  if(STATE.studentEssayResultOpen != null) root.append(modalEssayResult(STATE.studentEssayResultOpen));
   if(STATE.chatOpen && STATE.view !== 'login') root.append(chatPanel(STATE.view));
   if(STATE.toast) root.append(el('div', { class:'toast' }, STATE.toast));
 
