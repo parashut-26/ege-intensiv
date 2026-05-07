@@ -1355,6 +1355,8 @@ async function uploadEssayPhoto(file){
 
 /* Кэш сочинений из БД (для учительского/кураторского списка) */
 let DB_ESSAYS = [];
+/* Отдельный кэш замечаний — по essay_id. Не теряется при перезагрузке DB_ESSAYS. */
+const ESSAY_COMMENTS_CACHE = {};
 
 async function loadEssaysFromDb(){
   if(!sb) return;
@@ -2961,8 +2963,12 @@ function taskAction(t, locked){
       if(myEssay.status === 'done'){
         primary = el('button', { class:'btn btn-p btn-sm',
           onclick: async () => {
-            if(typeof myEssay.id === 'number' && sb && !myEssay.comments){
-              try { myEssay.comments = await loadEssayComments(myEssay.id); }
+            if(typeof myEssay.id === 'number' && sb && !ESSAY_COMMENTS_CACHE[myEssay.id]){
+              try {
+                const arr = await loadEssayComments(myEssay.id);
+                myEssay.comments = arr;
+                ESSAY_COMMENTS_CACHE[myEssay.id] = arr;
+              }
               catch(e){ myEssay.comments = []; }
             }
             STATE.studentEssayResultOpen = myEssay.id;
@@ -4220,6 +4226,7 @@ function essayRow(e, isCurator){
           if(r.voice_url) STATE.essayVoiceUrl = r.voice_url;
         }
         e.comments = cmts;
+        ESSAY_COMMENTS_CACHE[e.id] = cmts;
       } catch(err){ console.warn(err); }
     }
     render();
@@ -4247,8 +4254,12 @@ function essayRow(e, isCurator){
             style:{ background:'var(--p-soft)', color:'var(--p)' },
             onclick: async (ev) => {
               ev.stopPropagation();
-              if(typeof e.id === 'number' && sb && !e.comments){
-                try { e.comments = await loadEssayComments(e.id); }
+              if(typeof e.id === 'number' && sb && !ESSAY_COMMENTS_CACHE[e.id]){
+                try {
+                  const arr = await loadEssayComments(e.id);
+                  e.comments = arr;
+                  ESSAY_COMMENTS_CACHE[e.id] = arr;
+                }
                 catch(err){ e.comments = []; }
               }
               STATE.studentEssayResultOpen = e.id;
@@ -4708,26 +4719,29 @@ function modalEssayResult(essayId){
 
   /* Полный текст или фото работы с замечаниями */
   const isPhotoEssay = essay.format === 'photo';
+  /* Берём из единого кэша, чтобы не зависеть от ссылки на старый объект */
+  if(!essay.comments && ESSAY_COMMENTS_CACHE[essay.id]) essay.comments = ESSAY_COMMENTS_CACHE[essay.id];
+  const commentsForView = ESSAY_COMMENTS_CACHE[essay.id] || essay.comments || [];
   let bodyEl;
   if(isPhotoEssay){
-    bodyEl = renderPhotosWithPins(essay.photoUrls || [], essay.comments || [], {
+    bodyEl = renderPhotosWithPins(essay.photoUrls || [], commentsForView, {
       readonly: true,
       onPinClick: (c, pinEl) => showStudentCommentTooltip(c, pinEl)
     });
   } else {
-    bodyEl = renderEssayWithMarks(essay.text || '', essay.comments || [], { readonly: true });
+    bodyEl = renderEssayWithMarks(essay.text || '', commentsForView, { readonly: true });
     bodyEl.addEventListener('click', ev => {
       if(ev.target && ev.target.tagName === 'MARK'){
         const cid = +ev.target.getAttribute('data-id');
-        const c = (essay.comments || []).find(x => x.id === cid);
+        const c = commentsForView.find(x => x.id === cid);
         if(c) showStudentCommentTooltip(c, ev.target);
       }
     });
   }
   /* Легенда цветов — только если есть выделения */
   let legend = null;
-  if(essay.comments && essay.comments.length){
-    const usedKinds = [...new Set(essay.comments.map(c => c.kind))];
+  if(commentsForView && commentsForView.length){
+    const usedKinds = [...new Set(commentsForView.map(c => c.kind))];
     legend = el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'8px' }},
       ...usedKinds.map(k => {
         const m = errKindMeta(k);
@@ -4744,7 +4758,7 @@ function modalEssayResult(essayId){
     el('h4', { style:{ marginBottom:'8px' }}, '📝 Твоя работа'),
     el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginBottom:'8px' }}, subtitleParts.join(' · ') || '—'),
     legend,
-    (essay.comments && essay.comments.length)
+    (commentsForView && commentsForView.length)
       ? el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'6px' }},
           isPhotoEssay
             ? '💡 Кликни по цветному пину, чтобы прочитать замечание учителя.'
@@ -5191,31 +5205,27 @@ function modalEssayReview(essayId){
   const leftCol = el('div', null);
   const isPhotoEssay = essay.format === 'photo';
 
-  /* DEBUG: разбираем что пришло в модалку учителя */
-  const dbgPhotoCnt = (essay.comments || []).filter(c => c.photo_anchor).length;
-  const dbgTextCnt = (essay.comments || []).filter(c => c.start_pos != null).length;
-  console.log('[modalEssayReview] essay.id=' + essay.id +
-    ', format=' + essay.format +
-    ', photoUrls=' + (essay.photoUrls ? essay.photoUrls.length : 0) +
-    ', comments всего=' + (essay.comments ? essay.comments.length : 0) +
-    ' (фото-пинов=' + dbgPhotoCnt + ', текстовых=' + dbgTextCnt + ')');
+  /* Берём замечания из кэша (если был fresh-load после предыдущего рендера —
+     ссылка essay.comments может быть устарелая из старого DB_ESSAYS) */
+  if(!essay.comments && ESSAY_COMMENTS_CACHE[essay.id]) essay.comments = ESSAY_COMMENTS_CACHE[essay.id];
+  const commentsForView = ESSAY_COMMENTS_CACHE[essay.id] || essay.comments || [];
 
   let essayBodyEl;
   if(isPhotoEssay){
-    essayBodyEl = renderPhotosWithPins(essay.photoUrls || [], essay.comments || [], {
+    essayBodyEl = renderPhotosWithPins(essay.photoUrls || [], commentsForView, {
       readonly: false,
       onPinClick: (c, pinEl) => showExistingCommentPopup(essay, c, pinEl),
       onPhotoClick: ({ page, x, y, pageWrap }) => showPhotoErrPopup(essay, pageWrap, { page, x, y })
     });
   } else {
-    essayBodyEl = renderEssayWithMarks(essayText, essay.comments || [], { readonly: false });
+    essayBodyEl = renderEssayWithMarks(essayText, commentsForView, { readonly: false });
     essayBodyEl.addEventListener('mouseup', () => {
       setTimeout(() => showErrPopup(essay, essayBodyEl, essayText), 0);
     });
     essayBodyEl.addEventListener('click', ev => {
       if(ev.target && ev.target.tagName === 'MARK'){
         const cid = +ev.target.getAttribute('data-id');
-        const c = (essay.comments || []).find(x => x.id === cid);
+        const c = commentsForView.find(x => x.id === cid);
         if(c) showExistingCommentPopup(essay, c, ev.target);
       }
     });
@@ -5241,10 +5251,10 @@ function modalEssayReview(essayId){
         ? '💡 Кликни по фото в месте ошибки — поставится пин с категорией и комментарием. Клик по пину — посмотреть/удалить. Баллы К4–К10 пересчитаются автоматически.'
         : '💡 Выделите фрагмент текста, чтобы добавить комментарий-ошибку. Клик по подсветке — посмотреть/удалить. Баллы К4–К10 пересчитаются автоматически.'),
     essayBodyEl,
-    (essay.comments && essay.comments.length)
+    (commentsForView && commentsForView.length)
       ? el('div', { class:'card', style:{ marginTop:'12px', background:'var(--surface-soft)' }},
-          el('h4', { style:{ marginBottom:'8px' }}, '🏷 Замечания (' + essay.comments.length + ')'),
-          el('div', { class:'err-comments-list' }, essay.comments.map(c => commentItemRow(essay, c))))
+          el('h4', { style:{ marginBottom:'8px' }}, '🏷 Замечания (' + commentsForView.length + ')'),
+          el('div', { class:'err-comments-list' }, commentsForView.map(c => commentItemRow(essay, c))))
       : null);
 
   /* Правая колонка */
@@ -5388,8 +5398,9 @@ function showPhotoErrPopup(essay, pageWrap, anchor){
           kind: chosenKind, comment: ta.value.trim() || '',
           voice_url: voiceRec.getUrl()
         });
-        essay.comments = essay.comments || [];
+        essay.comments = ESSAY_COMMENTS_CACHE[essay.id] || essay.comments || [];
         if(row) essay.comments.push(row);
+        ESSAY_COMMENTS_CACHE[essay.id] = essay.comments;
         recomputeErrorsFromComments(essay.comments);
         cleanup();
         render();
@@ -5469,8 +5480,9 @@ function showErrPopup(essay, container, fullText){
           fragment, start_pos: startPos, end_pos: endPos, kind: chosenKind, comment: ta.value.trim() || '',
           voice_url: voiceRec.getUrl()
         });
-        essay.comments = essay.comments || [];
+        essay.comments = ESSAY_COMMENTS_CACHE[essay.id] || essay.comments || [];
         if(row) essay.comments.push(row);
+        ESSAY_COMMENTS_CACHE[essay.id] = essay.comments;
         recomputeErrorsFromComments(essay.comments);
         popup.remove();
         sel.removeAllRanges();
@@ -5563,7 +5575,8 @@ function showExistingCommentPopup(essay, c, markEl){
           if(!confirm('Удалить замечание?')) return;
           try {
             await deleteEssayComment(c.id);
-            essay.comments = (essay.comments || []).filter(x => x.id !== c.id);
+            essay.comments = (ESSAY_COMMENTS_CACHE[essay.id] || essay.comments || []).filter(x => x.id !== c.id);
+            ESSAY_COMMENTS_CACHE[essay.id] = essay.comments;
             recomputeErrorsFromComments(essay.comments);
             popup.remove();
             render();
