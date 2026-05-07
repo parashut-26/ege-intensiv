@@ -435,6 +435,12 @@ const STATE = {
   authMode: 'live',     // 'live' (реальный e-mail) | 'demo' (роли как раньше)
   authEmail: '',
   authCode: '',         // введённый ученицей 6-значный код
+  authMethod: 'name',   // 'name' (по имени+email) | 'code' (через email-код)
+  authFullName: '',     // имя+фамилия для метода 'name'
+  importStudentsOpen: false,
+  importStudentsText: '',
+  importStudentsBusy: false,
+  importStudentsResult: null,
   authStage: 'idle',    // 'idle' | 'sending' | 'sent' | 'error'
   authError: null,
   authLoading: true,    // показываем «Загрузка…» пока проверяем сессию
@@ -482,6 +488,105 @@ async function authRequestCode(email){
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email })
+  });
+  if(!resp.ok){
+    const txt = await resp.text();
+    let msg = txt;
+    try { msg = JSON.parse(txt).error || txt; } catch(e){}
+    throw new Error(msg);
+  }
+  return await resp.json();
+}
+
+/* Простой вход по имени+email (для интенсива). Звон Edge Function login-by-name-email. */
+async function authLoginByNameEmail(fullName, email){
+  const url = SUPABASE_URL + '/functions/v1/login-by-name-email';
+  const resp = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ full_name: fullName, email })
+  });
+  if(!resp.ok){
+    const txt = await resp.text();
+    let msg = txt;
+    try { msg = JSON.parse(txt).error || txt; } catch(e){}
+    throw new Error(msg);
+  }
+  const data = await resp.json();
+  /* Сохраняем токен в том же формате, что и code-flow */
+  const projectRef = SUPABASE_URL.replace('https://', '').split('.')[0];
+  const tokenObj = {
+    access_token: data.access_token,
+    refresh_token: data.access_token,
+    token_type: 'bearer',
+    expires_at: Math.floor(Date.now() / 1000) + (data.expires_in || 60 * 60 * 24 * 7),
+    expires_in: data.expires_in || 60 * 60 * 24 * 7,
+    user: data.user
+  };
+  try {
+    localStorage.setItem('sb-' + projectRef + '-auth-token', JSON.stringify(tokenObj));
+  } catch(e){
+    console.warn('Не удалось записать токен:', e);
+  }
+  return data;
+}
+
+/* Парсер списка учеников. Поддерживает форматы:
+   - «Имя\nemail»                 (пары через перевод строки)
+   - «Имя\n[email](url)»          (markdown-формат)
+   - «Имя, email»                  (CSV)
+   - «Имя | email»                 (pipe)
+   - «Имя email»                   (одна строка с пробелом)
+   Возвращает [{ full_name, email }]. */
+function parseStudentList(text){
+  if(!text) return [];
+  const emailRe = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/;
+  const result = [];
+  /* Сначала пробуем формат с парами строк (имя\nemail) */
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l);
+  let i = 0;
+  while(i < lines.length){
+    const line = lines[i];
+    /* Сразу пара "Имя, email" / "Имя | email" / "Имя email"? */
+    const inlineMatch = line.match(emailRe);
+    const stripUrlMd = (s) => s.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1'); // [text](url) → text
+    if(inlineMatch && line.length > inlineMatch[0].length + 2){
+      const email = inlineMatch[0].toLowerCase();
+      let name = line.replace(emailRe, '').replace(/[,|;]/g, ' ').trim();
+      name = stripUrlMd(name);
+      if(name) result.push({ full_name: name, email });
+      i++; continue;
+    }
+    /* Иначе текущая строка — имя, следующая — email или markdown-ссылка */
+    if(i + 1 < lines.length){
+      const nextLine = lines[i + 1];
+      const nextMatch = nextLine.match(emailRe);
+      if(nextMatch && !line.match(emailRe)){
+        const email = nextMatch[0].toLowerCase();
+        const name = stripUrlMd(line).trim();
+        if(name) result.push({ full_name: name, email });
+        i += 2; continue;
+      }
+    }
+    i++;
+  }
+  /* Дедуп по email */
+  const seen = new Set();
+  return result.filter(r => {
+    if(seen.has(r.email)) return false;
+    seen.add(r.email);
+    return true;
+  });
+}
+
+/* Edge Function: импорт списка учеников (только для учителя/куратора) */
+async function importStudents(students){
+  if(!MY_PROFILE) throw new Error('нет авторизации');
+  const url = SUPABASE_URL + '/functions/v1/import-students';
+  const resp = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ students, requester_id: MY_PROFILE.id })
   });
   if(!resp.ok){
     const txt = await resp.text();
@@ -2667,7 +2772,58 @@ function viewLogin(){
   card.append(headerBlock);
 
   if(STATE.authMode === 'live' && sb){
-    if(STATE.authStage === 'sent' || STATE.authStage === 'verifying'){
+    /* Переключатель методов входа: имя+email или email-код */
+    if(STATE.authStage !== 'sent' && STATE.authStage !== 'verifying'){
+      const tabs = el('div', { style:{ display:'flex', gap:'4px', marginBottom:'14px', padding:'4px', background:'var(--surface-soft)', borderRadius:'10px' }});
+      const mkTab = (m, label) => el('button', {
+        class: 'btn btn-sm' + (STATE.authMethod === m ? ' btn-y' : ' btn-secondary'),
+        style:{ flex:1, fontSize:'12px' },
+        onclick: () => { STATE.authMethod = m; STATE.authError = null; render(); }
+      }, label);
+      tabs.append(mkTab('name', '👤 Имя + e-mail'), mkTab('code', '✉️ Код на почту'));
+      card.append(tabs);
+    }
+
+    if(STATE.authMethod === 'name' && STATE.authStage !== 'sent' && STATE.authStage !== 'verifying'){
+      /* === Простой вход по имени+email === */
+      card.append(
+        el('label', { style:{ display:'block', fontSize:'12px', color:'var(--ink-2)', fontWeight:'700', marginBottom:'6px', marginTop:'4px' }}, 'Имя и Фамилия:'),
+        el('input', { type:'text', placeholder:'Анна Соколова', value: STATE.authFullName,
+          style:{ width:'100%', padding:'12px 14px', borderRadius:'12px', border:'1px solid var(--border-2)', fontSize:'14px', marginBottom:'10px' },
+          oninput: ev => { STATE.authFullName = ev.target.value; }
+        }),
+        el('label', { style:{ display:'block', fontSize:'12px', color:'var(--ink-2)', fontWeight:'700', marginBottom:'6px' }}, 'E-mail:'),
+        el('input', { type:'email', placeholder:'name@example.com', value: STATE.authEmail,
+          style:{ width:'100%', padding:'12px 14px', borderRadius:'12px', border:'1px solid var(--border-2)', fontSize:'14px', marginBottom:'10px' },
+          oninput: ev => { STATE.authEmail = ev.target.value; }
+        }));
+      if(STATE.authError){
+        card.append(el('div', { style:{ color:'var(--red)', fontSize:'12px', marginBottom:'8px' }}, '⚠ ' + STATE.authError));
+      }
+      card.append(
+        el('button', {
+          class:'login-btn btn-y',
+          disabled: STATE.authStage === 'sending' || undefined,
+          onclick: async () => {
+            const fullName = (STATE.authFullName || '').trim();
+            const email = (STATE.authEmail || '').trim().toLowerCase();
+            if(!fullName){ STATE.authError = 'Введите имя'; render(); return; }
+            if(!email || !email.includes('@')){ STATE.authError = 'Введите корректный e-mail'; render(); return; }
+            STATE.authStage = 'sending'; STATE.authError = null; render();
+            try {
+              await authLoginByNameEmail(fullName, email);
+              location.reload();
+            } catch(e){
+              STATE.authStage = 'idle';
+              STATE.authError = e.message || 'Не удалось войти';
+              render();
+            }
+          }
+        }, STATE.authStage === 'sending' ? '⏳ Входим…' : '🐝 Войти'),
+        el('p', { class:'foot-note', style:{ marginTop:'14px' }},
+          'Для учеников интенсива. Имя должно совпадать со списком учителя.'));
+      /* Не показываем демо-режим в name-методе */
+    } else if(STATE.authStage === 'sent' || STATE.authStage === 'verifying'){
       /* Шаг 2: ввод 6-значного кода из письма */
       card.append(el('div', { style:{ padding:'18px', background:'var(--green-soft)', borderRadius:'14px', border:'1px solid var(--green)', marginBottom:'12px' }},
         el('h3', { style:{ color:'#065F46', textAlign:'center', marginBottom:'6px' }}, '📧 Проверьте почту'),
@@ -3228,6 +3384,117 @@ function sampleCard(s){
 /* =======================================================================
    ФОРМА ДОБАВЛЕНИЯ / РЕДАКТИРОВАНИЯ ОБРАЗЦА СОЧИНЕНИЯ
    ======================================================================= */
+/* =======================================================================
+   МОДАЛКА — ИМПОРТ УЧЕНИКОВ ПО СПИСКУ (только учитель/куратор)
+   ======================================================================= */
+function modalImportStudents(){
+  const close = () => { STATE.importStudentsOpen = false; STATE.importStudentsResult = null; render(); };
+
+  const ta = el('textarea', {
+    placeholder: 'Вставь список учеников.\n\nЛюбой формат подойдёт:\n\nАнна Соколова\nanya@example.com\nИван Петров\nivan@mail.ru\n\nИЛИ:\n\nАнна Соколова, anya@example.com\nИван Петров | ivan@mail.ru\n\nДля списков из «Русский 100» с markdown-ссылками — тоже работает, [email](url) парсится автоматически.',
+    style:{ width:'100%', minHeight:'220px', padding:'12px', borderRadius:'10px', border:'1px solid var(--border-2)',
+            fontFamily:'inherit', fontSize:'13px', lineHeight:'1.5', resize:'vertical' }
+  }, STATE.importStudentsText || '');
+  ta.addEventListener('input', () => { STATE.importStudentsText = ta.value; });
+
+  const previewBox = el('div', { style:{ marginTop:'10px' }});
+  const renderPreview = () => {
+    previewBox.innerHTML = '';
+    const parsed = parseStudentList(STATE.importStudentsText || ta.value || '');
+    if(!parsed.length){
+      previewBox.append(el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', fontStyle:'italic' }},
+        'Распарсено: 0 — вставь список выше или нажми «Распознать»'));
+      return parsed;
+    }
+    previewBox.append(
+      el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'6px', fontWeight:'700' }},
+        '✓ Распознано: ' + parsed.length + ' учеников'),
+      el('div', { style:{ maxHeight:'200px', overflowY:'auto', background:'var(--surface-soft)', padding:'8px', borderRadius:'8px', fontSize:'12px', fontFamily:'monospace' }},
+        ...parsed.map((s, i) => el('div', null, (i+1) + '. ' + s.full_name + ' — ' + s.email))));
+    return parsed;
+  };
+  renderPreview();
+
+  const status = el('div', { style:{ fontSize:'12px', minHeight:'16px' }}, '');
+
+  const importBtn = el('button', { class:'btn btn-p',
+    onclick: async () => {
+      const parsed = parseStudentList(STATE.importStudentsText || ta.value || '');
+      if(!parsed.length){ status.style.color = 'var(--red)'; status.textContent = 'Сначала вставь список'; return; }
+      if(!confirm('Импортировать ' + parsed.length + ' учеников? Они смогут заходить по своему имени и email.')) return;
+      STATE.importStudentsBusy = true;
+      importBtn.disabled = true;
+      status.style.color = 'var(--ink-3)'; status.textContent = '⏳ Создаём профили…';
+      render();
+      try {
+        const result = await importStudents(parsed);
+        STATE.importStudentsResult = result;
+        STATE.importStudentsBusy = false;
+        showToast('✓ Готово: создано ' + result.summary.created + ', обновлено ' + result.summary.updated);
+        render();
+      } catch(e){
+        STATE.importStudentsBusy = false;
+        status.style.color = 'var(--red)'; status.textContent = '⚠ ' + e.message;
+        importBtn.disabled = false;
+      }
+    }
+  }, '✓ Импортировать');
+
+  /* Если уже есть результат — показываем его вместо textarea */
+  let body;
+  if(STATE.importStudentsResult){
+    const r = STATE.importStudentsResult;
+    const rows = r.results.map((row, i) => el('div', {
+      style:{ display:'flex', justifyContent:'space-between', padding:'6px 8px', background:
+        row.status === 'created' ? 'var(--green-soft)' :
+        row.status === 'updated' ? 'var(--y-soft)' :
+        'var(--red-soft)',
+        borderRadius:'6px', marginBottom:'4px', fontSize:'12px' }
+    },
+      el('span', null, (i+1) + '. ' + row.full_name + ' — ' + row.email),
+      el('span', { style:{ fontWeight:'700' }},
+        row.status === 'created' ? '✓ создан' :
+        row.status === 'updated' ? '↻ обновлён' :
+        '✕ ' + (row.message || 'ошибка'))));
+    body = el('div', { class:'modal-body' },
+      el('div', { class:'card', style:{ background:'var(--green-soft)', border:'1px solid var(--green)', marginBottom:'12px' }},
+        el('h3', { style:{ color:'#065F46' }}, '✓ Импорт завершён'),
+        el('div', { style:{ fontSize:'13px', marginTop:'6px', color:'#065F46' }},
+          'Всего: ' + r.summary.total + ' · Создано: ' + r.summary.created + ' · Обновлено: ' + r.summary.updated + (r.summary.errors ? ' · Ошибок: ' + r.summary.errors : ''))),
+      el('div', { style:{ maxHeight:'400px', overflowY:'auto' }}, ...rows));
+  } else {
+    body = el('div', { class:'modal-body' },
+      el('div', { class:'card', style:{ background:'var(--p-soft)', border:'1px solid var(--p-2)', marginBottom:'14px' }},
+        el('h4', null, '📥 Как работает'),
+        el('p', { style:{ fontSize:'13px', color:'var(--ink-2)', marginTop:'6px', lineHeight:'1.5' }},
+          'Вставь список учеников в любом удобном формате. Парсер сам распознает имя и email. ',
+          'После импорта ученики смогут заходить на платформу, введя своё ', el('b', null, 'имя'), ' и ', el('b', null, 'email'), ' — без кодов и паролей.')),
+      ta,
+      el('div', { style:{ display:'flex', gap:'8px', marginTop:'8px', alignItems:'center' }},
+        el('button', { class:'btn btn-secondary btn-sm', onclick: () => { STATE.importStudentsText = ta.value; renderPreview(); }
+        }, '🔍 Распознать')),
+      previewBox);
+  }
+
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        STATE.importStudentsResult ? 'Результат импорта' : 'Импорт учеников'),
+      el('h2', { style:{ marginTop:'4px' }}, STATE.importStudentsResult ? '✓ Готово' : '📥 Загрузить список')),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const foot = el('div', { class:'modal-foot' },
+    status,
+    el('div', { style:{ display:'flex', gap:'8px' }},
+      STATE.importStudentsResult
+        ? el('button', { class:'btn btn-p', onclick: close }, 'Закрыть')
+        : el('button', { class:'btn btn-secondary', onclick: close }, 'Отмена'),
+      STATE.importStudentsResult ? null : importBtn));
+
+  return el('div', { class:'modal-bg', onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }},
+    el('div', { class:'modal', style:{ maxWidth:'700px' }}, head, body, foot));
+}
+
 function modalEssaySampleEdit(){
   const isNew = STATE.sampleEditOpen === 'new';
   const existing = isNew ? null : SAMPLES.find(x => x.id === STATE.sampleEditOpen);
@@ -4417,10 +4684,13 @@ function viewTeacherStudents(){
   wrap.append(
     el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', flexWrap:'wrap', gap:'10px' }},
       el('h1', null, '👥 Ученики · ' + STUDENTS.length),
-      el('div', { style:{ display:'flex', gap:'8px' }},
+      el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' }},
         el('button', { class:'btn btn-secondary',
           onclick: () => showToast('Откроется управление кураторами')
         }, '🤝 Кураторы (' + CURATORS.length + ')'),
+        el('button', { class:'btn btn-teal',
+          onclick: () => { STATE.importStudentsOpen = true; STATE.importStudentsResult = null; render(); }
+        }, '📥 Импорт списка'),
         el('button', { class:'btn btn-y',
           onclick: () => { STATE.newStudentForm = true; render(); }
         }, '＋ Добавить ученика'))));
@@ -6972,6 +7242,7 @@ function render(){
   if(STATE.studentEssayResultOpen != null) root.append(modalEssayResult(STATE.studentEssayResultOpen));
   if(STATE.sampleOpen != null) root.append(modalEssaySample(STATE.sampleOpen));
   if(STATE.sampleEditOpen != null) root.append(modalEssaySampleEdit());
+  if(STATE.importStudentsOpen) root.append(modalImportStudents());
   if(STATE.chatOpen && STATE.view !== 'login') root.append(chatPanel(STATE.view));
   if(STATE.toast) root.append(el('div', { class:'toast' }, STATE.toast));
 
