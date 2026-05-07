@@ -434,6 +434,7 @@ const STATE = {
   /* === Авторизация === */
   authMode: 'live',     // 'live' (реальный e-mail) | 'demo' (роли как раньше)
   authEmail: '',
+  authCode: '',         // введённый ученицей 6-значный код
   authStage: 'idle',    // 'idle' | 'sending' | 'sent' | 'error'
   authError: null,
   authLoading: true,    // показываем «Загрузка…» пока проверяем сессию
@@ -449,6 +450,63 @@ async function authSendMagicLink(email){
     options: { emailRedirectTo: window.location.href }
   });
   if(error) throw error;
+}
+
+/* === Вход по 6-значному коду через Edge Functions (обход блокировки /auth/v1 в РФ) === */
+async function authRequestCode(email){
+  const url = SUPABASE_URL + '/functions/v1/request-login-code';
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + SUPABASE_KEY,
+      'apikey': SUPABASE_KEY
+    },
+    body: JSON.stringify({ email })
+  });
+  if(!resp.ok){
+    const txt = await resp.text();
+    let msg = txt;
+    try { msg = JSON.parse(txt).error || txt; } catch(e){}
+    throw new Error(msg);
+  }
+  return await resp.json();
+}
+
+async function authVerifyCode(email, code){
+  const url = SUPABASE_URL + '/functions/v1/verify-login-code';
+  const resp = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + SUPABASE_KEY,
+      'apikey': SUPABASE_KEY
+    },
+    body: JSON.stringify({ email, code })
+  });
+  if(!resp.ok){
+    const txt = await resp.text();
+    let msg = txt;
+    try { msg = JSON.parse(txt).error || txt; } catch(e){}
+    throw new Error(msg);
+  }
+  const data = await resp.json();
+  /* Сохраняем токен в том же ключе, где его ждёт getAccessToken (как Supabase Auth SDK) */
+  const projectRef = SUPABASE_URL.replace('https://', '').split('.')[0];
+  const tokenObj = {
+    access_token: data.access_token,
+    refresh_token: data.access_token,
+    token_type: 'bearer',
+    expires_at: Math.floor(Date.now() / 1000) + (data.expires_in || 60 * 60 * 24 * 7),
+    expires_in: data.expires_in || 60 * 60 * 24 * 7,
+    user: data.user
+  };
+  try {
+    localStorage.setItem('sb-' + projectRef + '-auth-token', JSON.stringify(tokenObj));
+  } catch(e){
+    console.warn('Не удалось записать токен в localStorage:', e);
+  }
+  return data;
 }
 
 /* Декодируем payload JWT (без проверки подписи — сервер всё равно проверит) */
@@ -2575,16 +2633,50 @@ function viewLogin(){
   card.append(headerBlock);
 
   if(STATE.authMode === 'live' && sb){
-    if(STATE.authStage === 'sent'){
-      card.append(el('div', { style:{ padding:'20px', background:'var(--green-soft)', borderRadius:'14px', border:'1px solid var(--green)', marginBottom:'10px' }},
-        el('h3', { style:{ color:'#065F46', textAlign:'center' }}, '📧 Проверьте почту'),
-        el('p', { style:{ textAlign:'center', fontSize:'13px', color:'#065F46', marginTop:'8px' }},
-          'Я отправила ссылку для входа на ', el('b', null, STATE.authEmail), '. Откройте письмо и нажмите ссылку — попадёте на платформу автоматически.')));
+    if(STATE.authStage === 'sent' || STATE.authStage === 'verifying'){
+      /* Шаг 2: ввод 6-значного кода из письма */
+      card.append(el('div', { style:{ padding:'18px', background:'var(--green-soft)', borderRadius:'14px', border:'1px solid var(--green)', marginBottom:'12px' }},
+        el('h3', { style:{ color:'#065F46', textAlign:'center', marginBottom:'6px' }}, '📧 Проверьте почту'),
+        el('p', { style:{ textAlign:'center', fontSize:'13px', color:'#065F46' }},
+          'Код отправлен на ', el('b', null, STATE.authEmail), '. Введите его ниже.')));
       card.append(
-        el('button', { class:'login-btn btn-secondary',
-          onclick: () => { STATE.authStage = 'idle'; STATE.authEmail = ''; render(); }
+        el('label', { style:{ display:'block', fontSize:'12px', color:'var(--ink-2)', fontWeight:'700', marginBottom:'6px', marginTop:'4px' }}, '6-значный код из письма:'),
+        el('input', { type:'text', inputmode:'numeric', maxlength:'6', placeholder:'123 456',
+          value: STATE.authCode || '',
+          style:{ width:'100%', padding:'14px', borderRadius:'12px', border:'1px solid var(--border-2)',
+                  fontSize:'24px', textAlign:'center', letterSpacing:'8px', fontWeight:'800',
+                  fontFamily:'Manrope, monospace', marginBottom:'10px' },
+          oninput: ev => { STATE.authCode = ev.target.value.replace(/\D/g, '').slice(0, 6); }
+        }));
+      if(STATE.authError){
+        card.append(el('div', { style:{ color:'var(--red)', fontSize:'12px', marginBottom:'8px' }}, '⚠ ' + STATE.authError));
+      }
+      card.append(
+        el('button', { class:'login-btn btn-y',
+          disabled: STATE.authStage === 'verifying' || undefined,
+          onclick: async () => {
+            const code = (STATE.authCode || '').trim();
+            if(!/^\d{6}$/.test(code)){ STATE.authError = 'Нужен код из 6 цифр'; render(); return; }
+            STATE.authStage = 'verifying'; STATE.authError = null; render();
+            try {
+              await authVerifyCode(STATE.authEmail, code);
+              /* После записи токена в localStorage перезагружаем профиль */
+              STATE.authStage = 'idle';
+              STATE.authError = null;
+              STATE.authCode = '';
+              location.reload();
+            } catch(e){
+              STATE.authStage = 'sent';
+              STATE.authError = e.message || 'Не удалось подтвердить код';
+              render();
+            }
+          }
+        }, STATE.authStage === 'verifying' ? '⏳ Проверяем…' : '✓ Войти'),
+        el('button', { class:'login-btn btn-secondary', style:{ marginTop:'8px' },
+          onclick: () => { STATE.authStage = 'idle'; STATE.authEmail = ''; STATE.authCode = ''; STATE.authError = null; render(); }
         }, '↻ Ввести другой e-mail'));
     } else {
+      /* Шаг 1: ввод email */
       card.append(
         el('label', { style:{ display:'block', fontSize:'12px', color:'var(--ink-2)', fontWeight:'700', marginBottom:'6px', marginTop:'8px' }}, 'Ваш e-mail:'),
         el('input', { type:'email', placeholder:'name@example.com', value: STATE.authEmail,
@@ -2599,21 +2691,23 @@ function viewLogin(){
           class:'login-btn btn-y',
           disabled: STATE.authStage === 'sending' || undefined,
           onclick: async () => {
-            const email = (STATE.authEmail || '').trim();
+            const email = (STATE.authEmail || '').trim().toLowerCase();
             if(!email || !email.includes('@')){ STATE.authError = 'Введите корректный e-mail'; render(); return; }
             STATE.authStage = 'sending'; STATE.authError = null; render();
             try {
-              await authSendMagicLink(email);
+              await authRequestCode(email);
+              STATE.authEmail = email;
               STATE.authStage = 'sent';
+              STATE.authCode = '';
             } catch(e){
               STATE.authStage = 'error';
-              STATE.authError = e.message || 'Не удалось отправить ссылку';
+              STATE.authError = e.message || 'Не удалось отправить код';
             }
             render();
           }
-        }, STATE.authStage === 'sending' ? '⏳ Отправляю…' : '📧 Получить ссылку для входа'),
+        }, STATE.authStage === 'sending' ? '⏳ Отправляю…' : '📧 Получить код'),
         el('p', { class:'foot-note', style:{ marginTop:'14px' }},
-          'Без паролей. Платформа отправит ссылку для входа на ваш e-mail.'));
+          'Без паролей и без VPN. На e-mail придёт 6-значный код.'));
     }
     card.append(
       el('div', { class:'divider' }, 'или'),
