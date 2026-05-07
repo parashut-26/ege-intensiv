@@ -1478,11 +1478,16 @@ function renderPhotosWithPins(photos, comments, opts){
   }
   /* Группируем комментарии по странице и считаем номера */
   const byPage = {};
-  (comments || []).filter(c => c.photo_anchor).forEach(c => {
+  const photoComments = (comments || []).filter(c => c.photo_anchor);
+  photoComments.forEach(c => {
     const p = (c.photo_anchor && c.photo_anchor.page) || 0;
     if(!byPage[p]) byPage[p] = [];
     byPage[p].push(c);
   });
+  console.log('[renderPhotosWithPins] readonly=' + !!opts.readonly +
+    ', photos=' + photos.length +
+    ', photoComments=' + photoComments.length +
+    ', firstAnchor=' + (photoComments[0] ? JSON.stringify(photoComments[0].photo_anchor) : 'нет'));
   photos.forEach((url, idx) => {
     const pageWrap = el('div', { class: 'essay-photo' + (opts.readonly ? '' : ' editable') });
     pageWrap.dataset.page = String(idx);
@@ -5185,6 +5190,15 @@ function modalEssayReview(essayId){
   /* Левая колонка: текст или фото + выделения/пины */
   const leftCol = el('div', null);
   const isPhotoEssay = essay.format === 'photo';
+
+  /* DEBUG: разбираем что пришло в модалку учителя */
+  const dbgPhotoCnt = (essay.comments || []).filter(c => c.photo_anchor).length;
+  const dbgTextCnt = (essay.comments || []).filter(c => c.start_pos != null).length;
+  console.log('[modalEssayReview] essay.id=' + essay.id +
+    ', format=' + essay.format +
+    ', photoUrls=' + (essay.photoUrls ? essay.photoUrls.length : 0) +
+    ', comments всего=' + (essay.comments ? essay.comments.length : 0) +
+    ' (фото-пинов=' + dbgPhotoCnt + ', текстовых=' + dbgTextCnt + ')');
 
   let essayBodyEl;
   if(isPhotoEssay){
