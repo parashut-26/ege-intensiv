@@ -301,6 +301,18 @@ h1{font-size:28px;line-height:1.15} h2{font-size:22px} h3{font-size:17px} h4{fon
 .err-comments-list{max-height:200px;overflow-y:auto;display:flex;flex-direction:column;gap:6px}
 .err-comments-list .item{display:flex;gap:8px;align-items:flex-start;padding:8px;border-radius:8px;background:var(--surface-soft);font-size:12px;line-height:1.4}
 .err-comments-list .frag{font-style:italic;color:var(--ink-2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:inline-block;vertical-align:bottom}
+.essay-photos{display:flex;flex-direction:column;gap:14px}
+.essay-photo{position:relative;display:block;background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden}
+.essay-photo img{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none}
+.essay-photo.editable img{cursor:crosshair}
+.essay-photo .page-num{position:absolute;top:6px;left:6px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;padding:3px 8px;border-radius:6px;font-weight:700;pointer-events:none}
+.pin{position:absolute;width:26px;height:26px;border-radius:50%;border:2px solid #fff;color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.4);transform:translate(-50%,-50%);z-index:2;transition:.1s}
+.pin:hover{transform:translate(-50%,-50%) scale(1.15)}
+.pin-orf{background:#DC2626}.pin-pun{background:#2563EB}.pin-gram{background:#7C3AED}.pin-rech{background:#16A34A}
+.pin-fact{background:#D97706}.pin-log{background:#0D9488}.pin-eth{background:#6B7280}.pin-other{background:#EA580C}
+.photo-thumb{position:relative;width:80px;height:80px;border-radius:8px;overflow:hidden;border:1px solid var(--border)}
+.photo-thumb img{width:100%;height:100%;object-fit:cover}
+.photo-thumb .x{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;border:none}
 .criteria{display:flex;flex-direction:column;gap:8px}
 .crit{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-radius:10px;background:var(--surface-soft);border:1px solid var(--border);gap:10px}
 .crit.locked{opacity:.5}
@@ -396,6 +408,8 @@ const STATE = {
   essayBy: null,           // 'curator' | 'teacher' — кто проверяет
   essayDraftOpen: false,   // открыта форма сдачи сочинения у ученика
   essayDraftText: '',      // черновик текста
+  essayDraftMode: 'typed', // 'typed' | 'photo'
+  essayDraftPhotos: [],    // [{ url, name }] — уже залитые в Storage
   newStudentForm: false,
   curatorPermsFor: null,   // id куратора — открыта модалка прав
   variantMode: false,      // сборка случайного варианта
@@ -1168,17 +1182,36 @@ function countEssayWords(text){
 }
 
 /* Сохранение черновика сочинения в БД (таблица essays). */
-async function submitEssay(text){
+async function submitEssay(opts){
   if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
-  const wc = countEssayWords(text);
-  const inserted = await restRequest('POST', '/essays', {
+  /* Совместимость: если строка — это старый text-формат */
+  if(typeof opts === 'string') opts = { format: 'typed', text: opts };
+  const payload = {
     student_id: MY_PROFILE.id,
-    format: 'typed',
-    body_text: text,
-    word_count: wc,
+    format: opts.format,
     status: 'submitted'
-  }, { prefer: 'return=representation' });
+  };
+  if(opts.format === 'typed'){
+    payload.body_text = opts.text;
+    payload.word_count = countEssayWords(opts.text);
+  } else if(opts.format === 'photo'){
+    payload.photo_urls = opts.photoUrls || [];
+  }
+  const inserted = await restRequest('POST', '/essays', payload, { prefer: 'return=representation' });
   return Array.isArray(inserted) ? inserted[0] : inserted;
+}
+
+/* Загрузить фото сочинения в Storage. Возвращает publicUrl. */
+async function uploadEssayPhoto(file){
+  if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
+  const ext = (file.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'jpg'])[1].toLowerCase();
+  const path = 'essays/' + MY_PROFILE.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
+  const { error: upErr } = await sb.storage.from('materials').upload(path, file, {
+    cacheControl: '3600', upsert: false,
+    contentType: file.type || 'image/jpeg'
+  });
+  if(upErr) throw new Error('Storage: ' + upErr.message);
+  return sb.storage.from('materials').getPublicUrl(path).data.publicUrl;
 }
 
 /* Кэш сочинений из БД (для учительского/кураторского списка) */
@@ -1189,7 +1222,7 @@ async function loadEssaysFromDb(){
   try {
     /* Берём сочинения и подтягиваем имя ученика. У essays три FK к profiles
        (student_id, pre_checked_by, finalized_by) — указываем явно через !essays_student_id_fkey. */
-    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,word_count,status,submitted_at,format,student:profiles!essays_student_id_fkey(full_name,email),review:essay_reviews(total,general_comment,is_pre_check,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10)&order=submitted_at.desc&limit=200');
+    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,photo_urls,word_count,status,submitted_at,format,student:profiles!essays_student_id_fkey(full_name,email),review:essay_reviews(total,general_comment,is_pre_check,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10)&order=submitted_at.desc&limit=200');
     if(Array.isArray(arr)){
       DB_ESSAYS = arr.map(e => {
         const r = e.review && (Array.isArray(e.review) ? e.review[0] : e.review);
@@ -1199,6 +1232,7 @@ async function loadEssaysFromDb(){
           studentName: (e.student && e.student.full_name) || (e.student && e.student.email) || 'Ученик',
           studentEmail: e.student && e.student.email,
           text: e.body_text,
+          photoUrls: Array.isArray(e.photo_urls) ? e.photo_urls : [],
           wordCount: e.word_count,
           status: e.status,
           submittedAt: e.submitted_at,
@@ -1259,6 +1293,63 @@ function renderEssayWithMarks(text, comments, opts){
   return wrap;
 }
 
+/* Рендерит галерею фото-страниц с пинами-замечаниями.
+   photos: [url1, url2, ...]  comments: [{ id, kind, comment, photo_anchor:{x,y,page} }]
+   opts.readonly: false → клик по фото ставит новый пин (учитель), клик по пину — редакт/удаление
+                 true  → только просмотр (ученик) */
+function renderPhotosWithPins(photos, comments, opts){
+  opts = opts || {};
+  const wrap = el('div', { class:'essay-photos' });
+  if(!photos || !photos.length){
+    wrap.append(el('div', { style:{ color:'var(--ink-3)', fontStyle:'italic' }}, 'Фото не загружены'));
+    return wrap;
+  }
+  /* Группируем комментарии по странице и считаем номера */
+  const byPage = {};
+  (comments || []).filter(c => c.photo_anchor).forEach(c => {
+    const p = (c.photo_anchor && c.photo_anchor.page) || 0;
+    if(!byPage[p]) byPage[p] = [];
+    byPage[p].push(c);
+  });
+  photos.forEach((url, idx) => {
+    const pageWrap = el('div', { class: 'essay-photo' + (opts.readonly ? '' : ' editable') });
+    pageWrap.dataset.page = String(idx);
+    const img = el('img', { src: url, alt: 'фото ' + (idx+1) });
+    img.addEventListener('dragstart', ev => ev.preventDefault());
+    pageWrap.append(img,
+      el('span', { class:'page-num' }, 'стр. ' + (idx + 1)));
+    /* Пины */
+    (byPage[idx] || []).forEach((c, i) => {
+      const meta = errKindMeta(c.kind);
+      const pin = el('div', {
+        class: 'pin pin-' + meta.id,
+        style: { left: ((c.photo_anchor.x || 0) * 100) + '%',
+                 top:  ((c.photo_anchor.y || 0) * 100) + '%' },
+        title: meta.crit + ' · ' + meta.label + (c.comment ? ' — ' + c.comment : '')
+      }, String(i + 1));
+      pin.dataset.cid = String(c.id);
+      pin.addEventListener('click', ev => {
+        ev.stopPropagation();
+        opts.onPinClick && opts.onPinClick(c, pin);
+      });
+      pageWrap.append(pin);
+    });
+    /* Клик по фото → новый пин (учитель) */
+    if(!opts.readonly){
+      pageWrap.addEventListener('click', ev => {
+        if(ev.target.classList.contains('pin')) return;
+        if(ev.target.tagName !== 'IMG') return;
+        const r = pageWrap.getBoundingClientRect();
+        const x = (ev.clientX - r.left) / r.width;
+        const y = (ev.clientY - r.top) / r.height;
+        opts.onPhotoClick && opts.onPhotoClick({ page: idx, x, y, pageWrap, ev });
+      });
+    }
+    wrap.append(pageWrap);
+  });
+  return wrap;
+}
+
 /* Возвращает позицию (в символах) внутри textContent контейнера root */
 function getCharOffsetIn(root, node, offset){
   let pos = 0;
@@ -1294,20 +1385,48 @@ async function loadEssayComments(essayId){
   }
 }
 
-/* Сохранить новый комментарий-выделение */
+/* Сохранить новый комментарий-выделение (текстовое или фото-пин) */
 async function saveEssayComment(essayId, payload){
   if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
   const body = {
     essay_id: essayId,
     author_id: MY_PROFILE.id,
-    fragment: payload.fragment,
-    start_pos: payload.start_pos,
-    end_pos: payload.end_pos,
     kind: payload.kind,
-    comment: payload.comment
+    comment: payload.comment || ''
   };
+  if(payload.photo_anchor){
+    body.photo_anchor = payload.photo_anchor;
+  } else {
+    body.fragment = payload.fragment;
+    body.start_pos = payload.start_pos;
+    body.end_pos = payload.end_pos;
+  }
   const row = await restRequest('POST', '/essay_comments', body, { prefer: 'return=representation' });
   return Array.isArray(row) ? row[0] : row;
+}
+
+/* Автоподсчёт ошибок по выделениям → обновляем STATE.errors и STATE.scoresK.
+   К4 (fact, max=1): 0=1, 1+=0
+   К5 (log, max=2):  0=2, 1-2=1, 3+=0
+   К6 (eth, max=1):  0=1, 1+=0
+   К7-К10 (orf/pun/gram/rech, max=3): 0=3, 1-2=2, 3-4=1, 5+=0 */
+function recomputeErrorsFromComments(comments){
+  const cnt = { fact:0, log:0, eth:0, orf:0, pun:0, gram:0, rech:0 };
+  (comments || []).forEach(c => { if(cnt[c.kind] != null) cnt[c.kind]++; });
+  const map = [
+    { id:'K4', kind:'fact', score: n => n === 0 ? 1 : 0 },
+    { id:'K5', kind:'log',  score: n => n === 0 ? 2 : (n <= 2 ? 1 : 0) },
+    { id:'K6', kind:'eth',  score: n => n === 0 ? 1 : 0 },
+    { id:'K7', kind:'orf',  score: n => n === 0 ? 3 : (n <= 2 ? 2 : (n <= 4 ? 1 : 0)) },
+    { id:'K8', kind:'pun',  score: n => n === 0 ? 3 : (n <= 2 ? 2 : (n <= 4 ? 1 : 0)) },
+    { id:'K9', kind:'gram', score: n => n === 0 ? 3 : (n <= 2 ? 2 : (n <= 4 ? 1 : 0)) },
+    { id:'K10',kind:'rech', score: n => n === 0 ? 3 : (n <= 2 ? 2 : (n <= 4 ? 1 : 0)) },
+  ];
+  map.forEach(m => {
+    const n = cnt[m.kind] || 0;
+    STATE.errors[m.id] = n;
+    STATE.scoresK[m.id] = m.score(n);
+  });
 }
 
 async function deleteEssayComment(commentId){
@@ -3584,9 +3703,11 @@ function essayRow(e, isCurator){
   else stChip = chip('✓ ' + (e.finalScore != null ? e.finalScore + '/22' : 'готово'), 'green');
 
   /* Превью: для реальных DB-сочинений берём первые 80 символов body_text;
-     для моков — text + when. */
+     для фото-работ — спецметка; для моков — text + when. */
   let preview;
-  if(e.text && e.text.length > 60){
+  if(e.format === 'photo'){
+    preview = '📸 фото-работа · ' + (e.photoUrls || []).length + ' стр.';
+  } else if(e.text && e.text.length > 60){
     preview = e.text.slice(0, 80).replace(/\s+/g, ' ') + '…';
   } else {
     preview = e.text || '';
@@ -3915,6 +4036,15 @@ function modalStudentDetail(){
 function modalEssayDraft(){
   const close = () => { STATE.essayDraftOpen = false; render(); };
 
+  /* Переключатель формата */
+  const formatToggle = el('div', { style:{ display:'flex', gap:'8px', marginBottom:'14px', padding:'4px', background:'var(--surface-soft)', borderRadius:'10px' }});
+  const mkTab = (mode, label) => el('button', {
+    class: 'btn btn-sm' + (STATE.essayDraftMode === mode ? ' btn-p' : ' btn-secondary'),
+    style:{ flex:1 },
+    onclick: () => { STATE.essayDraftMode = mode; render(); }
+  }, label);
+  formatToggle.append(mkTab('typed', '⌨️ Текстом'), mkTab('photo', '📸 Фото'));
+
   const textArea = el('textarea', {
     placeholder: 'Введи свой текст сочинения. Минимум 150 слов, иначе работа не зачтётся (правило ФИПИ).',
     style:{ width:'100%', minHeight:'320px', padding:'14px', borderRadius:'10px',
@@ -3940,26 +4070,87 @@ function modalEssayDraft(){
   textArea.addEventListener('input', updateCount);
   setTimeout(updateCount, 0);
 
+  /* === Фото-режим === */
+  const photoStatus = el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', minHeight:'18px' }}, '');
+  const photoList = el('div', { style:{ display:'flex', gap:'10px', flexWrap:'wrap', marginTop:'8px' }});
+  const renderThumbs = () => {
+    photoList.innerHTML = '';
+    STATE.essayDraftPhotos.forEach((p, idx) => {
+      const thumb = el('div', { class:'photo-thumb' },
+        el('img', { src: p.url, alt: 'фото ' + (idx+1) }),
+        el('button', { class:'x', title:'Удалить', onclick: () => {
+          STATE.essayDraftPhotos.splice(idx, 1);
+          renderThumbs();
+        }}, '×'));
+      photoList.append(thumb);
+    });
+  };
+  renderThumbs();
+  const fileInput = el('input', { type:'file', accept:'image/*', multiple:'multiple',
+    style:{ display:'none' }});
+  fileInput.addEventListener('change', async ev => {
+    const files = Array.from(ev.target.files || []);
+    if(!files.length) return;
+    photoStatus.textContent = '⏳ Заливаем ' + files.length + ' файл(ов)…';
+    photoStatus.style.color = 'var(--ink-3)';
+    let ok = 0, fail = 0;
+    for(const f of files){
+      try {
+        const url = await uploadEssayPhoto(f);
+        STATE.essayDraftPhotos.push({ url, name: f.name });
+        ok++;
+        renderThumbs();
+      } catch(e){
+        console.error(e);
+        fail++;
+      }
+    }
+    photoStatus.textContent = '✓ Загружено: ' + ok + (fail ? ' · ⚠ ошибок: ' + fail : '');
+    photoStatus.style.color = fail ? 'var(--red)' : 'var(--green)';
+    fileInput.value = '';
+  });
+
+  const photoBlock = el('div', null,
+    el('div', { class:'card', style:{ background:'var(--surface-soft)', border:'2px dashed var(--border-2)', textAlign:'center', padding:'20px' }},
+      el('div', { style:{ fontSize:'40px', marginBottom:'8px' }}, '📸'),
+      el('h4', { style:{ marginBottom:'4px' }}, 'Загрузи фото своей работы'),
+      el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'12px' }},
+        'Можно несколько страниц — учитель сможет ставить пометки прямо на фотографии.'),
+      el('button', { class:'btn btn-p',
+        onclick: () => fileInput.click()
+      }, '📷 Выбрать фото')),
+    fileInput,
+    photoStatus,
+    photoList);
+
   const submitBtn = el('button', { class:'btn btn-p',
     onclick: async () => {
-      const text = textArea.value.trim();
-      if(text.length < 50){ showToast('Текст слишком короткий'); return; }
-      const wc = countEssayWords(text);
-      if(wc < 150){
-        if(!confirm('У тебя ' + wc + ' слов из 150 — по правилам ФИПИ работа за < 150 слов не оценивается. Всё равно сдать?')) return;
-      }
       submitBtn.disabled = true;
       submitBtn.textContent = '⏳ Сдаём…';
       try {
-        await submitEssay(text);
+        if(STATE.essayDraftMode === 'typed'){
+          const text = textArea.value.trim();
+          if(text.length < 50){ showToast('Текст слишком короткий'); throw new Error(); }
+          const wc = countEssayWords(text);
+          if(wc < 150){
+            if(!confirm('У тебя ' + wc + ' слов из 150 — по правилам ФИПИ работа за < 150 слов не оценивается. Всё равно сдать?')){ throw new Error(); }
+          }
+          await submitEssay({ format:'typed', text });
+          showToast('✓ Сочинение сдано · ' + wc + ' слов');
+        } else {
+          if(!STATE.essayDraftPhotos.length){ showToast('Загрузите хотя бы одно фото'); throw new Error(); }
+          await submitEssay({ format:'photo', photoUrls: STATE.essayDraftPhotos.map(p => p.url) });
+          showToast('✓ Сдано · ' + STATE.essayDraftPhotos.length + ' фото');
+        }
         await loadEssaysFromDb();
         STATE.essayDraftOpen = false;
         STATE.essayDraftText = '';
-        showToast('✓ Сочинение сдано · ' + wc + ' слов');
+        STATE.essayDraftPhotos = [];
+        STATE.essayDraftMode = 'typed';
         render();
       } catch(e){
-        console.error('submitEssay упал:', e);
-        showToast('⚠ ' + e.message);
+        if(e && e.message) console.error('submitEssay упал:', e);
+        if(e && e.message) showToast('⚠ ' + e.message);
         submitBtn.disabled = false;
         submitBtn.textContent = '✓ Сдать на проверку';
       }
@@ -3978,11 +4169,15 @@ function modalEssayDraft(){
       el('h4', null, '📝 Что нужно сделать'),
       el('p', { style:{ color:'var(--ink-2)', marginTop:'6px', fontSize:'13px', lineHeight:'1.5' }},
         'Сформулируй проблему текста, прокомментируй её двумя примерами с пояснением, укажи позицию автора, выскажи своё отношение и обоснуй пример-аргумент. Минимум 150 слов.')),
-    el('div', { style:{ marginBottom:'10px', display:'flex', justifyContent:'space-between', alignItems:'baseline' }},
-      el('h4', null, '🖋 Твой текст'),
-      el('span', { style:{ fontSize:'13px', color:'var(--ink-2)' }},
-        '🐝 Слов: ', el('b', null, wcEl), ' · ', wcStatus)),
-    textArea);
+    formatToggle,
+    STATE.essayDraftMode === 'typed'
+      ? el('div', null,
+          el('div', { style:{ marginBottom:'10px', display:'flex', justifyContent:'space-between', alignItems:'baseline' }},
+            el('h4', null, '🖋 Твой текст'),
+            el('span', { style:{ fontSize:'13px', color:'var(--ink-2)' }},
+              '🐝 Слов: ', el('b', null, wcEl), ' · ', wcStatus)),
+          textArea)
+      : photoBlock);
 
   const foot = el('div', { class:'modal-foot' },
     el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }},
@@ -4030,15 +4225,24 @@ function modalEssayResult(essayId){
 
   const body = el('div', { class:'modal-body' });
 
-  /* Полный текст работы с выделенными ошибками (если есть essay_comments) */
-  const textEl = renderEssayWithMarks(essay.text || '', essay.comments || [], { readonly: true });
-  textEl.addEventListener('click', ev => {
-    if(ev.target && ev.target.tagName === 'MARK'){
-      const cid = +ev.target.getAttribute('data-id');
-      const c = (essay.comments || []).find(x => x.id === cid);
-      if(c) showStudentCommentTooltip(c, ev.target);
-    }
-  });
+  /* Полный текст или фото работы с замечаниями */
+  const isPhotoEssay = essay.format === 'photo';
+  let bodyEl;
+  if(isPhotoEssay){
+    bodyEl = renderPhotosWithPins(essay.photoUrls || [], essay.comments || [], {
+      readonly: true,
+      onPinClick: (c, pinEl) => showStudentCommentTooltip(c, pinEl)
+    });
+  } else {
+    bodyEl = renderEssayWithMarks(essay.text || '', essay.comments || [], { readonly: true });
+    bodyEl.addEventListener('click', ev => {
+      if(ev.target && ev.target.tagName === 'MARK'){
+        const cid = +ev.target.getAttribute('data-id');
+        const c = (essay.comments || []).find(x => x.id === cid);
+        if(c) showStudentCommentTooltip(c, ev.target);
+      }
+    });
+  }
   /* Легенда цветов — только если есть выделения */
   let legend = null;
   if(essay.comments && essay.comments.length){
@@ -4050,16 +4254,22 @@ function modalEssayResult(essayId){
           m.crit + ' · ' + m.label);
       }));
   }
+  const subtitleParts = [];
+  if(!isPhotoEssay && essay.wordCount != null) subtitleParts.push(essay.wordCount + ' слов');
+  if(isPhotoEssay) subtitleParts.push('📸 ' + (essay.photoUrls || []).length + ' стр.');
+  if(essay.submittedAt) subtitleParts.push('сдано ' + new Date(essay.submittedAt).toLocaleString('ru-RU', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }));
+
   const textBlock = el('div', { class:'card', style:{ marginBottom:'12px' }},
     el('h4', { style:{ marginBottom:'8px' }}, '📝 Твоя работа'),
-    el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginBottom:'8px' }},
-      essay.wordCount + ' слов · сдано ' + (essay.submittedAt ? new Date(essay.submittedAt).toLocaleString('ru-RU', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) : '—')),
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginBottom:'8px' }}, subtitleParts.join(' · ') || '—'),
     legend,
     (essay.comments && essay.comments.length)
       ? el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'6px' }},
-          '💡 Кликни по выделенному фрагменту, чтобы прочитать замечание учителя.')
+          isPhotoEssay
+            ? '💡 Кликни по цветному пину, чтобы прочитать замечание учителя.'
+            : '💡 Кликни по выделенному фрагменту, чтобы прочитать замечание учителя.')
       : null,
-    textEl);
+    bodyEl);
   body.append(textBlock);
 
   if(r.general_comment){
@@ -4487,32 +4697,51 @@ function modalEssayReview(essayId){
   const wordCount = essay.wordCount != null ? essay.wordCount : countEssayWords(essayText);
   const isCurator = STATE.essayBy === 'curator';
 
-  /* Левая колонка: текст + выделения */
+  /* Левая колонка: текст или фото + выделения/пины */
   const leftCol = el('div', null);
-  const essayTextEl = renderEssayWithMarks(essayText, essay.comments || [], { readonly: false });
-  /* Обработка выделения: показываем popup с категорией + комментарием */
-  essayTextEl.addEventListener('mouseup', () => {
-    setTimeout(() => showErrPopup(essay, essayTextEl, essayText), 0);
-  });
-  /* Клик по существующему mark → показ popup с возможностью удалить */
-  essayTextEl.addEventListener('click', ev => {
-    if(ev.target && ev.target.tagName === 'MARK'){
-      const cid = +ev.target.getAttribute('data-id');
-      const c = (essay.comments || []).find(x => x.id === cid);
-      if(c) showExistingCommentPopup(essay, c, ev.target);
-    }
-  });
+  const isPhotoEssay = essay.format === 'photo';
 
-  leftCol.append(
-    el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'10px', flexWrap:'wrap' }},
-      el('div', { style:{ fontWeight:'700', fontSize:'14px' }}, '✍️ ' + (essay.studentName || 'Ученик')),
+  let essayBodyEl;
+  if(isPhotoEssay){
+    essayBodyEl = renderPhotosWithPins(essay.photoUrls || [], essay.comments || [], {
+      readonly: false,
+      onPinClick: (c, pinEl) => showExistingCommentPopup(essay, c, pinEl),
+      onPhotoClick: ({ page, x, y, pageWrap }) => showPhotoErrPopup(essay, pageWrap, { page, x, y })
+    });
+  } else {
+    essayBodyEl = renderEssayWithMarks(essayText, essay.comments || [], { readonly: false });
+    essayBodyEl.addEventListener('mouseup', () => {
+      setTimeout(() => showErrPopup(essay, essayBodyEl, essayText), 0);
+    });
+    essayBodyEl.addEventListener('click', ev => {
+      if(ev.target && ev.target.tagName === 'MARK'){
+        const cid = +ev.target.getAttribute('data-id');
+        const c = (essay.comments || []).find(x => x.id === cid);
+        if(c) showExistingCommentPopup(essay, c, ev.target);
+      }
+    });
+  }
+
+  /* Шапка с инфой о работе */
+  const headBadges = el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'10px', flexWrap:'wrap' }},
+    el('div', { style:{ fontWeight:'700', fontSize:'14px' }}, '✍️ ' + (essay.studentName || 'Ученик')));
+  if(isPhotoEssay){
+    headBadges.append(
+      chip('📸 фото · ' + (essay.photoUrls || []).length + ' стр.', 'p'));
+  } else {
+    headBadges.append(
       chip('📝 текстовая сдача', 'p'),
       chip(wordCount + ' слов · ' + (wordCount >= 150 ? 'норма' : '< 150 — НЕ ЗАСЧИТЫВАЕТСЯ'),
-           wordCount >= 150 ? 'green' : 'red')),
+           wordCount >= 150 ? 'green' : 'red'));
+  }
+
+  leftCol.append(
+    headBadges,
     el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
-      '💡 Выделите фрагмент текста, чтобы добавить комментарий-ошибку. Клик по подсветке — посмотреть/удалить.'),
-    essayTextEl,
-    /* Список комментариев */
+      isPhotoEssay
+        ? '💡 Кликни по фото в месте ошибки — поставится пин с категорией и комментарием. Клик по пину — посмотреть/удалить. Баллы К4–К10 пересчитаются автоматически.'
+        : '💡 Выделите фрагмент текста, чтобы добавить комментарий-ошибку. Клик по подсветке — посмотреть/удалить. Баллы К4–К10 пересчитаются автоматически.'),
+    essayBodyEl,
     (essay.comments && essay.comments.length)
       ? el('div', { class:'card', style:{ marginTop:'12px', background:'var(--surface-soft)' }},
           el('h4', { style:{ marginBottom:'8px' }}, '🏷 Замечания (' + essay.comments.length + ')'),
@@ -4614,6 +4843,75 @@ function modalEssayReview(essayId){
   }, modal);
 }
 
+/* Popup для нового пина на фото — учитель кликнул по точке на фотографии */
+function showPhotoErrPopup(essay, pageWrap, anchor){
+  document.querySelectorAll('.err-popup').forEach(n => n.remove());
+  /* Поставим временный «призрак» пина в месте клика, чтобы было понятно куда */
+  const ghost = el('div', {
+    class: 'pin pin-orf',
+    style: { left: (anchor.x * 100) + '%', top: (anchor.y * 100) + '%', opacity:'.5' }
+  }, '?');
+  pageWrap.append(ghost);
+
+  const rect = pageWrap.getBoundingClientRect();
+  const popup = el('div', { class:'err-popup' });
+  popup.style.left = Math.max(8, Math.min(window.innerWidth - 360, rect.left + rect.width * anchor.x)) + 'px';
+  popup.style.top = (rect.top + window.scrollY + rect.height * anchor.y + 30) + 'px';
+
+  let chosenKind = 'orf';
+  const kindBtns = ERR_KINDS.map(k => el('button', {
+    class: 'kind-btn' + (k.id === chosenKind ? ' active' : ''),
+    style: { background: k.bg, borderColor: k.bg },
+    onclick: ev => {
+      chosenKind = k.id;
+      popup.querySelectorAll('.kind-btn').forEach(b => b.classList.remove('active'));
+      ev.currentTarget.classList.add('active');
+      ghost.className = 'pin pin-' + k.id;
+    }
+  }, k.crit + ' ' + k.label));
+
+  const ta = el('textarea', { placeholder: 'Комментарий к этой ошибке' });
+  const status = el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, '');
+  const cleanup = () => { ghost.remove(); popup.remove(); };
+  const cancelBtn = el('button', { class:'btn btn-secondary btn-sm', onclick: cleanup }, 'Отмена');
+  const saveBtn = el('button', { class:'btn btn-p btn-sm',
+    onclick: async () => {
+      saveBtn.disabled = true; status.textContent = '⏳';
+      try {
+        const row = await saveEssayComment(essay.id, {
+          photo_anchor: { page: anchor.page, x: anchor.x, y: anchor.y },
+          kind: chosenKind, comment: ta.value.trim() || ''
+        });
+        essay.comments = essay.comments || [];
+        if(row) essay.comments.push(row);
+        recomputeErrorsFromComments(essay.comments);
+        cleanup();
+        render();
+      } catch(e){
+        status.textContent = '⚠ ' + e.message;
+        saveBtn.disabled = false;
+      }
+    }
+  }, '✓ Сохранить');
+
+  popup.append(
+    el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'6px' }},
+      'Пин на странице ' + (anchor.page + 1)),
+    el('div', { class:'kinds' }, ...kindBtns),
+    ta,
+    el('div', { class:'row' }, status, cancelBtn, saveBtn));
+  document.body.append(popup);
+  setTimeout(() => ta.focus(), 50);
+
+  const closer = (ev) => {
+    if(!popup.contains(ev.target) && !pageWrap.contains(ev.target)){
+      cleanup();
+      document.removeEventListener('mousedown', closer);
+    }
+  };
+  setTimeout(() => document.addEventListener('mousedown', closer), 100);
+}
+
 /* Popup для нового замечания при выделении текста */
 function showErrPopup(essay, container, fullText){
   /* Удалить уже открытые popup-ы */
@@ -4662,6 +4960,7 @@ function showErrPopup(essay, container, fullText){
         });
         essay.comments = essay.comments || [];
         if(row) essay.comments.push(row);
+        recomputeErrorsFromComments(essay.comments);
         popup.remove();
         sel.removeAllRanges();
         render();
@@ -4734,6 +5033,7 @@ function showExistingCommentPopup(essay, c, markEl){
           try {
             await deleteEssayComment(c.id);
             essay.comments = (essay.comments || []).filter(x => x.id !== c.id);
+            recomputeErrorsFromComments(essay.comments);
             popup.remove();
             render();
           } catch(e){ alert('⚠ ' + e.message); }
@@ -4759,6 +5059,7 @@ function commentItemRow(essay, c){
         try {
           await deleteEssayComment(c.id);
           essay.comments = (essay.comments || []).filter(x => x.id !== c.id);
+          recomputeErrorsFromComments(essay.comments);
           render();
         } catch(e){ alert('⚠ ' + e.message); }
       }
