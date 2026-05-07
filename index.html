@@ -1202,38 +1202,6 @@ async function submitEssay(opts){
 }
 
 /* === Голосовые комментарии: запись + загрузка === */
-let _activeRecording = null;
-
-async function startVoiceRecording(){
-  if(_activeRecording) throw new Error('Запись уже идёт');
-  if(!navigator.mediaDevices || !window.MediaRecorder) throw new Error('Браузер не поддерживает запись звука');
-  const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-  const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
-    : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
-    : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4'
-    : '';
-  const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
-  const chunks = [];
-  rec.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
-  const stopPromise = new Promise(resolve => {
-    rec.onstop = () => {
-      stream.getTracks().forEach(t => t.stop());
-      resolve(new Blob(chunks, { type: rec.mimeType || 'audio/webm' }));
-    };
-  });
-  rec.start();
-  _activeRecording = { rec, stopPromise };
-  return _activeRecording;
-}
-
-function stopVoiceRecording(){
-  if(!_activeRecording) return null;
-  const r = _activeRecording;
-  _activeRecording = null;
-  if(r.rec.state !== 'inactive') r.rec.stop();
-  return r.stopPromise;
-}
-
 async function uploadEssayAudio(blob){
   if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
   const ext = (blob.type || '').includes('mp4') ? 'm4a' : 'webm';
@@ -1246,45 +1214,102 @@ async function uploadEssayAudio(blob){
 }
 
 /* Виджет «Записать / Стоп / Прослушать / Удалить».
-   Возвращает { node, getUrl }. Рендерит обычный div, состояние внутри замыкания.
-   onChange(url|null) — опционально, вызывается при изменении url. */
+   Состояние локально для конкретного экземпляра — несколько виджетов на странице
+   независимы друг от друга. Если узел виджета удалён из DOM (например, попап
+   закрыли) — запись и поток микрофона останавливаются автоматически. */
 function makeVoiceRecorder(initialUrl, onChange){
   const wrap = el('div', { style:{ display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap' }});
   let currentUrl = initialUrl || null;
   let isRecording = false;
   let timerId = null;
   let startedAt = 0;
+  let mediaRec = null;
+  let mediaStream = null;
+  let chunks = [];
+  let observer = null;
 
   const setUrl = u => { currentUrl = u; onChange && onChange(u); };
 
+  const cleanupTracks = () => {
+    if(mediaStream){
+      try { mediaStream.getTracks().forEach(t => t.stop()); } catch(e){}
+      mediaStream = null;
+    }
+  };
+
+  const forceAbort = () => {
+    if(timerId){ clearInterval(timerId); timerId = null; }
+    if(mediaRec && mediaRec.state !== 'inactive'){
+      try { mediaRec.onstop = null; mediaRec.stop(); } catch(e){}
+    }
+    cleanupTracks();
+    mediaRec = null;
+    chunks = [];
+    isRecording = false;
+    if(observer){ try { observer.disconnect(); } catch(e){} observer = null; }
+  };
+
   const refresh = () => {
+    /* Если виджет уже не в DOM — отменяем всё и выходим */
+    if(!document.body.contains(wrap)){
+      forceAbort();
+      return;
+    }
     wrap.innerHTML = '';
     const recBtn = el('button', { type:'button', class: isRecording ? 'btn btn-sm' : 'btn btn-secondary btn-sm',
       style: isRecording ? { background:'var(--red)', color:'#fff' } : {},
       onclick: async () => {
         if(isRecording){
+          /* Остановить + дождаться blob + залить */
           recBtn.disabled = true;
           recBtn.textContent = '⏳ заливаем…';
           if(timerId){ clearInterval(timerId); timerId = null; }
           try {
-            const blob = await stopVoiceRecording();
+            const blob = await new Promise((resolve, reject) => {
+              if(!mediaRec){ reject(new Error('Запись не была начата')); return; }
+              mediaRec.onstop = () => {
+                cleanupTracks();
+                resolve(new Blob(chunks, { type: mediaRec.mimeType || 'audio/webm' }));
+              };
+              try { mediaRec.stop(); } catch(e){ reject(e); }
+            });
+            mediaRec = null;
+            chunks = [];
             const url = await uploadEssayAudio(blob);
             setUrl(url);
             isRecording = false;
             refresh();
           } catch(e){
             alert('⚠ ' + e.message);
-            isRecording = false;
+            forceAbort();
             refresh();
           }
         } else {
+          /* Старт */
           try {
-            await startVoiceRecording();
+            if(!navigator.mediaDevices || !window.MediaRecorder) throw new Error('Браузер не поддерживает запись звука');
+            mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus'
+              : MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm'
+              : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4'
+              : '';
+            mediaRec = new MediaRecorder(mediaStream, mime ? { mimeType: mime } : {});
+            chunks = [];
+            mediaRec.ondataavailable = e => { if(e.data && e.data.size) chunks.push(e.data); };
+            mediaRec.start();
             isRecording = true;
             startedAt = Date.now();
+            /* Наблюдатель: если узел исчезнет из DOM — стопаем поток */
+            if(!observer){
+              observer = new MutationObserver(() => {
+                if(!document.body.contains(wrap)) forceAbort();
+              });
+              observer.observe(document.body, { childList: true, subtree: true });
+            }
             refresh();
             timerId = setInterval(refresh, 500);
           } catch(e){
+            cleanupTracks();
             alert('⚠ ' + e.message);
           }
         }
@@ -1305,7 +1330,7 @@ function makeVoiceRecorder(initialUrl, onChange){
     }
   };
   refresh();
-  return { node: wrap, getUrl: () => currentUrl };
+  return { node: wrap, getUrl: () => currentUrl, abort: forceAbort };
 }
 
 /* Загрузить фото сочинения в Storage. Возвращает publicUrl.
@@ -4414,16 +4439,18 @@ function modalEssayResult(essayId){
     bodyEl);
   body.append(textBlock);
 
-  if(r.general_comment || r.voice_url){
+  const rTxt = safeComment(r.general_comment);
+  const rVu = safeVoiceUrl(r.voice_url);
+  if(rTxt || rVu){
     body.append(el('div', { class:'card', style:{ background:'var(--p-soft)', border:'1px solid var(--p-2)', marginBottom:'10px' }},
       el('h4', null, '💬 Комментарий учителя'),
-      r.general_comment
-        ? el('p', { style:{ marginTop:'6px', whiteSpace:'pre-wrap', lineHeight:'1.5', fontSize:'14px' }}, r.general_comment)
+      rTxt
+        ? el('p', { style:{ marginTop:'6px', whiteSpace:'pre-wrap', lineHeight:'1.5', fontSize:'14px' }}, rTxt)
         : null,
-      r.voice_url
+      rVu
         ? el('div', { style:{ marginTop:'8px' }},
             el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'4px' }}, '🎤 Голосовое сообщение:'),
-            el('audio', { controls:'controls', src: r.voice_url, style:{ width:'100%', height:'36px' }}))
+            el('audio', { controls:'controls', src: rVu, style:{ width:'100%', height:'36px' }}))
         : null));
   }
   body.append(
@@ -5154,6 +5181,10 @@ function showErrPopup(essay, container, fullText){
   setTimeout(() => document.addEventListener('mousedown', closer), 100);
 }
 
+/* Утилиты — фильтруем пустые / литеральные «null» из БД */
+function safeComment(s){ return (s && s !== 'null') ? s : ''; }
+function safeVoiceUrl(u){ return (u && u !== 'null' && (''+u).indexOf('http') === 0) ? u : null; }
+
 /* Tooltip для ученика — только просмотр замечания */
 function showStudentCommentTooltip(c, markEl){
   document.querySelectorAll('.err-popup').forEach(n => n.remove());
@@ -5162,16 +5193,18 @@ function showStudentCommentTooltip(c, markEl){
   const popup = el('div', { class:'err-popup', style:{ width:'320px' }});
   popup.style.left = Math.max(8, Math.min(window.innerWidth - 340, rect.left)) + 'px';
   popup.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+  const txt = safeComment(c.comment);
+  const vu = safeVoiceUrl(c.voice_url);
   popup.append(
     el('div', { style:{ fontSize:'12px', fontWeight:'700', marginBottom:'4px',
       padding:'4px 8px', background: meta.bg, borderRadius:'6px', display:'inline-block' }},
       meta.crit + ' · ' + meta.label),
     el('div', { style:{ fontSize:'13px', marginTop:'6px', whiteSpace:'pre-wrap' }},
-      c.comment || (c.voice_url ? '' : '(без комментария)')),
-    c.voice_url
+      txt || (vu ? '' : '(без комментария)')),
+    vu
       ? el('div', { style:{ marginTop:'8px' }},
           el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'4px' }}, '🎤 Голос учителя:'),
-          el('audio', { controls:'controls', src: c.voice_url, style:{ width:'100%', height:'36px' }}))
+          el('audio', { controls:'controls', src: vu, style:{ width:'100%', height:'36px' }}))
       : null,
     el('div', { class:'row' },
       el('button', { class:'btn btn-secondary btn-sm', onclick: () => popup.remove() }, 'Закрыть')));
@@ -5188,15 +5221,17 @@ function showExistingCommentPopup(essay, c, markEl){
   const popup = el('div', { class:'err-popup', style:{ width:'320px' }});
   popup.style.left = Math.max(8, Math.min(window.innerWidth - 340, rect.left)) + 'px';
   popup.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+  const txtT = safeComment(c.comment);
+  const vuT = safeVoiceUrl(c.voice_url);
   popup.append(
     el('div', { style:{ fontSize:'12px', fontWeight:'700', marginBottom:'4px',
       padding:'4px 8px', background: meta.bg, borderRadius:'6px', display:'inline-block' }},
       meta.crit + ' · ' + meta.label),
     el('div', { style:{ fontSize:'13px', marginTop:'6px', whiteSpace:'pre-wrap' }},
-      c.comment || (c.voice_url ? '' : '(без комментария)')),
-    c.voice_url
+      txtT || (vuT ? '' : '(без комментария)')),
+    vuT
       ? el('div', { style:{ marginTop:'8px' }},
-          el('audio', { controls:'controls', src: c.voice_url, style:{ width:'100%', height:'36px' }}))
+          el('audio', { controls:'controls', src: vuT, style:{ width:'100%', height:'36px' }}))
       : null,
     el('div', { class:'row' },
       el('button', { class:'btn btn-secondary btn-sm', onclick: () => popup.remove() }, 'Закрыть'),
@@ -5226,8 +5261,8 @@ function commentItemRow(essay, c){
     el('div', { style:{ flex:1, minWidth:0 }},
       el('span', { class:'frag' }, where),
       el('div', null,
-        c.comment || el('span', { style:{ color:'var(--ink-3)' }}, c.voice_url ? '(голос)' : '(без комментария)'),
-        c.voice_url ? el('span', { style:{ marginLeft:'6px', fontSize:'11px' }}, '🎤') : null)),
+        safeComment(c.comment) || el('span', { style:{ color:'var(--ink-3)' }}, safeVoiceUrl(c.voice_url) ? '(голос)' : '(без комментария)'),
+        safeVoiceUrl(c.voice_url) ? el('span', { style:{ marginLeft:'6px', fontSize:'11px' }}, '🎤') : null)),
     el('button', { class:'btn-icon', title:'Удалить',
       style:{ background:'var(--red-soft)', color:'var(--red)' },
       onclick: async () => {
