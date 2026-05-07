@@ -386,7 +386,7 @@ const STATE = {
   showOnboarding: false,
   theoryOpen: null,        // номер задания
   attendanceOpen: false,   // открыта модалка посещаемости
-  scoresK: {}, errors: {},
+  scoresK: {}, errors: {}, essayComment: '',
   testAnswers: {},
   testChecked: false,
   testShuffle: null,    // если задано — открыт тренажёр случайных пар (число вопросов)
@@ -1189,6 +1189,71 @@ async function loadEssaysFromDb(){
   } catch(e){
     console.warn('Не удалось загрузить сочинения:', e.message);
   }
+}
+
+/* Загрузить существующую review (если куратор уже предпроверил — учитель увидит баллы) */
+async function loadEssayReview(essayId){
+  if(!sb) return null;
+  try {
+    const arr = await restRequest('GET', '/essay_reviews?essay_id=eq.' + encodeURIComponent(essayId) + '&select=*');
+    return Array.isArray(arr) && arr.length ? arr[0] : null;
+  } catch(e){
+    console.warn('Не удалось загрузить review:', e.message);
+    return null;
+  }
+}
+
+/* Сохранить оценку К1-К10 + общий комментарий + сменить статус сочинения.
+   nextStatus: 'in_progress' | 'pre_checked' | 'done'
+   isPreCheck: true для куратора */
+async function saveEssayReview(essayId, nextStatus, isPreCheck){
+  if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
+  /* собираем баллы из STATE */
+  const k1 = STATE.scoresK.K1 != null ? +STATE.scoresK.K1 : 1;
+  const lockK2K3 = k1 === 0;
+  const pick = id => {
+    if((id === 'K2' || id === 'K3') && lockK2K3) return 0;
+    const v = STATE.scoresK[id];
+    if(v != null) return +v;
+    /* default = max из CRIT */
+    const c = CRIT.find(x => x.id === id);
+    return c ? c.max : 0;
+  };
+  let total = 0;
+  CRIT.forEach(c => total += pick(c.id));
+  const payload = {
+    essay_id: essayId,
+    k1: pick('K1'), k2: pick('K2'), k3: pick('K3'),
+    k4: pick('K4'), k5: pick('K5'), k6: pick('K6'),
+    k7: pick('K7'), k8: pick('K8'), k9: pick('K9'), k10: pick('K10'),
+    k7_errors: STATE.errors.K7 != null ? +STATE.errors.K7 : null,
+    k8_errors: STATE.errors.K8 != null ? +STATE.errors.K8 : null,
+    k9_errors: STATE.errors.K9 != null ? +STATE.errors.K9 : null,
+    k10_errors: STATE.errors.K10 != null ? +STATE.errors.K10 : null,
+    total: total,
+    general_comment: (STATE.essayComment || '').trim() || null,
+    is_pre_check: !!isPreCheck,
+    reviewer_id: MY_PROFILE.id,
+    reviewed_at: new Date().toISOString()
+  };
+  /* upsert через Prefer: resolution=merge-duplicates (essay_id — PK) */
+  await restRequest('POST', '/essay_reviews', payload, { prefer: 'resolution=merge-duplicates,return=minimal' });
+  /* теперь обновим статус самого сочинения */
+  const essayUpdate = { status: nextStatus };
+  if(isPreCheck) essayUpdate.pre_checked_by = MY_PROFILE.id;
+  if(nextStatus === 'done'){
+    essayUpdate.finalized_by = MY_PROFILE.id;
+    essayUpdate.finalized_at = new Date().toISOString();
+  }
+  await restRequest('PATCH', '/essays?id=eq.' + encodeURIComponent(essayId), essayUpdate, { prefer: 'return=minimal' });
+  /* обновим локальный кэш и счётчики */
+  const e = DB_ESSAYS.find(x => x.id === essayId);
+  if(e){
+    e.status = nextStatus;
+    if(nextStatus === 'done') e.finalScore = total;
+    if(isPreCheck) e.preScore = total;
+  }
+  return total;
 }
 
 /* Загрузить файл в Storage + создать запись в materials.
@@ -3406,7 +3471,29 @@ function essayRow(e, isCurator){
   return el('div', {
     class:'card',
     style:{ background:'var(--surface-soft)', padding:'12px 14px', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px', gap:'10px' },
-    onclick: () => { STATE.essayOpen = e.id; STATE.essayBy = isCurator ? 'curator' : 'teacher'; render(); }
+    onclick: async () => {
+      STATE.essayOpen = e.id;
+      STATE.essayBy = isCurator ? 'curator' : 'teacher';
+      STATE.scoresK = {};
+      STATE.errors = {};
+      STATE.essayComment = '';
+      /* Подтянем существующую review (если есть — например, куратор уже предпроверил) */
+      if(typeof e.id === 'number' && sb){
+        try {
+          const r = await loadEssayReview(e.id);
+          if(r){
+            ['k1','k2','k3','k4','k5','k6','k7','k8','k9','k10'].forEach(k => {
+              if(r[k] != null) STATE.scoresK[k.toUpperCase()] = r[k];
+            });
+            ['k7_errors','k8_errors','k9_errors','k10_errors'].forEach(k => {
+              if(r[k] != null) STATE.errors[k.replace('_errors','').toUpperCase()] = r[k];
+            });
+            if(r.general_comment) STATE.essayComment = r.general_comment;
+          }
+        } catch(err){ console.warn(err); }
+      }
+      render();
+    }
   },
     el('div', { style:{ display:'flex', gap:'10px', alignItems:'center', minWidth:0, flex:1 }},
       el('span', { style:{ fontSize:'20px' }}, '📝'),
@@ -4126,6 +4213,16 @@ function modalEssayReview(essayId){
   /* Ищем сначала в реальных DB_ESSAYS, потом в моках */
   const essay = DB_ESSAYS.find(e => e.id === essayId) || ESSAYS.find(e => e.id === essayId);
   if(!essay) return null;
+  /* Ярлык сочинения: для DB-работы это «Сочинение по тексту…» (берём начало body), для мока — essay.text */
+  const isDb = DB_ESSAYS.find(e => e.id === essayId);
+  const essayLabel = isDb ? 'Сочинение' : essay.text;
+  /* Подзаголовок с датой */
+  let whenLabel = essay.when;
+  if(!whenLabel && essay.submittedAt){
+    try { whenLabel = new Date(essay.submittedAt).toLocaleString('ru-RU', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }); }
+    catch(e){ whenLabel = essay.submittedAt; }
+  }
+  if(!whenLabel) whenLabel = '—';
 
   const k1 = STATE.scoresK.K1 ?? 1;
   const lockK2K3 = k1 === 0;
@@ -4199,7 +4296,9 @@ function modalEssayReview(essayId){
       el('h4', null, '💬 Общий комментарий ученику'),
       el('textarea', {
         placeholder: isCurator ? 'Куратор: ваш предварительный комментарий — учитель сможет его дополнить.' : 'Аня, отличная работа над комментарием…',
-        style:{ width:'100%', padding:'10px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'80px', resize:'vertical', marginTop:'8px' }
+        style:{ width:'100%', padding:'10px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'80px', resize:'vertical', marginTop:'8px' },
+        value: STATE.essayComment || '',
+        oninput: ev => { STATE.essayComment = ev.target.value; }
       }),
       el('button', { class:'btn btn-secondary btn-sm', style:{ marginTop:'8px' },
         onclick: () => showToast('Запись голоса для общего комментария')
@@ -4211,18 +4310,47 @@ function modalEssayReview(essayId){
     el('div', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
       lockK2K3 ? '⚠️ К1=0 → К2 и К3 автоматически 0 (по методике)' : '✓ К1≠0 — можно ставить К2 и К3'));
 
+  /* Действие после сохранения: чистим STATE и рендерим */
+  const doAfter = (msg) => {
+    STATE.essayOpen = null;
+    STATE.essayBy = null;
+    STATE.scoresK = {};
+    STATE.errors = {};
+    STATE.essayComment = '';
+    if(msg) showToast(msg);
+    render();
+  };
+  /* Универсальный хэндлер сохранения review (для DB-сочинений) или мок-обновления */
+  const doSave = async (nextStatus, isPreCheck, msg) => {
+    if(isDb && sb && MY_PROFILE){
+      try {
+        const t = await saveEssayReview(essayId, nextStatus, isPreCheck);
+        doAfter(msg.replace('{score}', t));
+      } catch(err){
+        console.error(err);
+        showToast('Ошибка сохранения: ' + err.message);
+      }
+    } else {
+      /* мок — как раньше */
+      essay.status = nextStatus;
+      if(isPreCheck){ essay.preBy = 'c-sofia'; essay.preScore = total; }
+      if(nextStatus === 'done') essay.finalScore = total;
+      doAfter(msg.replace('{score}', total));
+    }
+  };
+
   if(isCurator){
     foot.append(el('button', { class:'btn btn-teal',
-      onclick: () => { essay.status = 'pre_checked'; essay.preBy = 'c-sofia'; essay.preScore = total; STATE.essayOpen = null; STATE.scoresK = {}; STATE.errors = {}; showToast('Передано учителю · ' + total + '/22'); render(); }
+      onclick: () => doSave('pre_checked', true, 'Передано учителю · {score}/22')
     }, '✓ Передать учителю на подтверждение'));
   } else {
     foot.append(
       el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' }},
         el('button', { class:'btn btn-secondary',
-          onclick: () => { essay.status = 'in_progress'; STATE.essayOpen = null; STATE.scoresK = {}; STATE.errors = {}; showToast('Сохранено как «в работе»'); render(); }
+          onclick: () => doSave('in_progress', false, 'Сохранено как «в работе»')
         }, 'Сохранить и закрыть'),
         el('button', { class:'btn btn-p',
-          onclick: () => { essay.status = 'done'; essay.finalScore = total; STATE.essayOpen = null; STATE.scoresK = {}; STATE.errors = {}; showToast('Опубликовано · +' + total + ' 🐝'); render(); }
+          onclick: () => doSave('done', false, 'Опубликовано · +{score} 🐝')
         }, '✓ Опубликовать ученику')));
   }
 
@@ -4232,17 +4360,17 @@ function modalEssayReview(essayId){
     el('div', { class:'modal-head' },
       el('div', null,
         el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
-          essay.studentName + ' · ' + essay.when + (isCurator ? ' · режим куратора' : '')),
-        el('h2', null, '✍️ ' + essay.text)),
+          essay.studentName + ' · ' + whenLabel + (isCurator ? ' · режим куратора' : '')),
+        el('h2', null, '✍️ ' + essayLabel)),
       el('button', { class:'x',
-        onclick: () => { STATE.essayOpen = null; STATE.scoresK = {}; STATE.errors = {}; render(); }
+        onclick: () => { STATE.essayOpen = null; STATE.essayBy = null; STATE.scoresK = {}; STATE.errors = {}; STATE.essayComment = ''; render(); }
       }, '×')),
     el('div', { class:'modal-body' },
       el('div', { class:'essay-grid' }, leftCol, rightCol)),
     foot);
 
   return el('div', { class:'modal-bg',
-    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.essayOpen = null; STATE.scoresK = {}; STATE.errors = {}; render(); }}
+    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.essayOpen = null; STATE.essayBy = null; STATE.scoresK = {}; STATE.errors = {}; STATE.essayComment = ''; render(); }}
   }, modal);
 }
 
