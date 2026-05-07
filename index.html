@@ -419,6 +419,7 @@ const STATE = {
   attendanceOpen: false,   // открыта модалка посещаемости
   scoresK: {}, errors: {}, essayComment: '', essayVoiceUrl: null,
   studentEssayResultOpen: null,
+  sampleOpen: null,
   testAnswers: {},
   testChecked: false,
   testShuffle: null,    // если задано — открыт тренажёр случайных пар (число вопросов)
@@ -827,7 +828,7 @@ async function restoreSession(){
         else STATE.view = 'student';
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb()]).then(() => render()).catch(() => {});
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb()]).then(() => render()).catch(() => {});
         return;
       } else {
         STATE.authLoading = false;
@@ -883,7 +884,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb()]).then(() => render()).catch(() => {});
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb()]).then(() => render()).catch(() => {});
   } else {
     STATE.view = 'login';
   }
@@ -1055,8 +1056,9 @@ const ESSAYS = [
   { id: 'e5', studentId: 's5', studentName: 'Иван Лебедев', text: 'Сочинение по тексту Лихачёва', when: '5 ч. назад', status: 'new' },
 ];
 
-/* Образцы сочинений в Базе знаний (с разбалловкой) */
-const SAMPLES = [
+/* Образцы сочинений в Базе знаний (с разбалловкой).
+   ПРИМЕЧАНИЕ: при загрузке из БД (essay_samples) этот массив дополняется/перезаписывается. */
+let SAMPLES = [
   { id: 'sample-sofia', author: 'София Малинина', score: 22, maxScore: 22, level: 'high',
     title: 'Какой опыт приобретает молодой человек, служа в армии? (К.Я. Ваншенкин)',
     short: 'Образцовая работа: проблема через вопрос, два примера со связкой, аргумент из «Капитанской дочки» Пушкина.',
@@ -1382,6 +1384,39 @@ async function loadEssaysFromDb(){
     }
   } catch(e){
     console.warn('Не удалось загрузить сочинения:', e.message);
+  }
+}
+
+/* Загрузить образцы из БД и заменить мок SAMPLES.
+   Если БД пуста или ошибка — оставляем моки. */
+async function loadEssaySamplesFromDb(){
+  if(!sb) return;
+  try {
+    const arr = await restRequest('GET', '/essay_samples?select=*&order=score.desc,created_at.desc&limit=50');
+    if(!Array.isArray(arr) || !arr.length){
+      console.log('essay_samples пуст — оставляем моки');
+      return;
+    }
+    SAMPLES = arr.map(s => ({
+      id: s.id,
+      _db: true,
+      author: s.author_name || 'Без автора',
+      title: s.title,
+      score: s.score,
+      maxScore: s.max_score || 22,
+      level: s.level || (s.score >= 18 ? 'high' : s.score >= 12 ? 'medium' : 'low'),
+      short: s.short || '',
+      text: s.text,
+      photoUrls: Array.isArray(s.photo_urls) ? s.photo_urls : [],
+      kBreakdown: s.k_breakdown || null,
+      breakdown: s.k_breakdown
+        ? Object.entries(s.k_breakdown).map(([k, v]) => k + ': ' + v).join(' · ')
+        : '',
+      comments: s.comments || ''
+    }));
+    console.log('✓ Образцов загружено: ' + SAMPLES.length);
+  } catch(e){
+    console.warn('Не удалось загрузить образцы:', e.message);
   }
 }
 
@@ -3005,8 +3040,10 @@ function theoryCard(t){
 function sampleCard(s){
   const lvlClass = s.level === 'high' ? '' : s.level === 'medium' ? 'medium' : 'low';
   return el('div', { class:'sample-card',
-    onclick: () => { if(s.id === 'sample-sofia') showToast('Откроется работа Софии 22/22 со всеми пометками экспертов');
-                     else showToast('Откроется образец работы '+s.author); }
+    onclick: () => {
+      if(s._db){ STATE.sampleOpen = s.id; render(); }
+      else showToast('Этот образец пока не загружен в БД — будет видно после прогона add_essay_samples.sql');
+    }
   },
     el('div', { class:'head' },
       el('div', null,
@@ -3015,6 +3052,91 @@ function sampleCard(s){
       el('div', { class:'score ' + lvlClass }, s.score + '/' + s.maxScore)),
     el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'10px' }}, s.short),
     el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', fontFamily:'monospace' }}, s.breakdown));
+}
+
+/* =======================================================================
+   МОДАЛЬ ОБРАЗЦА СОЧИНЕНИЯ — текст работы + баллы К1-К10 + разбор экспертов
+   ======================================================================= */
+function modalEssaySample(sampleId){
+  const s = SAMPLES.find(x => x.id === sampleId);
+  if(!s) return null;
+  const close = () => { STATE.sampleOpen = null; render(); };
+
+  /* Список баллов по К1-К10 */
+  const scoreList = el('div', { style:{ display:'flex', flexDirection:'column', gap:'6px', marginTop:'10px' }});
+  if(s.kBreakdown){
+    CRIT.forEach(c => {
+      const v = s.kBreakdown[c.id];
+      if(v == null) return;
+      const sec = c.sec;
+      const colorMap = { 'Содержание':'var(--p-soft)', 'Речь':'var(--y-soft)', 'Грамотность':'var(--green-soft)' };
+      scoreList.append(el('div', {
+        style:{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                padding:'10px 12px', background:colorMap[sec] || 'var(--surface-soft)', borderRadius:'10px' }
+      },
+        el('div', null,
+          el('div', { style:{ fontWeight:'700', fontSize:'13px' }}, c.id + ' · ' + c.name),
+          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, sec)),
+        el('div', { style:{ fontWeight:'800', fontSize:'15px' }}, v + ' / ' + c.max)));
+    });
+  }
+
+  /* Markdown-рендер для разбора (поддержка **жирного** и переводов строк) */
+  const renderComments = (txt) => {
+    if(!txt) return null;
+    let html = escHtml(txt).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/\n/g, '<br>');
+    return el('div', { html, style:{ fontSize:'13px', lineHeight:'1.6', whiteSpace:'pre-wrap' }});
+  };
+
+  const lvlClass = s.level === 'high' ? 'green' : s.level === 'medium' ? 'warn' : 'red';
+
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        'Образец сочинения · ' + s.author),
+      el('h2', { style:{ marginTop:'4px' }}, s.title)),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const body = el('div', { class:'modal-body' });
+
+  /* Бэйдж балла */
+  body.append(el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'14px', flexWrap:'wrap' }},
+    chip('🐝 ' + s.score + ' / ' + s.maxScore + ' баллов', lvlClass),
+    s.short ? el('span', { style:{ fontSize:'13px', color:'var(--ink-2)', flex:1, minWidth:'200px' }}, s.short) : null));
+
+  /* Текст работы */
+  if(s.text){
+    body.append(el('div', { class:'card', style:{ marginBottom:'12px' }},
+      el('h4', { style:{ marginBottom:'8px' }}, '📝 Текст работы'),
+      el('div', { class:'essay-text', style:{ whiteSpace:'pre-wrap' }}, s.text)));
+  }
+
+  /* Фото-страницы (если есть) */
+  if(s.photoUrls && s.photoUrls.length){
+    body.append(el('div', { class:'card', style:{ marginBottom:'12px' }},
+      el('h4', { style:{ marginBottom:'8px' }}, '📸 Сканы работы'),
+      renderPhotosWithPins(s.photoUrls, [], { readonly: true })));
+  }
+
+  /* Баллы по критериям */
+  if(s.kBreakdown){
+    body.append(el('h4', { style:{ marginTop:'4px' }}, '📊 Баллы по критериям'), scoreList);
+  }
+
+  /* Разбор экспертов */
+  if(s.comments){
+    body.append(el('div', { class:'card', style:{ background:'var(--p-soft)', border:'1px solid var(--p-2)', marginTop:'14px' }},
+      el('h4', null, '🎓 Разбор экспертов'),
+      renderComments(s.comments)));
+  }
+
+  const foot = el('div', { class:'modal-foot' },
+    el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }}, 'Учебный материал'),
+    el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть'));
+
+  return el('div', { class:'modal-bg', onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }},
+    el('div', { class:'modal', style:{ maxWidth:'820px' }}, head, body, foot));
 }
 
 /* =======================================================================
@@ -5695,19 +5817,30 @@ function viewContentSamples(){
 
   SAMPLES.forEach(s => {
     const lvlClass = s.level === 'high' ? '' : s.level === 'medium' ? 'medium' : 'low';
-    wrap.append(el('div', { class:'sample-card' },
+    wrap.append(el('div', { class:'sample-card', style:{ cursor: s._db ? 'pointer' : 'default' },
+      onclick: () => { if(s._db) { STATE.sampleOpen = s.id; render(); } }
+    },
       el('div', { class:'head' },
         el('div', null,
           el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', fontWeight:'700' }}, s.author),
           el('h4', { style:{ marginTop:'4px' }}, s.title)),
         el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
           el('div', { class:'score ' + lvlClass }, s.score + '/' + s.maxScore),
-          el('button', { class:'btn-icon', title:'Редактировать',
-            onclick: () => showToast('Откроется редактор образца')
-          }, '✏️'),
-          el('button', { class:'btn-icon', style:{ color:'var(--red)' }, title:'Удалить',
-            onclick: () => showToast('Подтвердите удаление')
-          }, '🗑'))),
+          s._db ? el('button', { class:'btn-icon', title:'Открыть',
+            onclick: ev => { ev.stopPropagation(); STATE.sampleOpen = s.id; render(); }
+          }, '👁') : null,
+          s._db ? el('button', { class:'btn-icon', style:{ color:'var(--red)' }, title:'Удалить',
+            onclick: async ev => {
+              ev.stopPropagation();
+              if(!confirm('Удалить образец «' + s.author + '»?')) return;
+              try {
+                await restRequest('DELETE', '/essay_samples?id=eq.' + s.id, null, { prefer: 'return=minimal' });
+                await loadEssaySamplesFromDb();
+                showToast('Удалено');
+                render();
+              } catch(e){ showToast('⚠ ' + e.message); }
+            }
+          }, '🗑') : null)),
       el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'10px' }}, s.short),
       el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', fontFamily:'monospace' }}, s.breakdown)));
   });
@@ -6479,6 +6612,7 @@ function render(){
   if(STATE.showOnboarding) root.append(modalOnboarding());
   if(STATE.essayDraftOpen) root.append(modalEssayDraft());
   if(STATE.studentEssayResultOpen != null) root.append(modalEssayResult(STATE.studentEssayResultOpen));
+  if(STATE.sampleOpen != null) root.append(modalEssaySample(STATE.sampleOpen));
   if(STATE.chatOpen && STATE.view !== 'login') root.append(chatPanel(STATE.view));
   if(STATE.toast) root.append(el('div', { class:'toast' }, STATE.toast));
 
