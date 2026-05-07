@@ -2748,14 +2748,25 @@ function taskAction(t, locked){
       onclick: () => { STATE.testOpen = 4; STATE.testAnswers = {}; STATE.testChecked = false; render(); }
     }, '⚡ Пройти');
   if(t.kind === 'essay'){
-    /* Уже сдал? Тогда кнопка меняется по статусу */
     const myId = MY_PROFILE && MY_PROFILE.id;
     const myEssay = myId ? DB_ESSAYS.find(x => x.studentId === myId) : null;
+    /* Кнопка-пересдача — небольшая, рядом с основным статусом */
+    const resubmitBtn = el('button', { class:'btn btn-secondary btn-sm', title:'Сдать ещё одну работу',
+      onclick: ev => {
+        ev.stopPropagation();
+        STATE.essayDraftOpen = true;
+        STATE.essayDraftText = '';
+        STATE.essayDraftPhotos = [];
+        STATE.essayDraftMode = 'typed';
+        render();
+      }
+    }, '↻ Пересдать');
+
     if(myEssay){
+      let primary;
       if(myEssay.status === 'done'){
-        return el('button', { class:'btn btn-p btn-sm',
+        primary = el('button', { class:'btn btn-p btn-sm',
           onclick: async () => {
-            /* Подтянем замечания учителя */
             if(typeof myEssay.id === 'number' && sb && !myEssay.comments){
               try { myEssay.comments = await loadEssayComments(myEssay.id); }
               catch(e){ myEssay.comments = []; }
@@ -2764,15 +2775,18 @@ function taskAction(t, locked){
             render();
           }
         }, '🐝 Результат: ' + (myEssay.finalScore != null ? myEssay.finalScore + '/22' : 'смотреть'));
+      } else if(myEssay.status === 'pre_checked'){
+        primary = chip('🤝 куратор проверил', 'teal');
+      } else if(myEssay.status === 'in_progress'){
+        primary = chip('📝 учитель проверяет', 'warn');
+      } else {
+        primary = chip('📝 на проверке', 'p');
       }
-      if(myEssay.status === 'pre_checked')
-        return chip('🤝 куратор проверил', 'teal');
-      if(myEssay.status === 'in_progress')
-        return chip('📝 учитель проверяет', 'warn');
-      return chip('📝 на проверке', 'p');
+      return el('div', { style:{ display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap', justifyContent:'flex-end' }},
+        primary, resubmitBtn);
     }
     return el('button', { class:'btn btn-p btn-sm',
-      onclick: () => { STATE.essayDraftOpen = true; render(); }
+      onclick: () => { STATE.essayDraftOpen = true; STATE.essayDraftText = ''; STATE.essayDraftPhotos = []; STATE.essayDraftMode = 'typed'; render(); }
     }, '✍️ Сдать');
   }
   if(t.kind === 'webinar')
