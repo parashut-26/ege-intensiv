@@ -1026,7 +1026,7 @@ async function restoreSession(){
         else STATE.view = 'student';
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb()]).then(() => render()).catch(() => {});
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb()]).then(() => render()).catch(() => {});
         return;
       } else {
         STATE.authLoading = false;
@@ -1082,7 +1082,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb()]).then(() => render()).catch(() => {});
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb()]).then(() => render()).catch(() => {});
   } else {
     STATE.view = 'login';
   }
@@ -1227,7 +1227,9 @@ const ME_STUDENT = {
   weakTopics: [4, 5, 8],
 };
 
-const STUDENTS = [
+/* STUDENTS — мок-данные. Заменяются на реальные из БД при первом успешном loadStudentsFromDb().
+   До загрузки оставляем мок, чтобы UI работал в демо-режиме. */
+let STUDENTS = [
   { id: 's1', name: 'Михаил Кузнецов', email: 'm.kuznetsov@mail.ru', type: 'гость', status: 'pending', bee: null, avg: null, progress: null, color: '#A78BFA', paid: false, paidAmount: 0 },
   { id: 's2', name: 'Анна Соколова',   email: 'anya.sokol@mail.ru', type: 'свой', status: 'active',  bee: 47,   avg: 94, progress: 68, color: '#FB7185', paid: true, paidAmount: 5000, paidDate: '15.04', paidMethod: 'СБП' },
   { id: 's3', name: 'Настя Колобаева', email: 'nastya.k@yandex.ru', type: 'свой', status: 'active',  bee: 28,   avg: 76, progress: 42, color: '#34D399', paid: true, paidAmount: 5000, paidDate: '12.04', paidMethod: 'карта' },
@@ -1548,6 +1550,34 @@ async function uploadEssayPhoto(file){
   });
   if(upErr) throw new Error('Storage: ' + upErr.message);
   return sb.storage.from('essays').getPublicUrl(path).data.publicUrl;
+}
+
+/* Цвета аватарок — циклически по индексу */
+const _AVATAR_COLORS = ['#A78BFA','#FB7185','#34D399','#FBBF24','#60A5FA','#F472B6','#22D3EE','#A3E635','#F87171','#818CF8','#FB923C','#10B981'];
+
+/* Загрузить реальный список учеников из БД */
+async function loadStudentsFromDb(){
+  if(!sb) return;
+  try {
+    const arr = await restRequest('GET', '/profiles?role=eq.student&select=id,full_name,email,s_type,s_status,bee,avatar_color&order=full_name.asc');
+    if(!Array.isArray(arr)){ console.warn('students load: не массив'); return; }
+    STUDENTS = arr.map((p, i) => ({
+      id: p.id,
+      name: p.full_name || (p.email ? p.email.split('@')[0] : 'Ученик'),
+      email: p.email || '',
+      type: p.s_type || 'гость',
+      status: p.s_status || 'active',
+      bee: p.bee != null ? p.bee : 0,
+      avg: null,        // вычислим позже из attempts
+      progress: null,   // вычислим позже из attempts
+      color: p.avatar_color || _AVATAR_COLORS[i % _AVATAR_COLORS.length],
+      paid: false,      // отдельная таблица payments — подтянем позже
+      paidAmount: 0
+    }));
+    console.log('✓ Учеников загружено: ' + STUDENTS.length);
+  } catch(e){
+    console.warn('Не удалось загрузить учеников:', e.message);
+  }
 }
 
 /* Кэш сочинений из БД (для учительского/кураторского списка) */
@@ -3430,6 +3460,8 @@ function modalImportStudents(){
         const result = await importStudents(parsed);
         STATE.importStudentsResult = result;
         STATE.importStudentsBusy = false;
+        /* Перезагружаем реальный список учеников из БД */
+        await loadStudentsFromDb();
         showToast('✓ Готово: создано ' + result.summary.created + ', обновлено ' + result.summary.updated);
         render();
       } catch(e){
