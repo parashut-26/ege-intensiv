@@ -1026,7 +1026,7 @@ async function restoreSession(){
         else STATE.view = 'student';
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb()]).then(() => render()).catch(() => {});
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb()]).then(() => render()).catch(() => {});
         return;
       } else {
         STATE.authLoading = false;
@@ -1082,7 +1082,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb()]).then(() => render()).catch(() => {});
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb()]).then(() => render()).catch(() => {});
   } else {
     STATE.view = 'login';
   }
@@ -1240,12 +1240,53 @@ let STUDENTS = [
   { id: 's8', name: 'Артём Волков',    email: 'artyom.v@yandex.ru', type: 'свой', status: 'pending', bee: null, avg: null, progress: null, color: '#A3E635', paid: false, paidAmount: 0 },
 ];
 
-const CURATORS = [
+/* CURATORS — мок до загрузки из БД */
+let CURATORS = [
   { id: 'c-sofia', name: 'София Малинина', email: 'sofia.m@mail.ru', color: '#A78BFA',
     perms: { addTasks: true, addMaterials: true, editTasks: false, manageDays: false, approveGuests: false } },
   { id: 'c-nastya', name: 'Анастасия Орлова', email: 'nastya.o@yandex.ru', color: '#F472B6',
     perms: { addTasks: false, addMaterials: false, editTasks: false, manageDays: false, approveGuests: false } },
 ];
+
+const _DEFAULT_CURATOR_PERMS = {
+  addTasks: false, addMaterials: false, editTasks: false,
+  manageDays: false, approveGuests: false
+};
+
+/* Загрузить реальный список кураторов из БД */
+async function loadCuratorsFromDb(){
+  if(!sb) return;
+  try {
+    const arr = await restRequest('GET', '/profiles?role=eq.curator&select=id,full_name,email,avatar_color,curator_perms&order=full_name.asc');
+    if(!Array.isArray(arr)){ return; }
+    CURATORS = arr.map((p, i) => ({
+      id: p.id,
+      name: p.full_name || (p.email ? p.email.split('@')[0] : 'Куратор'),
+      email: p.email || '',
+      color: p.avatar_color || _AVATAR_COLORS[i % _AVATAR_COLORS.length],
+      perms: { ..._DEFAULT_CURATOR_PERMS, ...(p.curator_perms || {}) },
+      _db: true
+    }));
+    console.log('✓ Кураторов загружено: ' + CURATORS.length);
+  } catch(e){
+    console.warn('Не удалось загрузить кураторов:', e.message);
+  }
+}
+
+/* Сохранить права куратора в БД */
+async function saveCuratorPerms(curatorId, perms){
+  if(!sb) throw new Error('нет БД');
+  await restRequest('PATCH', '/profiles?id=eq.' + encodeURIComponent(curatorId),
+    { curator_perms: perms }, { prefer: 'return=minimal' });
+}
+
+/* Снять с куратора роль (вернуть в ученики) */
+async function demoteCurator(curatorId){
+  if(!sb) throw new Error('нет БД');
+  await restRequest('PATCH', '/profiles?id=eq.' + encodeURIComponent(curatorId),
+    { role: 'student', s_status: 'active', s_type: 'свой' },
+    { prefer: 'return=minimal' });
+}
 
 /* Сочинения — добавлено состояние «pre-checked by curator» */
 const ESSAYS = [
@@ -4825,6 +4866,8 @@ function studentRow(s){
                 if(/^[0-9a-f-]{36}$/i.test(s.id) && sb){
                   try {
                     await restRequest('PATCH', '/profiles?id=eq.' + s.id, { role: 'curator' }, { prefer: 'return=minimal' });
+                    await loadStudentsFromDb();
+                    await loadCuratorsFromDb();
                     showToast('✓ ' + s.name + ' теперь куратор');
                   } catch(e){ showToast('⚠ ' + e.message); return; }
                 } else {
@@ -5354,6 +5397,7 @@ function modalNewStudent(){
 function modalCuratorPerms(){
   const c = CURATORS.find(x => x.id === STATE.curatorPermsFor);
   if(!c) return null;
+  const close = () => { STATE.curatorPermsFor = null; render(); };
 
   const permRows = [
     { key:'addTasks', label:'Может добавлять задания', desc:'Создавать новые тесты и упражнения' },
@@ -5363,27 +5407,59 @@ function modalCuratorPerms(){
     { key:'approveGuests', label:'Может одобрять гостей', desc:'Подтверждать заявки на интенсив' },
   ];
 
+  const status = el('div', { style:{ fontSize:'12px', minHeight:'16px' }}, '');
+  const saveBtn = el('button', { class:'btn btn-p',
+    onclick: async () => {
+      saveBtn.disabled = true;
+      status.style.color = 'var(--ink-3)'; status.textContent = '⏳ Сохраняем…';
+      try {
+        if(c._db){ await saveCuratorPerms(c.id, c.perms); }
+        showToast('Права обновлены 🤝');
+        close();
+      } catch(e){
+        status.style.color = 'var(--red)'; status.textContent = '⚠ ' + e.message;
+        saveBtn.disabled = false;
+      }
+    }
+  }, 'Сохранить');
+
   return el('div', { class:'modal-bg',
-    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.curatorPermsFor = null; render(); }}
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
   },
     el('div', { class:'modal', style:{ maxWidth:'520px' }},
       el('div', { class:'modal-head' },
         el('div', null,
           el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
-            'Расширенные права куратора'),
+            'Куратор · ' + c.email),
           el('h2', { style:{ marginTop:'4px' }}, c.name)),
-        el('button', { class:'x', onclick: () => { STATE.curatorPermsFor = null; render(); }}, '×')),
+        el('button', { class:'x', onclick: close }, '×')),
       el('div', { class:'modal-body' },
         el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'14px' }},
-          'По умолчанию куратор только смотрит и помогает. Включайте здесь нужные расширенные права. Финализация сочинений и удаление учеников всегда остаются у вас — без переключателя.'),
+          'По умолчанию куратор только смотрит и помогает. Включайте здесь нужные расширенные права. Финализация сочинений и удаление учеников всегда остаются у вас.'),
         el('div', { style:{ display:'flex', flexDirection:'column', gap:'10px' }},
-          permRows.map(p => permRow(c, p)))),
+          permRows.map(p => permRow(c, p))),
+        c._db ? el('div', { style:{ marginTop:'18px', padding:'12px', background:'var(--red-soft)', borderRadius:'10px' }},
+          el('div', { style:{ fontSize:'13px', fontWeight:'700', color:'var(--red)', marginBottom:'4px' }},
+            '⚠ Опасная зона'),
+          el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'8px' }},
+            'Снять роль куратора — он вернётся в список учеников. Аккаунт и его данные не удаляются.'),
+          el('button', { class:'btn btn-secondary btn-sm', style:{ background:'var(--red-soft)', color:'var(--red)' },
+            onclick: async () => {
+              if(!confirm('Снять с ' + c.name + ' роль куратора?')) return;
+              try {
+                await demoteCurator(c.id);
+                await loadCuratorsFromDb();
+                await loadStudentsFromDb();
+                showToast(c.name + ' теперь ученик');
+                close();
+              } catch(e){ alert('⚠ ' + e.message); }
+            }
+          }, '↓ Снять с куратора')) : null),
       el('div', { class:'modal-foot' },
-        el('span', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
-          'Можно менять в любой момент'),
-        el('button', { class:'btn btn-p',
-          onclick: () => { STATE.curatorPermsFor = null; showToast('Права обновлены 🤝'); render(); }
-        }, 'Готово'))));
+        status,
+        el('div', { style:{ display:'flex', gap:'8px' }},
+          el('button', { class:'btn btn-secondary', onclick: close }, 'Отмена'),
+          saveBtn))));
 }
 
 function permRow(c, p){
