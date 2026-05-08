@@ -21,10 +21,11 @@ DECLARE
   day2_id_v INTEGER;
   day3_id_v INTEGER;
 BEGIN
-  -- Создаём интенсив, если ещё нет
-  SELECT id INTO intensive_id_v FROM intensives WHERE title = 'Краш-тест 2026' LIMIT 1;
+  -- Создаём интенсив, если ещё нет.
+  -- В схеме колонка называется `name` (не `title`).
+  SELECT id INTO intensive_id_v FROM intensives WHERE name = 'Краш-тест 2026' LIMIT 1;
   IF intensive_id_v IS NULL THEN
-    INSERT INTO intensives (title, start_date, end_date)
+    INSERT INTO intensives (name, start_date, end_date)
     VALUES ('Краш-тест 2026', DATE '2026-05-30', DATE '2026-06-04')
     RETURNING id INTO intensive_id_v;
   END IF;
