@@ -698,35 +698,18 @@ async function loadProfileDirect(access_token){
     throw e;
   }
 
-  /* Если профиля нет — создаём student'а */
+  /* Если профиля нет — НЕ создаём через POST (RLS заблокирует),
+     вместо этого чистим localStorage и считаем что юзер не залогинен.
+     Это случается когда:
+     1) старый JWT в кэше, а профиль уже удалён
+     2) JWT с другого окружения/проекта */
   if(!profile){
-    console.log('→ Профиля нет, создаём через REST POST…');
+    console.warn('→ Профиля для user_id=' + userId + ' не найдено. Чистим сессию.');
     try {
-      const body = {
-        id: userId, role: 'student', email: userEmail,
-        full_name: userEmail.split('@')[0] || 'Гость',
-        s_type: 'гость', s_status: 'pending', bee: 0
-      };
-      const resp = await Promise.race([
-        fetch(SUPABASE_URL + '/rest/v1/profiles', {
-          method: 'POST',
-          headers: { ...headers, 'Prefer': 'return=representation' },
-          body: JSON.stringify(body)
-        }),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout REST POST')), 8000))
-      ]);
-      if(resp.ok){
-        const arr = await resp.json();
-        profile = Array.isArray(arr) ? arr[0] : arr;
-        console.log('✓ Профиль создан через REST');
-      } else {
-        console.warn('REST POST profile вернул', resp.status, await resp.text());
-        return null;
-      }
-    } catch(e){
-      console.warn('REST POST profile упал:', e.message);
-      return null;
-    }
+      const projectRef = SUPABASE_URL.replace('https://', '').split('.')[0];
+      Object.keys(localStorage).filter(k => /^sb-/.test(k)).forEach(k => localStorage.removeItem(k));
+    } catch(e){}
+    return null;
   }
 
   if(profile && payload.exp){
