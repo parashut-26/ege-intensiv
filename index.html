@@ -744,11 +744,24 @@ async function restRequest(method, path, body, opts){
   };
   if(opts.prefer) headers['Prefer'] = opts.prefer;
   const url = SUPABASE_URL + '/rest/v1' + path;
-  /* 30-секундный таймаут + до 2 автоповторов на сетевых ошибках/таймаутах
-     (на мобильных RU-сетях бывает медленно или флапает). */
-  const maxAttempts = (opts.noRetry ? 1 : 3);
+  /* Стратегия ретраев:
+     — 4xx → не повторяем (это не сетевая проблема, а наш кривой запрос).
+     — 502/503/504 (Gateway-ошибки PHP-прокси на reg.ru, бывают
+       интермиттентно при пиковой нагрузке) → до 5 попыток с быстрым
+       начальным бэкоффом (250 → 500 → 800 → 1200 мс), потому что
+       типичный «затык» прокси длится 200-500 мс.
+     — Прочие 5xx и сетевые таймауты → стандартные 3 попытки с
+       1с/2с бэкоффом.
+     opts.noRetry → 1 попытка без ретраев. */
+  const noRetry = !!opts.noRetry;
   let lastErr;
-  for(let attempt = 1; attempt <= maxAttempts; attempt++){
+  /* Бэкоффы по индексу попытки. Фактический максимум попыток =
+     длине массива бэкоффов + 1 (последняя попытка без ожидания после). */
+  const gatewayBackoffs  = [250, 500, 800, 1200]; // 5 попыток для 502/503/504
+  const standardBackoffs = [1000, 2000];          // 3 попытки для остального
+
+  for(let attempt = 1; ; attempt++){
+    let isGatewayError = false;
     try {
       const resp = await Promise.race([
         fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined }),
@@ -756,28 +769,42 @@ async function restRequest(method, path, body, opts){
       ]);
       if(!resp.ok){
         const txt = await resp.text();
-        /* 4xx — не повторяем, это не сетевая проблема */
         const err = new Error('REST ' + method + ' ' + path + ' → ' + resp.status + ': ' + txt);
+        /* 4xx — фатально, не повторяем */
         if(resp.status >= 400 && resp.status < 500) throw err;
+        /* 502/503/504 + текст с ошибкой прокси — Gateway-ошибка */
+        if(resp.status === 502 || resp.status === 503 || resp.status === 504){
+          isGatewayError = true;
+        }
         lastErr = err;
-        if(attempt < maxAttempts) await new Promise(r => setTimeout(r, 1000 * attempt));
-        continue;
+      } else {
+        const ct = resp.headers.get('content-type') || '';
+        if(ct.includes('application/json')){
+          const t = await resp.text();
+          return t ? JSON.parse(t) : null;
+        }
+        return null;
       }
-      const ct = resp.headers.get('content-type') || '';
-      if(ct.includes('application/json')){
-        const t = await resp.text();
-        return t ? JSON.parse(t) : null;
-      }
-      return null;
     } catch(e){
       lastErr = e;
-      if(attempt < maxAttempts){
-        console.warn('REST ' + method + ' попытка ' + attempt + ' упала: ' + e.message + ' — повторяем');
-        await new Promise(r => setTimeout(r, 1000 * attempt));
-      }
     }
+
+    if(noRetry) throw lastErr;
+    /* Выбираем расписание ретраев */
+    const schedule = isGatewayError ? gatewayBackoffs : standardBackoffs;
+    if(attempt > schedule.length) throw lastErr;
+    const backoff = schedule[attempt - 1];
+    /* Лёгкий джиттер ±20%, чтобы не бить прокси одновременно несколькими параллельными запросами */
+    const jitter = backoff * (0.8 + Math.random() * 0.4);
+    if(isGatewayError){
+      console.warn('REST ' + method + ' ' + path + ' попытка ' + attempt +
+        ' → 502/503/504 (gateway), повторяем через ' + Math.round(jitter) + ' мс');
+    } else {
+      console.warn('REST ' + method + ' попытка ' + attempt + ' упала: ' +
+        (lastErr && lastErr.message) + ' — повторяем через ' + Math.round(jitter) + ' мс');
+    }
+    await new Promise(r => setTimeout(r, jitter));
   }
-  throw lastErr;
 }
 
 /* Кэш теории по 26 заданиям: { 1: 'markdown text', 2: '...', ... } */
