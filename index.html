@@ -4342,7 +4342,7 @@ function modalTheory(n){
               '…и ещё ' + (list.length - 5)));
           }
           return card;
-        })()),
+        })() : null),
       el('div', { class:'modal-foot' },
         el('span', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
           'Карточка задания ' + n),
