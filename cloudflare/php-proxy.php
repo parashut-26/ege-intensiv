@@ -20,7 +20,7 @@ $SUPABASE_HOST = 'hyczawwuehrqsqqosgub.supabase.co';
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
-    header('Access-Control-Allow-Headers: authorization, x-client-info, apikey, content-type, prefer, range');
+    header('Access-Control-Allow-Headers: authorization, x-client-info, apikey, content-type, prefer, range, x-supabase-api-version, accept, accept-language, accept-profile, content-profile, x-requested-with');
     header('Access-Control-Max-Age: 86400');
     http_response_code(204);
     exit;
