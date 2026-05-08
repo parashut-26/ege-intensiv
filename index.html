@@ -827,13 +827,15 @@ async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, 
     const inserted = await restRequest('POST', '/attempts', payload, { prefer: 'return=representation' });
     /* Триггер on_attempt_insert сам обновит profiles.bee и добавит запись в bee_transactions. */
     if(MY_PROFILE){ MY_PROFILE.bee = (MY_PROFILE.bee || 0) + beeEarned; }
-    /* Хуки на достижения */
-    awardAchievement('a1').catch(() => {});  /* Первая пчёлка — за самый первый attempt */
+    /* Хуки на достижения — ждём последовательно, иначе a1 и b2 читают MY_PROFILE.bee
+       одновременно и второй PATCH перезаписывает первый, теряя бонус */
+    await awardAchievement('a1').catch(() => {});  /* Первая пчёлка — за самый первый attempt */
     if(score === max_score && max_score > 0){
-      awardAchievement('b2').catch(() => {});  /* Точно в цель — без ошибок */
+      await awardAchievement('b2').catch(() => {});  /* Точно в цель — без ошибок */
     }
-    /* Обновляем локальную статистику в фоне (для KPI на главной) */
+    /* Обновляем локальную статистику и ленту активности в фоне (для KPI и виджета на главной) */
     loadMyStats().catch(() => {});
+    loadMyActivity().catch(() => {});
     return Array.isArray(inserted) ? inserted[0] : inserted;
   } catch(e){
     console.warn('saveAttempt упал:', e.message);
@@ -1024,7 +1026,7 @@ async function restoreSession(){
         else STATE.view = 'student';
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadGroupStats()]).then(() => render()).catch(() => {});
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats()]).then(() => render()).catch(() => {});
         return;
       } else {
         STATE.authLoading = false;
@@ -1080,7 +1082,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadGroupStats()]).then(() => render()).catch(() => {});
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats()]).then(() => render()).catch(() => {});
   } else {
     STATE.view = 'login';
   }
@@ -1323,6 +1325,44 @@ async function loadMyStats(){
   }
 }
 
+/* === ЛЕНТА АКТИВНОСТИ УЧЕНИКА (из bee_transactions) === */
+let MY_ACTIVITY = [];
+
+async function loadMyActivity(){
+  if(!sb || !MY_PROFILE) return;
+  try {
+    const arr = await restRequest('GET', '/bee_transactions?student_id=eq.' + encodeURIComponent(MY_PROFILE.id) +
+      '&select=amount,reason,emoji,source_kind,created_at&order=created_at.desc&limit=20');
+    if(Array.isArray(arr)) MY_ACTIVITY = arr;
+    console.log('✓ Активность загружена: ' + MY_ACTIVITY.length + ' записей');
+  } catch(e){
+    console.warn('loadMyActivity упал:', e.message);
+    MY_ACTIVITY = [];
+  }
+}
+
+/* Человекочитаемое «когда» — "только что", "5 минут назад", "сегодня в 13:00" */
+function humanWhen(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return '';
+  const now = new Date();
+  const diffMs = now - d;
+  const diffMin = Math.floor(diffMs / 60000);
+  if(diffMin < 1) return 'только что';
+  if(diffMin < 60) return diffMin + ' мин назад';
+  const today = new Date(); today.setHours(0,0,0,0);
+  const yest = new Date(today); yest.setDate(yest.getDate() - 1);
+  const dDay = new Date(d); dDay.setHours(0,0,0,0);
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  if(dDay.getTime() === today.getTime()) return 'сегодня в ' + hh + ':' + mm;
+  if(dDay.getTime() === yest.getTime()) return 'вчера в ' + hh + ':' + mm;
+  const diffDays = Math.floor((today - dDay) / 86400000);
+  if(diffDays < 7) return diffDays + ' дн назад';
+  return d.toLocaleDateString('ru-RU', { day:'numeric', month:'short' });
+}
+
 /* === ГРУППОВАЯ СТАТИСТИКА (для учителя) === */
 let GROUP_STATS = null;
 
@@ -1438,6 +1478,16 @@ async function awardAchievement(achievementId){
     /* Обновляем локально */
     MY_PROFILE.bee = newBee;
     if(existing) existing.unlocked = true;
+    /* Добавляем запись в начало локальной ленты, чтобы она появилась без перезагрузки */
+    if(Array.isArray(MY_ACTIVITY)){
+      MY_ACTIVITY.unshift({
+        amount: bonus,
+        reason: 'достижение «' + ach.name + '»',
+        emoji: ach.emoji || '🏆',
+        source_kind: 'achievement',
+        created_at: new Date().toISOString()
+      });
+    }
     showToast('🏆 ' + (ach.emoji || '') + ' ' + ach.name + ' · +' + bonus + ' 🐝');
     return { alreadyUnlocked: false, beesAwarded: bonus };
   } catch(e){
@@ -3386,16 +3436,30 @@ function viewStudentHome(){
 
   const activity = el('div', { class:'card' });
   activity.append(el('h2', { style:{ marginBottom:'10px' }}, '📈 Активность'));
-  ACTIVITY.forEach(a => {
+  /* Источник правды — bee_transactions. Если БД ещё не подгрузилась или
+     таблица пустая, показываем placeholder вместо мок-данных. */
+  const realActivity = (MY_PROFILE && Array.isArray(MY_ACTIVITY)) ? MY_ACTIVITY : [];
+  if(realActivity.length === 0){
     activity.append(
-      el('div', { class:'act-item' },
-        el('div', { class:'act-left' },
-          el('span', { class:'act-ic' }, a.ic),
-          el('div', null,
-            el('div', { class:'act-text' }, a.text),
-            el('div', { class:'act-meta' }, a.when + (a.why ? ' · ' + a.why : '')))),
-        el('span', { class:'act-points' }, '+' + a.bee + ' 🐝')));
-  });
+      el('div', { style:{ color:'var(--ink-2)', fontSize:'13px', padding:'12px 0' }},
+        MY_PROFILE
+          ? 'Пока активности нет. Решай задания — пчёлки начнут прилетать! 🐝'
+          : 'Загружаем…'));
+  } else {
+    realActivity.slice(0, 8).forEach(a => {
+      const emoji = a.emoji || (a.amount >= 0 ? '🐝' : '➖');
+      const reason = a.reason || (a.source_kind === 'achievement' ? 'достижение' : 'активность');
+      const sign = a.amount >= 0 ? '+' : '';
+      activity.append(
+        el('div', { class:'act-item' },
+          el('div', { class:'act-left' },
+            el('span', { class:'act-ic' }, emoji),
+            el('div', null,
+              el('div', { class:'act-text' }, reason),
+              el('div', { class:'act-meta' }, humanWhen(a.created_at)))),
+          el('span', { class:'act-points' }, sign + (a.amount || 0) + ' 🐝')));
+    });
+  }
 
   const wrap = el('div', { class:'fade-in' });
   wrap.append(
