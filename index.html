@@ -440,6 +440,7 @@ const STATE = {
   shuffledBank: null,   // кэш перемешанной подборки на время теста
   attemptsByTask: {},   // кэш истории попыток ученика по taskN: { 5: [{...}, ...] }
   studentDetailOpen: null,        // id ученика — открыта детальная карточка у учителя
+  attemptDetailOpen: null,        // id попытки — открыта модалка с разбором ответов
   studentAttempts: {},            // кэш попыток конкретного ученика: { studentId: [{...}, ...] }
   _onboardingDismissed: false,    // ученик закрыл onboarding-модалку (не показывать снова в этой сессии)
   helpedMsgs: {},
@@ -860,7 +861,7 @@ async function loadStudentAttempts(studentId){
   /* studentId должен быть UUID; если ID мокового вида ('s1', 's2') — пропускаем */
   if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(studentId)) return [];
   try {
-    const arr = await restRequest('GET', '/attempts?student_id=eq.' + studentId + '&select=id,ege_task_n,score,max_score,bee_earned,created_at&order=created_at.desc&limit=200');
+    const arr = await restRequest('GET', '/attempts?student_id=eq.' + studentId + '&select=id,ege_task_n,score,max_score,bee_earned,created_at,answers&order=created_at.desc&limit=200');
     return Array.isArray(arr) ? arr : [];
   } catch(e){
     console.warn('loadStudentAttempts упал:', e.message);
@@ -5299,7 +5300,14 @@ function modalStudentDetail(){
       b.attempts.slice(0, 10).forEach(a => {
         const pct = a.max_score ? Math.round(a.score / a.max_score * 100) : 0;
         const bg = pct >= 80 ? 'var(--green-soft)' : pct >= 60 ? 'var(--y-soft)' : 'var(--red-soft)';
-        aList.append(el('span', { style:{ fontSize:'11px', padding:'3px 8px', background:bg, borderRadius:'6px', color:'var(--ink)' }},
+        aList.append(el('span', {
+          style:{ fontSize:'11px', padding:'3px 8px', background:bg, borderRadius:'6px',
+                  color:'var(--ink)', cursor:'pointer', border:'1px solid transparent' },
+          title: 'Открыть подробности',
+          onmouseover: ev => { ev.target.style.borderColor = 'var(--ink-2)'; },
+          onmouseout: ev => { ev.target.style.borderColor = 'transparent'; },
+          onclick: () => { STATE.attemptDetailOpen = a.id; render(); }
+        },
           fmt(a.created_at) + ' · ' + a.score + '/' + a.max_score));
       });
       if(b.attempts.length > 10) aList.append(el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, '…и ещё ' + (b.attempts.length - 10)));
@@ -5702,6 +5710,132 @@ function modalNewStudent(){
       el('div', { class:'modal-foot' },
         el('button', { class:'btn btn-secondary', onclick: close }, 'Отмена'),
         saveBtn)));
+}
+
+/* =======================================================================
+   МОДАЛЬ ДЕТАЛИЗАЦИИ ПОПЫТКИ — что и как ответил ученик, где ошибся
+   ======================================================================= */
+function modalAttemptDetail(){
+  const aid = STATE.attemptDetailOpen;
+  if(!aid) return null;
+  const close = () => { STATE.attemptDetailOpen = null; render(); };
+
+  /* Ищем попытку в кэше всех учеников */
+  let attempt = null, studentId = null;
+  Object.entries(STATE.studentAttempts || {}).forEach(([sid, list]) => {
+    if(Array.isArray(list)){
+      const found = list.find(a => a.id === aid);
+      if(found){ attempt = found; studentId = sid; }
+    }
+  });
+
+  if(!attempt){
+    return el('div', { class:'modal-bg', onclick: close },
+      el('div', { class:'modal' },
+        el('div', { class:'modal-head' },
+          el('h2', null, 'Попытка не найдена'),
+          el('button', { class:'x', onclick: close }, '×')),
+        el('div', { class:'modal-body' },
+          el('p', null, 'Попробуйте перезагрузить карточку ученика.'))));
+  }
+
+  const taskN = attempt.ege_task_n;
+  const topic = (EGE_TASKS.find(t => t.n === taskN) || {}).topic || '';
+  const items = (attempt.answers && attempt.answers.items) || [];
+  const student = STUDENTS.find(s => s.id === studentId);
+  const studentName = student ? student.name : 'Ученик';
+  const pct = attempt.max_score ? Math.round(attempt.score / attempt.max_score * 100) : 0;
+  const dt = new Date(attempt.created_at);
+  const dateStr = dt.toLocaleDateString('ru-RU', { day:'numeric', month:'long' }) + ' в ' + dt.toTimeString().slice(0, 5);
+
+  /* Хелпер: ищем оригинал вопроса в QUIZ_BANK по src */
+  const findQuestion = (src) => {
+    if(!src) return null;
+    const bank = QUIZ_BANK[taskN] || [];
+    return bank.find(q => q.src === src) || null;
+  };
+
+  /* Форматирование пользовательского/правильного ответа */
+  const fmtAnswer = (val) => {
+    if(val == null) return '—';
+    if(Array.isArray(val)){
+      if(!val.length) return '(пусто)';
+      return val.map(v => typeof v === 'object' ? JSON.stringify(v) : String(v)).join(', ');
+    }
+    if(typeof val === 'object') return JSON.stringify(val);
+    return String(val);
+  };
+
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        studentName + ' · ' + dateStr),
+      el('h2', { style:{ marginTop:'4px' }}, 'Задание ' + taskN + ' · ' + topic)),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const summary = el('div', { class:'card', style:{ marginBottom:'14px', display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap' }},
+    chip('🐝 ' + (attempt.bee_earned || 0), 'y'),
+    chip('Результат: ' + attempt.score + ' / ' + attempt.max_score,
+      pct >= 80 ? 'green' : pct >= 60 ? 'warn' : 'red'),
+    chip(pct + '%', pct >= 80 ? 'green' : pct >= 60 ? 'warn' : 'red'));
+
+  const body = el('div', { class:'modal-body' });
+  body.append(summary);
+
+  if(!items.length){
+    body.append(el('p', { style:{ color:'var(--ink-3)', fontStyle:'italic' }},
+      'Детальные данные не сохранились (возможно старая попытка).'));
+  } else {
+    items.forEach((item, idx) => {
+      const q = findQuestion(item.src);
+      const ok = !!item.ok;
+      const card = el('div', { class:'card', style:{
+        marginBottom:'10px',
+        background: ok ? 'var(--green-soft)' : 'var(--red-soft)',
+        border: '1px solid ' + (ok ? 'var(--green)' : 'var(--red)')
+      }});
+      card.append(
+        el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }},
+          el('div', { style:{ fontWeight:'700', fontSize:'13px', color:'var(--ink-2)' }},
+            'Вопрос ' + (idx + 1) + ' · ' + (item.src || '—')),
+          el('span', { style:{ fontSize:'18px' }}, ok ? '✓' : '✗')));
+
+      /* Текст вопроса (если нашли в банке) */
+      if(q){
+        if(q.context){
+          card.append(el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'6px', fontStyle:'italic', whiteSpace:'pre-wrap' }},
+            q.context));
+        }
+        if(q.q){
+          card.append(el('div', { style:{ fontSize:'13px', marginBottom:'8px', whiteSpace:'pre-wrap' }}, q.q));
+        }
+        if(Array.isArray(q.sentences) && q.sentences.length){
+          const sentBox = el('ol', { style:{ margin:'0 0 8px 18px', padding:'0', fontSize:'13px' }});
+          q.sentences.forEach(s => sentBox.append(el('li', { style:{ marginBottom:'4px' }}, s)));
+          card.append(sentBox);
+        }
+      }
+
+      card.append(
+        el('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginTop:'6px' }},
+          el('div', { style:{ background:'#fff', padding:'8px 10px', borderRadius:'8px' }},
+            el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'2px', fontWeight:'700' }}, 'Ответ ученика'),
+            el('div', { style:{ fontSize:'13px', wordBreak:'break-word' }}, fmtAnswer(item.user))),
+          el('div', { style:{ background:'#fff', padding:'8px 10px', borderRadius:'8px' }},
+            el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'2px', fontWeight:'700' }}, 'Правильно'),
+            el('div', { style:{ fontSize:'13px', wordBreak:'break-word' }}, fmtAnswer(item.expected)))));
+
+      body.append(card);
+    });
+  }
+
+  const foot = el('div', { class:'modal-foot' },
+    el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }},
+      items.length + ' вопросов · ' + items.filter(i => i.ok).length + ' верно'),
+    el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть'));
+
+  return el('div', { class:'modal-bg', onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }},
+    el('div', { class:'modal', style:{ maxWidth:'780px' }}, head, body, foot));
 }
 
 /* =======================================================================
@@ -7688,6 +7822,7 @@ function render(){
   if(STATE.newStudentForm) root.append(modalNewStudent());
   if(STATE.curatorPermsFor) root.append(modalCuratorPerms());
   if(STATE.studentDetailOpen) root.append(modalStudentDetail());
+  if(STATE.attemptDetailOpen) root.append(modalAttemptDetail());
   /* Onboarding: если у профиля имя = префикс email (то есть дефолтное автогенерённое),
      показываем форму с просьбой ввести имя. Только один раз. */
   if(MY_PROFILE && !STATE._onboardingDismissed){
