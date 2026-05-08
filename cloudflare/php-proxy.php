@@ -33,11 +33,32 @@ $url = "https://{$SUPABASE_HOST}{$path}";
 // Собираем заголовки от клиента (кроме Host и Accept-Encoding —
 // последний заставит Supabase отдавать gzip, а cURL сам разжимает).
 $headers = [];
+$has_auth = false;
 foreach (getallheaders() as $name => $value) {
     $lower = strtolower($name);
     if ($lower === 'host') continue;
     if ($lower === 'accept-encoding') continue;
+    if ($lower === 'authorization') $has_auth = true;
     $headers[] = "{$name}: {$value}";
+}
+
+// Подстраховка для FastCGI/Apache — Authorization мог не дойти через getallheaders.
+// Пробуем явно прочитать из $_SERVER (заполняется через .htaccess RewriteRule).
+if (!$has_auth) {
+    $auth_value = '';
+    if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
+        $auth_value = $_SERVER['HTTP_AUTHORIZATION'];
+    } elseif (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
+        $auth_value = $_SERVER['REDIRECT_HTTP_AUTHORIZATION'];
+    } elseif (function_exists('apache_request_headers')) {
+        $apache = apache_request_headers();
+        foreach ($apache as $k => $v) {
+            if (strtolower($k) === 'authorization') { $auth_value = $v; break; }
+        }
+    }
+    if ($auth_value) {
+        $headers[] = "Authorization: {$auth_value}";
+    }
 }
 
 // Тело запроса (для POST/PATCH/PUT)

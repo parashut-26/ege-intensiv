@@ -1,5 +1,10 @@
 RewriteEngine On
 
+# КРИТИЧНО: Apache+FastCGI по умолчанию не пропускает Authorization в PHP.
+# Эта строка вручную пробрасывает его в HTTP_AUTHORIZATION для PHP.
+RewriteCond %{HTTP:Authorization} ^(.*)$
+RewriteRule .* - [E=HTTP_AUTHORIZATION:%1]
+
 # Все запросы (REST/Functions/Storage/Auth) → index.php (PHP-прокси)
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
