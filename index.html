@@ -1117,7 +1117,7 @@ async function restoreSession(){
         else STATE.view = 'student';
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats()]).then(() => {
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => CURRENT_ATTENDANCE_ID && loadAttendanceFor(CURRENT_ATTENDANCE_ID))]).then(() => {
           render();
           /* После основных загрузок — стартуем фоновый чат-poll */
           startUnreadBgPoll();
@@ -1177,7 +1177,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats()]).then(() => {
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => CURRENT_ATTENDANCE_ID && loadAttendanceFor(CURRENT_ATTENDANCE_ID))]).then(() => {
           render();
           /* После основных загрузок — стартуем фоновый чат-poll */
           startUnreadBgPoll();
@@ -2752,12 +2752,102 @@ const SAMPLE_ESSAY_TEXT = `Какой опыт приобретает молод
 
 Таким образом, служба в армии — неотъемлемый этап в жизни молодых людей. Именно в армии они могут приобрести бесценный опыт: научиться дружбе, мужеству, умению жить с достоинством, а также наполниться яркими впечатлениями.`;
 
-/* Посещаемость на день 1 */
+/* Посещаемость — реальные данные из БД.
+   WEBINARS: список вебинаров интенсива (загружается из day_activities).
+   ATTENDANCE_BY_ACT: { activity_id: { student_id: 'self'|'teacher' } } */
+let WEBINARS = [];
+let ATTENDANCE_BY_ACT = {};
+/* CURRENT_ATTENDANCE_ID — какой вебинар сейчас «активный»: вычисляется
+   как сегодняшний (по дате) или ближайший в прошлом, иначе первый. */
+let CURRENT_ATTENDANCE_ID = null;
+
+/* Совместимость со старым моком — пока остальной код не отрефакторим,
+   ATTENDANCE.webinar1 будет автоматически проксироваться на текущий
+   вебинар из ATTENDANCE_BY_ACT. */
 const ATTENDANCE = {
-  webinar1: {
-    s2: 'self', s3: 'teacher', s5: null, s6: 'self', s7: 'teacher',
+  get webinar1(){
+    return CURRENT_ATTENDANCE_ID ? (ATTENDANCE_BY_ACT[CURRENT_ATTENDANCE_ID] || {}) : {};
   },
 };
+
+async function loadWebinarsFromDb(){
+  if(!sb) return;
+  try {
+    const arr = await restRequest('GET',
+      '/day_activities?kind=eq.webinar' +
+      '&select=id,title,start_at,max_bee,day_id,intensive_days(id,ord,day_date,title)' +
+      '&order=day_id.asc');
+    if(!Array.isArray(arr)) return;
+    WEBINARS = arr.map(a => ({
+      id: a.id,
+      title: a.title,
+      startAt: a.start_at,
+      maxBee: a.max_bee || 3,
+      dayId: a.day_id,
+      dayOrd: a.intensive_days ? a.intensive_days.ord : null,
+      dayDate: a.intensive_days ? a.intensive_days.day_date : null,
+      dayTitle: a.intensive_days ? a.intensive_days.title : null
+    }));
+    /* Выбираем «текущий»: сегодняшний по дате, или ближайший прошедший, или первый */
+    if(WEBINARS.length){
+      const todayIso = new Date().toISOString().slice(0, 10);
+      const today = WEBINARS.find(w => w.dayDate === todayIso);
+      const past = WEBINARS.filter(w => w.dayDate && w.dayDate <= todayIso).sort((a,b)=>b.dayDate.localeCompare(a.dayDate));
+      CURRENT_ATTENDANCE_ID = (today || past[0] || WEBINARS[0]).id;
+    }
+    console.log('✓ Вебинаров загружено: ' + WEBINARS.length + ', текущий id=' + CURRENT_ATTENDANCE_ID);
+  } catch(e){
+    console.warn('loadWebinarsFromDb упал:', e.message);
+  }
+}
+
+async function loadAttendanceFor(activityId){
+  if(!sb || !activityId) return;
+  try {
+    const arr = await restRequest('GET',
+      '/attendance?activity_id=eq.' + activityId +
+      '&select=student_id,source,marked_by,marked_at');
+    if(!Array.isArray(arr)) return;
+    const map = {};
+    arr.forEach(r => { map[r.student_id] = r.source; });
+    ATTENDANCE_BY_ACT[activityId] = map;
+  } catch(e){
+    console.warn('loadAttendanceFor упал:', e.message);
+  }
+}
+
+async function markStudentAttendance(studentId, activityId, source){
+  if(!sb || !MY_PROFILE) throw new Error('не авторизован');
+  if(!activityId) throw new Error('не выбран вебинар');
+  /* INSERT с UNIQUE (student_id, activity_id) — повторный INSERT упадёт
+     с code 23505, считаем это «уже отмечен» */
+  try {
+    await restRequest('POST', '/attendance', {
+      student_id: studentId,
+      activity_id: activityId,
+      source: source || 'teacher',
+      marked_by: MY_PROFILE.id
+    }, { prefer: 'return=minimal' });
+  } catch(e){
+    if(/23505|duplicate|unique/i.test(e.message)){
+      /* Уже стоит — это ок. */
+      return { alreadyMarked: true };
+    }
+    throw e;
+  }
+  if(!ATTENDANCE_BY_ACT[activityId]) ATTENDANCE_BY_ACT[activityId] = {};
+  ATTENDANCE_BY_ACT[activityId][studentId] = source || 'teacher';
+  return { alreadyMarked: false };
+}
+
+async function unmarkStudentAttendance(studentId, activityId){
+  if(!sb) throw new Error('не авторизован');
+  if(!activityId) return;
+  await restRequest('DELETE',
+    '/attendance?student_id=eq.' + studentId + '&activity_id=eq.' + activityId,
+    null, { prefer: 'return=minimal' });
+  if(ATTENDANCE_BY_ACT[activityId]) delete ATTENDANCE_BY_ACT[activityId][studentId];
+}
 
 /* Большой банк пар паронимов из официального словаря ФИПИ — 40 пар.
    Каждая работает в обе стороны: слово A → ответ B и наоборот. */
@@ -3867,7 +3957,19 @@ function viewStudentHome(){
       }, '⚡ Начать разминку'),
       el('button', { class:'btn',
         style:{ background:'rgba(255,255,255,.85)', color:'var(--ink)' },
-        onclick: () => { STATE.testOpen = 4; STATE.testAnswers = {}; STATE.testChecked = false; render(); }
+        onclick: async () => {
+          if(!sb || !MY_PROFILE){ showToast('Войдите через почту, чтобы отметка засчиталась'); return; }
+          if(!CURRENT_ATTENDANCE_ID){ showToast('Вебинар ещё не настроен в БД'); return; }
+          try {
+            const r = await markStudentAttendance(MY_PROFILE.id, CURRENT_ATTENDANCE_ID, 'self');
+            if(r.alreadyMarked){ showToast('Ты уже отмечалась 🐝'); return; }
+            const w = WEBINARS.find(x => x.id === CURRENT_ATTENDANCE_ID);
+            const bee = w ? w.maxBee : 3;
+            if(MY_PROFILE) MY_PROFILE.bee = (MY_PROFILE.bee || 0) + bee;
+            showToast('🎙️ Засчитано · +' + bee + ' 🐝');
+            render();
+          } catch(e){ showToast('⚠ ' + e.message); }
+        }
       }, '🎯 Я на уроке')));
 
   const kpi = el('div', { class:'grid grid-4' });
@@ -4113,7 +4215,23 @@ function taskAction(t, locked){
   }
   if(t.kind === 'webinar')
     return el('button', { class:'btn btn-secondary btn-sm',
-      onclick: () => showToast('🎯 Засчитано как «Я на уроке» (+3 🐝)')
+      onclick: async () => {
+        if(!sb || !MY_PROFILE){ showToast('Войдите через почту, чтобы отметка засчиталась'); return; }
+        if(!CURRENT_ATTENDANCE_ID){ showToast('Вебинар ещё не настроен в БД'); return; }
+        try {
+          const r = await markStudentAttendance(MY_PROFILE.id, CURRENT_ATTENDANCE_ID, 'self');
+          if(r.alreadyMarked){
+            showToast('Ты уже отмечалась 🐝');
+          } else {
+            const w = WEBINARS.find(x => x.id === CURRENT_ATTENDANCE_ID);
+            const bee = w ? w.maxBee : 3;
+            /* Локально подкрутим показатели — без ожидания poll-тика */
+            if(MY_PROFILE) MY_PROFILE.bee = (MY_PROFILE.bee || 0) + bee;
+            showToast('🎙️ Засчитано · +' + bee + ' 🐝');
+          }
+          render();
+        } catch(e){ showToast('⚠ ' + e.message); }
+      }
     }, 'Я на уроке');
   return el('button', { class:'btn btn-secondary btn-sm',
     onclick: () => showToast('Откроется страница разбора')
@@ -6762,41 +6880,77 @@ function permRow(c, p){
    УЧИТЕЛЬ · ПОСЕЩАЕМОСТЬ (МОДАЛЬ)
    ======================================================================= */
 function modalAttendance(){
-  const total = STUDENTS.length;
-  const attended = Object.keys(ATTENDANCE.webinar1).filter(k => ATTENDANCE.webinar1[k]).length;
+  const close = () => { STATE.attendanceOpen = false; render(); };
+  /* Текущий вебинар */
+  const w = WEBINARS.find(x => x.id === CURRENT_ATTENDANCE_ID);
+  const map = CURRENT_ATTENDANCE_ID ? (ATTENDANCE_BY_ACT[CURRENT_ATTENDANCE_ID] || {}) : {};
+  const eligible = STUDENTS.filter(s => /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(s.id) && (s.status === 'active' || s.status === 'lagging'));
+  const total = eligible.length;
+  const attended = eligible.filter(s => map[s.id]).length;
+
+  /* Если ещё не подгружали attendance — фоном запросим, render обновит */
+  if(CURRENT_ATTENDANCE_ID && ATTENDANCE_BY_ACT[CURRENT_ATTENDANCE_ID] === undefined){
+    loadAttendanceFor(CURRENT_ATTENDANCE_ID).then(() => render());
+  }
+
+  /* Селектор вебинара (если их несколько) */
+  let webinarPicker = null;
+  if(WEBINARS.length > 1){
+    webinarPicker = el('select', {
+      style:{ padding:'6px 10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'13px', marginBottom:'12px' },
+      onchange: ev => {
+        CURRENT_ATTENDANCE_ID = +ev.target.value;
+        if(ATTENDANCE_BY_ACT[CURRENT_ATTENDANCE_ID] === undefined){
+          loadAttendanceFor(CURRENT_ATTENDANCE_ID).then(() => render());
+        } else { render(); }
+      }
+    });
+    WEBINARS.forEach(ww => {
+      const opt = el('option', { value: ww.id }, 'День ' + ww.dayOrd + ' · ' + ww.title + (ww.dayDate ? ' (' + ww.dayDate + ')' : ''));
+      if(ww.id === CURRENT_ATTENDANCE_ID) opt.selected = true;
+      webinarPicker.append(opt);
+    });
+  }
 
   return el('div', { class:'modal-bg',
-    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.attendanceOpen = false; render(); }}
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
   },
     el('div', { class:'modal', style:{ maxWidth:'520px' }},
       el('div', { class:'modal-head' },
         el('div', null,
           el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
-            'Вебинар День 1 · 13:00'),
-          el('h2', null, 'Посещаемость')),
-        el('button', { class:'x', onclick: () => { STATE.attendanceOpen = false; render(); }}, '×')),
+            w ? ('День ' + w.dayOrd + ' · ' + (w.startAt ? w.startAt.slice(0, 5) : '13:00')) : 'Посещаемость'),
+          el('h2', null, w ? w.title : 'Посещаемость')),
+        el('button', { class:'x', onclick: close }, '×')),
       el('div', { class:'modal-body' },
+        webinarPicker,
         el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'14px' }},
-          'Отмеченные ' + attended + ' / ' + total + '. Жёлтые — отметились сами, зелёные — отметили вы. Тапайте кружки для отметки.'),
+          !CURRENT_ATTENDANCE_ID
+            ? '⚠ Вебинары ещё не загружены. Прогоните sql/add_attendance_setup.sql в Supabase.'
+            : 'Отмеченные ' + attended + ' / ' + total + '. 🟡 — отметились сами, 🟢 — отметили вы. Тапните кружок — отметка сразу записывается в БД, +' + (w ? w.maxBee : 3) + ' 🐝 ученику.'),
         el('div', { class:'attend-list' },
-          STUDENTS.filter(s => s.status === 'active' || s.status === 'lagging').map(s => attendRow(s)))),
+          eligible.map(s => attendRow(s)))),
       el('div', { class:'modal-foot' },
         el('button', { class:'btn btn-secondary',
-          onclick: () => {
-            STUDENTS.forEach(s => {
-              if(s.status === 'active' || s.status === 'lagging') ATTENDANCE.webinar1[s.id] = 'teacher';
-            });
-            showToast('Все отмечены');
+          disabled: !CURRENT_ATTENDANCE_ID,
+          onclick: async () => {
+            if(!CURRENT_ATTENDANCE_ID) return;
+            let ok = 0, skip = 0, fail = 0;
+            for(const s of eligible){
+              if(map[s.id]){ skip++; continue; }
+              try { await markStudentAttendance(s.id, CURRENT_ATTENDANCE_ID, 'teacher'); ok++; }
+              catch(e){ fail++; console.warn(s.name, e.message); }
+            }
+            showToast('✓ Отмечено: ' + ok + (skip ? ' · уже было: ' + skip : '') + (fail ? ' · ⚠ ' + fail : ''));
             render();
           }
         }, '✓ Отметить всех'),
-        el('button', { class:'btn btn-y',
-          onclick: () => { STATE.attendanceOpen = false; showToast('Сохранено · +3 🐝 каждому отмеченному'); }
-        }, 'Готово'))));
+        el('button', { class:'btn btn-y', onclick: close }, 'Готово'))));
 }
 
 function attendRow(s){
-  const status = ATTENDANCE.webinar1[s.id];
+  const map = CURRENT_ATTENDANCE_ID ? (ATTENDANCE_BY_ACT[CURRENT_ATTENDANCE_ID] || {}) : {};
+  const status = map[s.id];
   const cls = status === 'teacher' ? 'attend-row checked' : status === 'self' ? 'attend-row self-checked' : 'attend-row';
   const checkCls = status === 'teacher' ? 'attend-check on' : status === 'self' ? 'attend-check self' : 'attend-check';
   const checkIcon = status === 'teacher' ? '✓' : status === 'self' ? '🐝' : '○';
@@ -6808,8 +6962,20 @@ function attendRow(s){
         el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }},
           status === 'self' ? '🐝 отметился сам' : status === 'teacher' ? 'отмечен вами' : 'не отмечен'))),
     el('button', { class: checkCls,
-      onclick: () => {
-        ATTENDANCE.webinar1[s.id] = ATTENDANCE.webinar1[s.id] ? null : 'teacher';
+      disabled: !CURRENT_ATTENDANCE_ID,
+      onclick: async () => {
+        if(!CURRENT_ATTENDANCE_ID) return;
+        try {
+          if(status){
+            /* Снять отметку */
+            await unmarkStudentAttendance(s.id, CURRENT_ATTENDANCE_ID);
+            /* Пчёлки за посещение НЕ снимаем — они уже зачислены в ledger;
+               отнимать пришлось бы тоже через ledger-минус-транзакцию. Пока так. */
+          } else {
+            const r = await markStudentAttendance(s.id, CURRENT_ATTENDANCE_ID, 'teacher');
+            if(!r.alreadyMarked) showToast('🎙️ ' + s.name.split(' ')[0] + ' · +' + (WEBINARS.find(w => w.id === CURRENT_ATTENDANCE_ID) || { maxBee: 3 }).maxBee + ' 🐝');
+          }
+        } catch(e){ showToast('⚠ ' + e.message); }
         render();
       }
     }, checkIcon));
