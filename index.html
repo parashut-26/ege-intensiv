@@ -416,6 +416,7 @@ const STATE = {
   chatOpen: false,
   chatChannel: 'group',
   chatRoomId: null,         // id общей комнаты в БД (грузим при первом открытии чата)
+  chatRoomTried: false,     // флаг: уже пробовали найти/создать комнату — не дёргать на каждом рендере
   chatMessages: [],         // массив сообщений из БД (для общего канала)
   chatLoading: false,
   chatLastError: null,
@@ -1489,6 +1490,7 @@ async function ensureGroupChatRoom(){
     return null;
   } catch(e){
     console.warn('ensureGroupChatRoom упал:', e.message);
+    STATE.chatLastError = e.message;
     return null;
   }
 }
@@ -8034,9 +8036,12 @@ function chatPanel(role){
   if(!STATE.chatOpen) return null;
   const meId = MY_PROFILE ? MY_PROFILE.id : null;
 
-  /* При первом открытии — обеспечить комнату, загрузить историю, запустить polling */
-  if(!STATE.chatRoomId && !STATE.chatLoading){
+  /* При первом открытии — обеспечить комнату, загрузить историю, запустить polling.
+     Флаг chatRoomTried выставляем, чтобы не дёргать ensureGroupChatRoom на каждом
+     ре-рендере, если он один раз упал (миграция не прогнана / нет прав). */
+  if(!STATE.chatRoomId && !STATE.chatLoading && !STATE.chatRoomTried){
     STATE.chatLoading = true;
+    STATE.chatRoomTried = true;
     ensureGroupChatRoom().then(rid => {
       STATE.chatLoading = false;
       if(rid){
@@ -8054,7 +8059,14 @@ function chatPanel(role){
         el('h4', null, '💬 Чат интенсива'),
         el('div', { style:{ fontSize:'11px', opacity:.8 }}, '🐝 Краш-тест 2026 · общий чат')),
       el('button', { style:{ color:'#fff', fontSize:'18px' },
-        onclick: () => { STATE.chatOpen = false; stopChatPolling(); render(); }
+        onclick: () => {
+          STATE.chatOpen = false;
+          /* Сбрасываем «пробовали» — на следующем открытии повторим попытку
+             (вдруг учитель тем временем прогнал миграцию) */
+          if(!STATE.chatRoomId) STATE.chatRoomTried = false;
+          stopChatPolling();
+          render();
+        }
       }, '×')));
 
   const msgsBox = el('div', { class:'chat-msgs', id:'chat-msgs' });
@@ -8066,8 +8078,14 @@ function chatPanel(role){
     msgsBox.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px 20px', fontSize:'13px' }},
       '⏳ Открываем чат…'));
   } else if(!STATE.chatRoomId){
-    msgsBox.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px 20px', fontSize:'13px' }},
-      'Чат ещё не создан. Учитель должен открыть его первым — это произойдёт автоматически при первом заходе учителя в чат.'));
+    /* Если упало с 403 — почти наверняка миграция add_chat_policies.sql не прогнана */
+    const isPolicyErr = STATE.chatLastError && /403|forbidden|policy/i.test(STATE.chatLastError);
+    msgsBox.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px 20px', fontSize:'13px', lineHeight:'1.6' }},
+      isPolicyErr
+        ? '⚠ Чат ещё не настроен в БД. Учителю нужно один раз прогнать миграцию sql/add_chat_policies.sql в Supabase SQL Editor — она создаст политики и общую комнату.'
+        : (role === 'teacher'
+            ? 'Не получилось создать комнату. Прогоните sql/add_chat_policies.sql в Supabase — она настроит политики и создаст общий чат.'
+            : 'Чат ещё не создан. Учитель должен открыть его первым.')));
   } else if(!STATE.chatMessages.length){
     msgsBox.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px 20px', fontSize:'13px' }},
       'Сообщений пока нет. Напишите первый — все участники интенсива увидят 💬'));
