@@ -2,10 +2,18 @@
 <html lang="ru">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<!-- Запрет кэширования HTML — чтобы PWA-ярлык на телефоне всегда тянул свежую версию.
-     На GitHub Pages по умолчанию max-age=600, и iOS-Safari может держать HTML вообще
-     пока не перезапустишь приложение. Эти три тега снимают проблему. -->
+<!-- viewport-fit=cover — корректная работа в PWA на iPhone с «чёлкой»;
+     shrink-to-fit=no — отключает iOS-овский авто-zoom-out, который иногда
+     рендерил страницу с увеличенным масштабом для PWA-ярлыка. -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, shrink-to-fit=no" />
+<!-- iOS PWA-метаданные: ярлык на рабочем столе откроется как настоящее
+     приложение, без Safari-шапки. -->
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="ЗебРус" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="theme-color" content="#FFFAF2" />
+<!-- Запрет кэширования HTML — чтобы PWA-ярлык на телефоне всегда тянул свежую версию. -->
 <meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate" />
 <meta http-equiv="pragma" content="no-cache" />
 <meta http-equiv="expires" content="0" />
@@ -35,7 +43,15 @@
   --shadow-lg:0 12px 32px rgba(26,27,58,.12);
 }
 *{box-sizing:border-box}
-html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5}
+html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:'Manrope',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:14px;line-height:1.5;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+/* На мобильном — горизонтальный overflow прячем, чтобы таблицы и широкие
+   карточки не растягивали viewport (это и было причиной «вид расширен»). */
+html,body{overflow-x:hidden;max-width:100%}
+/* iOS auto-zoom при фокусе на input — срабатывает если font-size <16px.
+   Поднимаем минимум на телефонах. */
+@media (max-width:640px){
+  input,textarea,select{font-size:16px !important}
+}
 button{font-family:inherit;cursor:pointer;border:0;background:transparent;color:inherit}
 input,textarea,select{font-family:inherit;font-size:inherit;color:inherit}
 a{color:var(--p);text-decoration:none;cursor:pointer}
@@ -178,6 +194,13 @@ h1{font-size:28px;line-height:1.15} h2{font-size:22px} h3{font-size:17px} h4{fon
 .table th{text-align:left;font-size:11px;text-transform:uppercase;color:var(--ink-3);letter-spacing:.08em;padding:12px 16px;border-bottom:1px solid var(--border);font-weight:700}
 .table td{padding:14px 16px;border-bottom:1px solid var(--border);vertical-align:middle}
 .table tr:hover td{background:#FFFCF2}
+/* На телефоне таблица обычно шире экрана — оборачиваем в скролл-контейнер,
+   чтобы скроллилась горизонтально, а не растягивала страницу. */
+@media (max-width:640px){
+  .card{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .table{font-size:13px}
+  .table th,.table td{padding:10px 12px}
+}
 .avatar-sm{width:34px;height:34px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:11px}
 
 /* ============ ВХОД ============ */
