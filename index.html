@@ -4241,10 +4241,30 @@ function modalTheory(n){
           };
           list.slice(0, 5).forEach(a => {
             const pct = a.max_score ? Math.round(a.score / a.max_score * 100) : 0;
-            card.append(el('div', { style:{ display:'flex', justifyContent:'space-between', padding:'8px 12px', background:'#fff', borderRadius:'8px', marginTop:'6px', fontSize:'13px' }},
-              el('span', null, fmt(a.created_at)),
-              el('span', { style:{ fontWeight:'700' }}, a.score + '/' + a.max_score + ' · ' + pct + '%')));
+            card.append(el('div', {
+              style:{
+                display:'flex', justifyContent:'space-between', alignItems:'center',
+                padding:'8px 12px', background:'#fff', borderRadius:'8px',
+                marginTop:'6px', fontSize:'13px', cursor:'pointer',
+                transition:'background .15s, transform .15s'
+              },
+              onmouseover: (e) => { e.currentTarget.style.background = 'var(--p-soft)'; e.currentTarget.style.transform = 'translateX(2px)'; },
+              onmouseout: (e) => { e.currentTarget.style.background = '#fff'; e.currentTarget.style.transform = 'translateX(0)'; },
+              onclick: () => {
+                /* Открываем тот же модал разбора, что и у учителя — он умеет искать
+                   в STATE.attemptsByTask, флаг isMine ставится автоматически. */
+                STATE.attemptDetailOpen = a.id;
+                render();
+              },
+              title: 'Открыть разбор попытки'
+            },
+              el('span', null, fmt(a.created_at) + ' '),
+              el('span', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
+                el('span', { style:{ fontWeight:'700' }}, a.score + '/' + a.max_score + ' · ' + pct + '%'),
+                el('span', { style:{ color:'var(--ink-3)', fontSize:'14px' }}, '›'))));
           });
+          card.append(el('div', { style:{ marginTop:'6px', fontSize:'11px', color:'var(--ink-3)', textAlign:'center' }},
+            'Нажми на попытку — увидишь разбор по каждому слову'));
           if(list.length > 5){
             card.append(el('div', { style:{ marginTop:'6px', fontSize:'11px', color:'var(--ink-3)', textAlign:'center' }},
               '…и ещё ' + (list.length - 5)));
@@ -5784,14 +5804,23 @@ function modalAttemptDetail(){
   if(!aid) return null;
   const close = () => { STATE.attemptDetailOpen = null; render(); };
 
-  /* Ищем попытку в кэше всех учеников */
-  let attempt = null, studentId = null;
+  /* Ищем попытку: сначала в кэше учительских (по учеников), затем в собственном
+     кэше ученика STATE.attemptsByTask (ключ — номер задания). */
+  let attempt = null, studentId = null, isMine = false;
   Object.entries(STATE.studentAttempts || {}).forEach(([sid, list]) => {
     if(Array.isArray(list)){
       const found = list.find(a => a.id === aid);
       if(found){ attempt = found; studentId = sid; }
     }
   });
+  if(!attempt){
+    Object.values(STATE.attemptsByTask || {}).forEach(list => {
+      if(Array.isArray(list)){
+        const found = list.find(a => a.id === aid);
+        if(found){ attempt = found; isMine = true; studentId = MY_PROFILE && MY_PROFILE.id; }
+      }
+    });
+  }
 
   if(!attempt){
     return el('div', { class:'modal-bg', onclick: close },
@@ -5807,7 +5836,10 @@ function modalAttemptDetail(){
   const topic = (EGE_TASKS.find(t => t.n === taskN) || {}).topic || '';
   const items = (attempt.answers && attempt.answers.items) || [];
   const student = STUDENTS.find(s => s.id === studentId);
-  const studentName = student ? student.name : 'Ученик';
+  /* Если ученик смотрит свою попытку — заголовок «Моя попытка», не имя */
+  const studentName = isMine
+    ? 'Моя попытка'
+    : (student ? student.name : (MY_PROFILE && MY_PROFILE.full_name) || 'Ученик');
   const pct = attempt.max_score ? Math.round(attempt.score / attempt.max_score * 100) : 0;
   const dt = new Date(attempt.created_at);
   const dateStr = dt.toLocaleDateString('ru-RU', { day:'numeric', month:'long' }) + ' в ' + dt.toTimeString().slice(0, 5);
@@ -5873,21 +5905,82 @@ function modalAttemptDetail(){
         if(q.q){
           card.append(el('div', { style:{ fontSize:'13px', marginBottom:'8px', whiteSpace:'pre-wrap' }}, q.q));
         }
-        if(Array.isArray(q.sentences) && q.sentences.length){
+      }
+
+      /* Определяем, был ли ответ списком индексов (multi-select / орфоэпия / паронимы / etc.) */
+      const userIdxs = Array.isArray(item.user)
+        ? item.user.map(v => Number(v)).filter(n => !isNaN(n))
+        : [];
+      const expectedIdxs = Array.isArray(item.expected)
+        ? item.expected.map(v => Number(v)).filter(n => !isNaN(n))
+        : [];
+      const isMultiSelect = q && Array.isArray(q.sentences) && q.sentences.length &&
+        (userIdxs.length || expectedIdxs.length);
+
+      if(isMultiSelect){
+        /* Полный разбор: каждое предложение/слово с пометкой что отметил ученик и что верно */
+        const userSet = new Set(userIdxs);
+        const correctSet = new Set(expectedIdxs);
+        const sentBox = el('div', { style:{ marginBottom:'8px' }});
+        q.sentences.forEach((s, i) => {
+          const picked = userSet.has(i);
+          const isCorrect = correctSet.has(i);
+          /* Цвет фона:
+             — picked + isCorrect = зелёный (попал)
+             — picked + !isCorrect = красный (выбрал лишнее)
+             — !picked + isCorrect = оранжевый (пропустил правильный)
+             — !picked + !isCorrect = серый */
+          let bg = '#f5f5f5', border = '#e5e5e5', mark = '';
+          if(picked && isCorrect){ bg = 'var(--green-soft)'; border = 'var(--green)'; mark = '✓'; }
+          else if(picked && !isCorrect){ bg = 'var(--red-soft)'; border = 'var(--red)'; mark = '✗ выбрал лишнее'; }
+          else if(!picked && isCorrect){ bg = '#fff4e0'; border = '#f0a020'; mark = '⚠ пропустил'; }
+
+          sentBox.append(
+            el('div', { style:{
+              display:'flex', alignItems:'flex-start', gap:'8px',
+              padding:'8px 10px', marginBottom:'4px',
+              background: bg, border:'1px solid ' + border, borderRadius:'8px', fontSize:'13px'
+            }},
+              el('span', { style:{ fontWeight:'700', minWidth:'20px', color:'var(--ink-2)' }}, (i+1) + '.'),
+              el('span', { style:{ flex:'1', whiteSpace:'pre-wrap' }}, String(s)),
+              mark ? el('span', { style:{ fontSize:'11px', fontWeight:'700', color: border, whiteSpace:'nowrap' }}, mark) : null));
+        });
+        card.append(sentBox);
+
+        /* Краткая сводка ответов в человекочитаемом виде (1-based) */
+        const userHuman = userIdxs.length ? userIdxs.map(i => i+1).sort((a,b)=>a-b).join(', ') : '(пусто)';
+        const corrHuman = expectedIdxs.length ? expectedIdxs.map(i => i+1).sort((a,b)=>a-b).join(', ') : '—';
+        card.append(
+          el('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginTop:'6px' }},
+            el('div', { style:{ background:'#fff', padding:'8px 10px', borderRadius:'8px' }},
+              el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'2px', fontWeight:'700' }}, 'Отметил ученик'),
+              el('div', { style:{ fontSize:'13px', wordBreak:'break-word' }}, userHuman)),
+            el('div', { style:{ background:'#fff', padding:'8px 10px', borderRadius:'8px' }},
+              el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'2px', fontWeight:'700' }}, 'Правильный ответ'),
+              el('div', { style:{ fontSize:'13px', wordBreak:'break-word' }}, corrHuman))));
+      } else {
+        /* Не multi-select: показываем sentences (если есть) и пары ответов */
+        if(q && Array.isArray(q.sentences) && q.sentences.length){
           const sentBox = el('ol', { style:{ margin:'0 0 8px 18px', padding:'0', fontSize:'13px' }});
           q.sentences.forEach(s => sentBox.append(el('li', { style:{ marginBottom:'4px' }}, s)));
           card.append(sentBox);
         }
+        card.append(
+          el('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginTop:'6px' }},
+            el('div', { style:{ background:'#fff', padding:'8px 10px', borderRadius:'8px' }},
+              el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'2px', fontWeight:'700' }}, 'Ответ ученика'),
+              el('div', { style:{ fontSize:'13px', wordBreak:'break-word' }}, fmtAnswer(item.user))),
+            el('div', { style:{ background:'#fff', padding:'8px 10px', borderRadius:'8px' }},
+              el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'2px', fontWeight:'700' }}, 'Правильно'),
+              el('div', { style:{ fontSize:'13px', wordBreak:'break-word' }}, fmtAnswer(item.expected)))));
       }
 
-      card.append(
-        el('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginTop:'6px' }},
-          el('div', { style:{ background:'#fff', padding:'8px 10px', borderRadius:'8px' }},
-            el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'2px', fontWeight:'700' }}, 'Ответ ученика'),
-            el('div', { style:{ fontSize:'13px', wordBreak:'break-word' }}, fmtAnswer(item.user))),
-          el('div', { style:{ background:'#fff', padding:'8px 10px', borderRadius:'8px' }},
-            el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'2px', fontWeight:'700' }}, 'Правильно'),
-            el('div', { style:{ fontSize:'13px', wordBreak:'break-word' }}, fmtAnswer(item.expected)))));
+      /* Если в банке вопрос не нашли — даём подсказку и выводим src, чтобы можно было сверить вручную */
+      if(!q){
+        card.append(el('div', { style:{
+          fontSize:'11px', color:'var(--ink-3)', marginTop:'8px', fontStyle:'italic'
+        }}, '⚠ Текст вопроса не нашёлся в банке (возможно, вопрос был удалён или переименован). Источник: ' + (item.src || '—')));
+      }
 
       body.append(card);
     });
