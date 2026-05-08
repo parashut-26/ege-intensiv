@@ -1,0 +1,6 @@
+RewriteEngine On
+
+# Все запросы (REST/Functions/Storage/Auth) → index.php (PHP-прокси)
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php [L,QSA]

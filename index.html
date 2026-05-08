@@ -369,10 +369,11 @@ h1{font-size:28px;line-height:1.15} h2{font-size:22px} h3{font-size:17px} h4{fon
 /* =======================================================================
    ПОДКЛЮЧЕНИЕ К SUPABASE
    ======================================================================= */
-/* Используем api.zebrus.online (Cloudflare Worker proxy) — supabase.co режется
-   мобильными операторами и некоторыми домашними провайдерами в РФ.
-   Worker пробрасывает все запросы на настоящий hyczawwuehrqsqqosgub.supabase.co. */
-const SUPABASE_URL = 'https://api.zebrus.online';
+/* Используем api2.zebrus.online — PHP-прокси на российском reg.ru хостинге
+   (IP 31.31.197.47). Cloudflare Worker (api.zebrus.online) тоже работает,
+   но некоторые провайдеры РФ режут Cloudflare-IP, а российский хостинг — нет.
+   PHP-скрипт пробрасывает все запросы на hyczawwuehrqsqqosgub.supabase.co. */
+const SUPABASE_URL = 'https://api2.zebrus.online';
 const SUPABASE_DIRECT_URL = 'https://hyczawwuehrqsqqosgub.supabase.co';
 
 /* Подменяет прямой URL Supabase на наш прокси-домен. Нужно для отображения
