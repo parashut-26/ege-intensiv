@@ -1321,9 +1321,13 @@ let MY_STATS = { done: 0, total: 26, avg: null, streak: 0 };
 
 async function loadMyStats(){
   if(!sb || !MY_PROFILE) return;
+  /* Учитель/куратор не решает задания — у них нет своих попыток. Не дёргаем
+     /attempts, чтобы не плодить заведомо пустые запросы (на которых ещё и
+     PHP-прокси любит словить 502). */
+  if(MY_PROFILE.role && MY_PROFILE.role !== 'student') return;
   try {
     const arr = await restRequest('GET', '/attempts?student_id=eq.' + encodeURIComponent(MY_PROFILE.id) +
-      '&select=ege_task_n,score,max_score,created_at&order=created_at.desc&limit=500');
+      '&select=ege_task_n,score,max_score,created_at&order=created_at.desc&limit=200');
     if(!Array.isArray(arr)) return;
     const tasks = new Set(arr.map(a => a.ege_task_n));
     MY_STATS.done = tasks.size;
@@ -1358,6 +1362,8 @@ let MY_ACTIVITY = [];
 
 async function loadMyActivity(){
   if(!sb || !MY_PROFILE) return;
+  /* Учительская роль — нет своих транзакций, лента активности не нужна */
+  if(MY_PROFILE.role && MY_PROFILE.role !== 'student') return;
   try {
     const arr = await restRequest('GET', '/bee_transactions?student_id=eq.' + encodeURIComponent(MY_PROFILE.id) +
       '&select=amount,reason,emoji,source_kind,created_at&order=created_at.desc&limit=20');
