@@ -10,6 +10,10 @@
  * Российский IP, поэтому провайдеры не блокируют.
  */
 
+// Чистая буферизация — никаких BOM/пробелов/уведомлений в выходе
+while (ob_get_level()) ob_end_clean();
+ob_start();
+
 $SUPABASE_HOST = 'hyczawwuehrqsqqosgub.supabase.co';
 
 // CORS preflight
@@ -26,10 +30,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
 $path = $_SERVER['REQUEST_URI'];
 $url = "https://{$SUPABASE_HOST}{$path}";
 
-// Собираем заголовки от клиента (кроме Host)
+// Собираем заголовки от клиента (кроме Host и Accept-Encoding —
+// последний заставит Supabase отдавать gzip, а cURL сам разжимает).
 $headers = [];
 foreach (getallheaders() as $name => $value) {
-    if (strtolower($name) === 'host') continue;
+    $lower = strtolower($name);
+    if ($lower === 'host') continue;
+    if ($lower === 'accept-encoding') continue;
     $headers[] = "{$name}: {$value}";
 }
 
@@ -49,6 +56,8 @@ curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
 curl_setopt($ch, CURLOPT_TIMEOUT, 30);
 curl_setopt($ch, CURLOPT_CONNECTTIMEOUT, 10);
 curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+// Передаём gzip/deflate автоматически — cURL разжимает на лету
+curl_setopt($ch, CURLOPT_ENCODING, '');
 
 if ($body !== null) {
     curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
@@ -86,4 +95,6 @@ foreach ($lines as $line) {
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Expose-Headers: content-range, content-length, etag');
 
+// Очищаем буфер и выводим только тело ответа (без BOM/пробелов)
+ob_end_clean();
 echo $out_body;
