@@ -5796,13 +5796,32 @@ function studentRow(s){
           el('div', { style:{ fontWeight:'700' }}, s.name),
           el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, s.email)))),
     el('td', null, s.type === 'свой' ? chip('🐝 свой', 'y') : chip('⭐ гость', 'grey')),
-    el('td', null, s.progress != null
-      ? el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
-          el('div', { style:{ flex:1, maxWidth:'120px' }}, el('div', { class:'bar thin' }, el('i', { style:{ width: s.progress + '%' }}))),
-          el('span', { style:{ fontWeight:'700', fontSize:'13px' }}, s.progress + '%'))
-      : el('span', { style:{ color:'var(--ink-3)' }}, '—')),
-    el('td', null, s.bee != null ? el('span', null, '🐝 ', el('b', null, s.bee)) : '—'),
-    el('td', null, s.avg != null ? el('b', null, s.avg + '%') : '—'),
+    /* Прогресс и Средний балл — считаем «на лету» из GROUP_STATS.byStudent.
+       Прогресс = доля задач из 26, на которые есть хотя бы одна попытка. */
+    (function(){
+      const stats = GROUP_STATS && GROUP_STATS.byStudent && GROUP_STATS.byStudent[s.id];
+      const progress = stats ? Math.round((stats.tasks.size / 26) * 100) : null;
+      const avg = stats && stats.max ? Math.round((stats.score / stats.max) * 100) : null;
+      const progressCell = el('td', null, progress != null
+        ? el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
+            el('div', { style:{ flex:1, maxWidth:'120px' }},
+              el('div', { class:'bar thin' }, el('i', { style:{ width: progress + '%' }}))),
+            el('span', { style:{ fontWeight:'700', fontSize:'13px' }}, progress + '%'))
+        : el('span', { style:{ color:'var(--ink-3)' }}, '—'));
+      const beeCell = el('td', null, s.bee != null ? el('span', null, '🐝 ', el('b', null, s.bee)) : '—');
+      const avgColor = avg == null ? 'var(--ink-3)' :
+                       avg >= 80 ? 'var(--green)' :
+                       avg >= 60 ? 'var(--warn)' : 'var(--red)';
+      const avgCell = el('td', null, avg != null
+        ? el('b', { style:{ color: avgColor }}, avg + '%')
+        : el('span', { style:{ color:'var(--ink-3)' }}, '—'));
+      /* Возвращаем фрагмент: прогресс, пчёлки, балл — три ячейки подряд */
+      const frag = document.createDocumentFragment();
+      frag.appendChild(progressCell);
+      frag.appendChild(beeCell);
+      frag.appendChild(avgCell);
+      return frag;
+    })(),
     el('td', null, s.paid ? chip('✓ ' + s.paidAmount + '₽', 'green') : chip('ждёт', 'red')),
     el('td', null, statusChip(s.status)),
     el('td', { style:{ textAlign:'right' }},
