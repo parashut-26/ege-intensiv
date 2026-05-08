@@ -706,8 +706,9 @@ async function loadProfileDirect(access_token){
   if(!profile){
     console.warn('→ Профиля для user_id=' + userId + ' не найдено. Чистим сессию.');
     try {
-      const projectRef = SUPABASE_URL.replace('https://', '').split('.')[0];
       Object.keys(localStorage).filter(k => /^sb-/.test(k)).forEach(k => localStorage.removeItem(k));
+      Object.keys(sessionStorage).filter(k => /^sb-/.test(k)).forEach(k => sessionStorage.removeItem(k));
+      if(sb && sb.auth) await sb.auth.signOut({ scope: 'local' }).catch(() => {});
     } catch(e){}
     return null;
   }
@@ -2886,6 +2887,16 @@ function viewLogin(){
             }
           }
         }, STATE.authStage === 'sending' ? '⏳ Входим…' : '🐝 Войти'),
+        el('button', { class:'login-btn btn-secondary', style:{ marginTop:'8px', fontSize:'12px' },
+          onclick: async () => {
+            try {
+              Object.keys(localStorage).filter(k => /^sb-/.test(k)).forEach(k => localStorage.removeItem(k));
+              Object.keys(sessionStorage).filter(k => /^sb-/.test(k)).forEach(k => sessionStorage.removeItem(k));
+              if(sb && sb.auth) await sb.auth.signOut({ scope: 'local' }).catch(() => {});
+            } catch(e){}
+            location.reload();
+          }
+        }, '🧹 Очистить сохранённую сессию'),
         el('p', { class:'foot-note', style:{ marginTop:'14px' }},
           'Для учеников интенсива. Имя должно совпадать со списком учителя.'));
       /* Не показываем демо-режим в name-методе */
