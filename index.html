@@ -3186,8 +3186,9 @@ function shellHeader(role){
 
   const right = el('div', { class:'right' });
   if(role === 'student'){
-    /* Реальные пчёлки из БД, fallback на мок если не загружены */
-    const beeCount = (MY_PROFILE && MY_PROFILE.bee != null) ? MY_PROFILE.bee : ME_STUDENT.bee;
+    /* Реальные пчёлки из БД. Для залогиненного — 0 при NULL.
+       Мок (ME_STUDENT.bee) только в демо-режиме (нет MY_PROFILE). */
+    const beeCount = MY_PROFILE ? (MY_PROFILE.bee || 0) : ME_STUDENT.bee;
     right.append(el('span', { class:'bee-counter' }, '🐝 ', el('b', null, beeCount)));
   }
   if(role === 'teacher') right.append(el('span', { class:'bell' }, '🔔', el('span', { class:'dot' })));
@@ -3256,7 +3257,7 @@ function viewStudentHome(){
       }, '🎯 Я на уроке')));
 
   const kpi = el('div', { class:'grid grid-4' });
-  const realBee = (MY_PROFILE && MY_PROFILE.bee != null) ? MY_PROFILE.bee : ME_STUDENT.bee;
+  const realBee = MY_PROFILE ? (MY_PROFILE.bee || 0) : ME_STUDENT.bee;
   kpi.append(
     kpiCard('Пчёлки', realBee, 'из ' + ME_STUDENT.beeMax + ' возможных', '🐝', 'var(--y-soft)'),
     kpiCard('Заданий пройдено', ME_STUDENT.done, 'из ' + ME_STUDENT.total, '✅', 'var(--green-soft)'),
