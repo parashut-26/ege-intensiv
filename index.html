@@ -1661,20 +1661,35 @@ async function sendDmMessage(text){
   await loadDmMessages();
 }
 
-/* Открыть ЛС с пользователем (создать если нет) — асинхронный helper */
-async function openDmWith(otherUserId){
+/* Открыть ЛС с пользователем (создать если нет) — асинхронный helper.
+   partnerInfo (опционально): { name, role } — если уже знаем кто это
+   (например, из карточки ученика), не дёргаем /profiles повторно. */
+async function openDmWith(otherUserId, partnerInfo){
   STATE.chatLoading = true;
+  /* Сразу выставим имя для шапки, если знаем — UX без мерцания */
+  if(partnerInfo && partnerInfo.name){
+    STATE.dmPartner = { id: otherUserId, name: partnerInfo.name, role: partnerInfo.role || null };
+  }
   render();
   try {
     const rid = await getOrCreateDmRoom(otherUserId);
     STATE.dmRoomId = rid;
     STATE.chatChannel = 'dm';
     await loadDmMessages();
-    /* Подгрузим заодно профиль собеседника, чтобы показать имя в шапке */
-    const arr = await restRequest('GET',
-      '/profiles?id=eq.' + otherUserId + '&select=id,full_name,role&limit=1');
-    if(Array.isArray(arr) && arr.length){
-      STATE.dmPartner = { id: arr[0].id, name: arr[0].full_name, role: arr[0].role };
+    /* Профиль собеседника подгружаем только если ещё не знаем имя.
+       Делаем это БЕЗ выброса исключения — даже если 502, диалог уже открыт. */
+    if(!STATE.dmPartner || !STATE.dmPartner.name){
+      try {
+        const arr = await restRequest('GET',
+          '/profiles?id=eq.' + otherUserId + '&select=id,full_name,role&limit=1');
+        if(Array.isArray(arr) && arr.length){
+          STATE.dmPartner = { id: arr[0].id, name: arr[0].full_name, role: arr[0].role };
+        }
+      } catch(e){
+        /* Не блокируем UX — диалог открыт, можно писать. Имя в шапке появится потом. */
+        console.warn('Не удалось подгрузить имя собеседника:', e.message);
+        STATE.dmPartner = STATE.dmPartner || { id: otherUserId, name: 'Собеседник', role: null };
+      }
     }
   } catch(e){
     STATE.chatLastError = e.message;
@@ -5625,8 +5640,17 @@ function studentRow(s){
             el('button', { class:'btn-icon', title:'Посмотреть карточку',
               onclick: () => { STATE.studentDetailOpen = s.id; render(); }
             }, '👁'),
-            el('button', { class:'btn-icon', title:'Написать в чате',
-              onclick: () => { STATE.chatOpen = true; STATE.chatChannel = 'dm'; render(); }
+            el('button', { class:'btn-icon', title:'Написать в ЛС',
+              onclick: () => {
+                if(!/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(s.id)){
+                  showToast('Этот ученик ещё не зарегистрирован — ЛС недоступно');
+                  return;
+                }
+                STATE.chatOpen = true;
+                STATE.chatChannel = 'dm';
+                render();
+                openDmWith(s.id, { name: s.name, role: 'student' });
+              }
             }, '💬'),
             el('button', { class:'btn-icon', title:'Сделать куратором',
               style:{ background:'var(--teal-soft)', color:'var(--teal)' },
@@ -5708,7 +5732,8 @@ function modalStudentDetail(){
           STATE.chatOpen = true;
           STATE.chatChannel = 'dm';
           render();
-          openDmWith(s.id);
+          /* Имя и роль уже знаем — передаём, чтобы не дёргать /profiles повторно */
+          openDmWith(s.id, { name: s.name, role: 'student' });
         }
       }, '💬 Написать') : null,
       el('button', { class:'x', onclick: close }, '×')));
@@ -8208,10 +8233,9 @@ function chatPanel(role){
       /* Для ученика — автоматически открыть ЛС с учителем,
          если ученик ещё ни с кем не переписывается */
       if(role === 'student' && (!STATE.dmList || !STATE.dmList.length) && !STATE.dmRoomId){
-        /* Найдём учителя из STUDENTS/CURATORS не получится — берём из profiles */
         restRequest('GET', '/profiles?role=eq.teacher&select=id,full_name,role&limit=1').then(arr => {
           if(Array.isArray(arr) && arr.length){
-            openDmWith(arr[0].id);
+            openDmWith(arr[0].id, { name: arr[0].full_name, role: 'teacher' });
           } else { render(); }
         });
       } else {
