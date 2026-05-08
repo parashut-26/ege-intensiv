@@ -826,6 +826,11 @@ async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, 
     const inserted = await restRequest('POST', '/attempts', payload, { prefer: 'return=representation' });
     /* Триггер on_attempt_insert сам обновит profiles.bee и добавит запись в bee_transactions. */
     if(MY_PROFILE){ MY_PROFILE.bee = (MY_PROFILE.bee || 0) + beeEarned; }
+    /* Хуки на достижения */
+    awardAchievement('a1').catch(() => {});  /* Первая пчёлка — за самый первый attempt */
+    if(score === max_score && max_score > 0){
+      awardAchievement('b2').catch(() => {});  /* Точно в цель — без ошибок */
+    }
     return Array.isArray(inserted) ? inserted[0] : inserted;
   } catch(e){
     console.warn('saveAttempt упал:', e.message);
@@ -1016,7 +1021,7 @@ async function restoreSession(){
         else STATE.view = 'student';
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb()]).then(() => render()).catch(() => {});
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb()]).then(() => render()).catch(() => {});
         return;
       } else {
         STATE.authLoading = false;
@@ -1072,7 +1077,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb()]).then(() => render()).catch(() => {});
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb()]).then(() => render()).catch(() => {});
   } else {
     STATE.view = 'login';
   }
@@ -1278,6 +1283,77 @@ async function demoteCurator(curatorId){
     { prefer: 'return=minimal' });
 }
 
+/* === ДОСТИЖЕНИЯ И ПЧЁЛКИ ===
+
+   Загружаем achievement_defs (общий справочник) и user_achievements
+   текущего пользователя. Объединяем в массив ACHIEVEMENTS с флагом unlocked. */
+async function loadAchievementsFromDb(){
+  if(!sb) return;
+  try {
+    const defs = await restRequest('GET', '/achievement_defs?select=id,category,emoji,name,description,bee_reward&order=category.asc,id.asc');
+    if(!Array.isArray(defs) || !defs.length){
+      console.log('achievement_defs пуст — оставляем моки');
+      return;
+    }
+    /* Подгружаем разблокированные текущего пользователя (если он залогинен) */
+    let unlockedIds = new Set();
+    if(MY_PROFILE && MY_PROFILE.id){
+      try {
+        const ua = await restRequest('GET', '/user_achievements?student_id=eq.' + encodeURIComponent(MY_PROFILE.id) + '&select=achievement_id');
+        if(Array.isArray(ua)) unlockedIds = new Set(ua.map(r => r.achievement_id));
+      } catch(e){ console.warn('user_achievements:', e.message); }
+    }
+    ACHIEVEMENTS = defs.map(d => ({
+      id: d.id,
+      cat: d.category,
+      emoji: d.emoji,
+      name: d.name,
+      desc: d.description,
+      pts: d.bee_reward || 5,
+      unlocked: unlockedIds.has(d.id)
+    }));
+    console.log('✓ Достижений загружено: ' + ACHIEVEMENTS.length + ' (разблокировано ' + unlockedIds.size + ')');
+  } catch(e){
+    console.warn('Не удалось загрузить достижения:', e.message);
+  }
+}
+
+/* Разблокировать достижение для текущего пользователя.
+   Возвращает {alreadyUnlocked:bool, beesAwarded:number} или null при ошибке.
+   Вызывать без await если просто хотим «выстрелить и забыть». */
+async function awardAchievement(achievementId){
+  if(!sb || !MY_PROFILE || !MY_PROFILE.id) return null;
+  /* Если уже разблокировано — не дублируем */
+  const existing = ACHIEVEMENTS.find(a => a.id === achievementId);
+  if(existing && existing.unlocked) return { alreadyUnlocked: true, beesAwarded: 0 };
+  try {
+    /* Пытаемся вставить — RLS пропускает любого authenticated, PK защищает от дублей */
+    await restRequest('POST', '/user_achievements',
+      { student_id: MY_PROFILE.id, achievement_id: achievementId },
+      { prefer: 'return=minimal,resolution=ignore-duplicates' });
+    /* Начисляем пчёлки в bee_transactions (триггера для user_achievements нет, делаем вручную) */
+    const bonus = (existing && existing.pts) || 5;
+    const ach = existing || ACHIEVEMENTS.find(a => a.id === achievementId) || { name: achievementId, emoji: '🏆' };
+    await restRequest('POST', '/bee_transactions',
+      { student_id: MY_PROFILE.id, amount: bonus,
+        reason: 'достижение «' + ach.name + '»',
+        source_kind: 'achievement', emoji: ach.emoji || '🏆' },
+      { prefer: 'return=minimal' });
+    /* Обновляем кэш в profiles.bee */
+    const newBee = (MY_PROFILE.bee || 0) + bonus;
+    await restRequest('PATCH', '/profiles?id=eq.' + encodeURIComponent(MY_PROFILE.id),
+      { bee: newBee }, { prefer: 'return=minimal' });
+    /* Обновляем локально */
+    MY_PROFILE.bee = newBee;
+    if(existing) existing.unlocked = true;
+    showToast('🏆 ' + (ach.emoji || '') + ' ' + ach.name + ' · +' + bonus + ' 🐝');
+    return { alreadyUnlocked: false, beesAwarded: bonus };
+  } catch(e){
+    console.warn('awardAchievement(' + achievementId + ') упал:', e.message);
+    return null;
+  }
+}
+
 /* Сочинения — добавлено состояние «pre-checked by curator» */
 const ESSAYS = [
   { id: 'e1', studentId: 's2', studentName: 'Анна Соколова', text: 'Сочинение по тексту Солоухина', when: '2 ч. назад', status: 'new' },
@@ -1309,7 +1385,10 @@ let SAMPLES = [
 ];
 
 /* 14 достижений в 4 категориях, каждое доступно */
-const ACHIEVEMENTS = [
+/* ACHIEVEMENTS — мок до загрузки из БД. После loadAchievementsFromDb()
+   эти моки полностью заменяются реальными достижениями + флагами unlocked
+   для текущего пользователя. */
+let ACHIEVEMENTS = [
   { id:'a1', cat:'showup', emoji:'🐝', name:'Первая пчёлка', desc:'Выполнила первое задание интенсива', pts:5, unlocked:true },
   { id:'a2', cat:'showup', emoji:'☀️', name:'Утренняя птичка', desc:'Прошла утреннюю разминку дня 1 до полудня', pts:5, unlocked:true },
   { id:'a3', cat:'showup', emoji:'📅', name:'Три дня вместе', desc:'Заходила на платформу каждый из трёх дней', pts:10, unlocked:false },
@@ -1431,6 +1510,8 @@ async function submitEssay(opts){
     payload.photo_urls = opts.photoUrls || [];
   }
   const inserted = await restRequest('POST', '/essays', payload, { prefer: 'return=representation' });
+  /* Достижение «✍️ Сочинение сдано» (a5) — за сам факт сдачи, до проверки */
+  awardAchievement('a5').catch(() => {});
   return Array.isArray(inserted) ? inserted[0] : inserted;
 }
 
@@ -3104,7 +3185,11 @@ function shellHeader(role){
       : { name: profileName || ME_STUDENT.fullname, sub: 'Ученик',        init: profileInit || 'А' };
 
   const right = el('div', { class:'right' });
-  if(role === 'student') right.append(el('span', { class:'bee-counter' }, '🐝 ', el('b', null, ME_STUDENT.bee)));
+  if(role === 'student'){
+    /* Реальные пчёлки из БД, fallback на мок если не загружены */
+    const beeCount = (MY_PROFILE && MY_PROFILE.bee != null) ? MY_PROFILE.bee : ME_STUDENT.bee;
+    right.append(el('span', { class:'bee-counter' }, '🐝 ', el('b', null, beeCount)));
+  }
   if(role === 'teacher') right.append(el('span', { class:'bell' }, '🔔', el('span', { class:'dot' })));
   right.append(
     el('span', { class:'user-pill' },
@@ -3171,8 +3256,9 @@ function viewStudentHome(){
       }, '🎯 Я на уроке')));
 
   const kpi = el('div', { class:'grid grid-4' });
+  const realBee = (MY_PROFILE && MY_PROFILE.bee != null) ? MY_PROFILE.bee : ME_STUDENT.bee;
   kpi.append(
-    kpiCard('Пчёлки', ME_STUDENT.bee, 'из ' + ME_STUDENT.beeMax + ' возможных', '🐝', 'var(--y-soft)'),
+    kpiCard('Пчёлки', realBee, 'из ' + ME_STUDENT.beeMax + ' возможных', '🐝', 'var(--y-soft)'),
     kpiCard('Заданий пройдено', ME_STUDENT.done, 'из ' + ME_STUDENT.total, '✅', 'var(--green-soft)'),
     kpiCard('Средний балл', ME_STUDENT.avg + '%', 'так держать!', '🎯', 'var(--p-soft)'),
     kpiCard('Серия дней', ME_STUDENT.streak, 'подряд активна', '🔥', '#FFEDD5'));
