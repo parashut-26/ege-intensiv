@@ -428,6 +428,7 @@ const STATE = {
   toast: null,
   showOnboarding: false,
   theoryOpen: null,        // номер задания
+  taskTab: 'theory',       // 'theory' | 'practice' — какая вкладка открыта в карточке задания
   attendanceOpen: false,   // открыта модалка посещаемости
   scoresK: {}, errors: {}, essayComment: '', essayVoiceUrl: null,
   studentEssayResultOpen: null,
@@ -3710,7 +3711,7 @@ function theoryCard(t){
   const skill = MY_SKILL[t.n];
   const cls = 'theory-card day' + t.day + (skill === 'weak' ? ' weak' : skill === 'ok' ? ' ok' : '');
   return el('div', { class: cls,
-    onclick: () => { STATE.theoryOpen = t.n; render(); }
+    onclick: () => { STATE.theoryOpen = t.n; STATE.taskTab = 'theory'; render(); }
   },
     el('div', { class:'num' }, String(t.n).padStart(2,'0')),
     el('div', { class:'topic' }, t.topic),
@@ -4126,7 +4127,48 @@ function modalTheory(n){
         }, '×')),
       el('div', { class:'modal-body' },
         el('div', { style:{ marginBottom:'14px' }}, chip(skillLabel, skillKind)),
+
+        /* Переключатель вкладок Теория / Практика */
         (function(){
+          const activeTab = STATE.taskTab || 'theory';
+          const mkTab = (key, label, badge) => {
+            const isActive = activeTab === key;
+            return el('button', {
+              onclick: () => { STATE.taskTab = key; render(); },
+              style:{
+                flex:'1', padding:'12px 16px', border:'none',
+                background: isActive ? 'var(--p)' : 'var(--surface-soft)',
+                color: isActive ? '#fff' : 'var(--ink-2)',
+                fontWeight: isActive ? '800' : '600',
+                fontSize:'14px', cursor:'pointer',
+                borderRadius: '10px',
+                transition: 'background .15s, color .15s',
+                display:'flex', alignItems:'center', justifyContent:'center', gap:'6px'
+              }
+            },
+              el('span', null, label),
+              badge != null ? el('span', {
+                style:{
+                  fontSize:'11px', padding:'2px 8px', borderRadius:'999px',
+                  background: isActive ? 'rgba(255,255,255,.25)' : 'var(--bg)',
+                  color: isActive ? '#fff' : 'var(--ink-3)',
+                  fontWeight:'700'
+                }
+              }, String(badge)) : null);
+          };
+          return el('div', {
+            style:{
+              display:'flex', gap:'6px', padding:'4px',
+              background:'var(--bg)', borderRadius:'12px',
+              marginBottom:'16px'
+            }
+          },
+            mkTab('theory', '📖 Теория'),
+            mkTab('practice', '🎯 Практика', hasQuiz ? bankFor(n).length : null));
+        })(),
+
+        /* === Вкладка ТЕОРИЯ === */
+        STATE.taskTab !== 'practice' ? (function(){
           const card = el('div', { class:'card theory-md', style:{ marginBottom:'14px', background:'var(--surface-soft)' }},
             el('h4', null, '📖 ' + t.topic));
           const md = THEORY[n];
@@ -4140,9 +4182,27 @@ function modalTheory(n){
             card.append(el('p', { style:{ color:'var(--ink-2)', marginTop:'6px' }},
               'Здесь будет краткая теория от Ольги Александровны — выжимка, формулы и подводные камни.'));
           }
+          /* Если есть тренажёр — крупная подсказка-кнопка перейти к практике */
+          if(hasQuiz){
+            card.append(el('div', { style:{
+              marginTop:'18px', padding:'14px', background:'var(--y-soft)',
+              border:'1px dashed var(--y-2)', borderRadius:'10px',
+              display:'flex', justifyContent:'space-between', alignItems:'center', gap:'12px', flexWrap:'wrap'
+            }},
+              el('div', null,
+                el('div', { style:{ fontWeight:'700', marginBottom:'2px' }}, '🎯 Готова потренироваться?'),
+                el('div', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
+                  'В банке ' + bankFor(n).length + ' ' + ruPlural(bankFor(n).length, 'вопрос', 'вопроса', 'вопросов') + ' — пчёлки за каждый верный')),
+              el('button', {
+                class:'btn btn-y',
+                onclick: () => { STATE.taskTab = 'practice'; render(); }
+              }, 'К практике →')));
+          }
           return card;
-        })(),
-        mats.length > 0 ? el('div', { class:'card', style:{ marginBottom:'14px' }},
+        })() : null,
+
+        /* На вкладке Теория показываем материалы (PDF / ссылки) */
+        STATE.taskTab !== 'practice' && mats.length > 0 ? el('div', { class:'card', style:{ marginBottom:'14px' }},
           el('h4', null, '📎 Материалы по этому заданию'),
           el('div', { style:{ marginTop:'10px', display:'flex', flexDirection:'column', gap:'6px' }},
             mats.map(m => {
@@ -4155,7 +4215,7 @@ function modalTheory(n){
                 el('a', { href: url, target:'_blank', rel:'noopener', class:'btn btn-secondary btn-sm', style:{ textDecoration:'none' }},
                   m.external_url ? 'Открыть ↗' : 'Открыть'));
             }))) : null,
-        hasQuiz ? (function(){
+        STATE.taskTab === 'practice' && hasQuiz ? (function(){
           const bankN = bankFor(n).length;
           const startWithLimit = (limit) => {
             STATE.testOpen = n;
@@ -4193,7 +4253,18 @@ function modalTheory(n){
                 onclick: () => { STATE.testOpen = 5; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testShuffle = 5; STATE.testLimit = null; STATE.shuffledBank = null; STATE.theoryOpen = null; render(); }
               }, '🎲 Быстрые 5 пар') : null));
         })() : null,
-        (function(){
+
+        /* Если на вкладке Практика, но банка ещё нет — пояснение */
+        STATE.taskTab === 'practice' && !hasQuiz ? el('div', {
+          class:'card',
+          style:{ marginBottom:'14px', background:'var(--surface-soft)', textAlign:'center', padding:'28px' }
+        },
+          el('div', { style:{ fontSize:'42px', marginBottom:'8px' }}, '🛠'),
+          el('h4', { style:{ marginBottom:'6px' }}, 'Тренажёр готовится'),
+          el('p', { style:{ color:'var(--ink-2)', fontSize:'13px' }},
+            'Банк вопросов по этому заданию ещё не наполнен. Пока изучай теорию — практика появится скоро.')) : null,
+
+        STATE.taskTab === 'practice' ? (function(){
           const cache = STATE.attemptsByTask || (STATE.attemptsByTask = {});
           let list = cache[n];
           /* Если кэша нет — стартуем подгрузку и просим перерендер */
