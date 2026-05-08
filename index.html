@@ -447,6 +447,7 @@ const STATE = {
   authMode: 'live',     // 'live' (реальный e-mail) | 'demo' (роли как раньше)
   authEmail: '',
   authCode: '',         // введённый ученицей 6-значный код
+  authConsent: false,   // галочка согласия с политикой/офертой
   authMethod: 'name',   // 'name' (по имени+email) | 'code' (через email-код)
   authFullName: '',     // имя+фамилия для метода 'name'
   importStudentsOpen: false,
@@ -2860,6 +2861,21 @@ function viewLogin(){
       if(STATE.authError){
         card.append(el('div', { style:{ color:'var(--red)', fontSize:'12px', marginBottom:'8px' }}, '⚠ ' + STATE.authError));
       }
+      /* Чекбокс согласия с документами */
+      const consentBox = el('div', { style:{ display:'flex', gap:'8px', alignItems:'flex-start', marginBottom:'10px', padding:'10px', background:'var(--surface-soft)', borderRadius:'10px' }},
+        el('input', { type:'checkbox', id:'auth-consent', checked: STATE.authConsent || undefined,
+          style:{ marginTop:'3px', flexShrink:'0' },
+          onchange: ev => { STATE.authConsent = ev.target.checked; }
+        }),
+        el('label', { for:'auth-consent', style:{ fontSize:'11px', lineHeight:'1.4', color:'var(--ink-2)', cursor:'pointer' }},
+          'Я ознакомлен(а) и согласен(на) с ',
+          el('a', { href:'https://zebrus.tb.ru/page2', target:'_blank', rel:'noopener', style:{ color:'var(--p)' }}, 'политикой конфиденциальности'),
+          ', ',
+          el('a', { href:'https://zebrus.tb.ru/page3', target:'_blank', rel:'noopener', style:{ color:'var(--p)' }}, 'обработкой персональных данных'),
+          ' и ',
+          el('a', { href:'https://zebrus.tb.ru/page4', target:'_blank', rel:'noopener', style:{ color:'var(--p)' }}, 'офертой'),
+          '.'));
+      card.append(consentBox);
       card.append(
         el('button', {
           class:'login-btn btn-y',
@@ -2869,6 +2885,7 @@ function viewLogin(){
             const email = (STATE.authEmail || '').trim().toLowerCase();
             if(!fullName){ STATE.authError = 'Введите имя'; render(); return; }
             if(!email || !email.includes('@')){ STATE.authError = 'Введите корректный e-mail'; render(); return; }
+            if(!STATE.authConsent){ STATE.authError = 'Нужно согласие с политикой и офертой (галочка выше)'; render(); return; }
             STATE.authStage = 'sending'; STATE.authError = null; render();
             try {
               await authLoginByNameEmail(fullName, email);
@@ -2959,6 +2976,20 @@ function viewLogin(){
           }, '🧹 Очистить кэш и войти заново'));
         }
       }
+      /* Чекбокс согласия с документами */
+      card.append(el('div', { style:{ display:'flex', gap:'8px', alignItems:'flex-start', marginBottom:'10px', padding:'10px', background:'var(--surface-soft)', borderRadius:'10px' }},
+        el('input', { type:'checkbox', id:'auth-consent2', checked: STATE.authConsent || undefined,
+          style:{ marginTop:'3px', flexShrink:'0' },
+          onchange: ev => { STATE.authConsent = ev.target.checked; }
+        }),
+        el('label', { for:'auth-consent2', style:{ fontSize:'11px', lineHeight:'1.4', color:'var(--ink-2)', cursor:'pointer' }},
+          'Я ознакомлен(а) и согласен(на) с ',
+          el('a', { href:'https://zebrus.tb.ru/page2', target:'_blank', rel:'noopener', style:{ color:'var(--p)' }}, 'политикой конфиденциальности'),
+          ', ',
+          el('a', { href:'https://zebrus.tb.ru/page3', target:'_blank', rel:'noopener', style:{ color:'var(--p)' }}, 'обработкой персональных данных'),
+          ' и ',
+          el('a', { href:'https://zebrus.tb.ru/page4', target:'_blank', rel:'noopener', style:{ color:'var(--p)' }}, 'офертой'),
+          '.')));
       card.append(
         el('button', {
           class:'login-btn btn-y',
@@ -2966,6 +2997,7 @@ function viewLogin(){
           onclick: async () => {
             const email = (STATE.authEmail || '').trim().toLowerCase();
             if(!email || !email.includes('@')){ STATE.authError = 'Введите корректный e-mail'; render(); return; }
+            if(!STATE.authConsent){ STATE.authError = 'Нужно согласие с политикой и офертой (галочка выше)'; render(); return; }
             STATE.authStage = 'sending'; STATE.authError = null; render();
             try {
               await authRequestCode(email);
@@ -7251,6 +7283,26 @@ function chatFab(){
 /* =======================================================================
    ОСНОВНОЙ РЕНДЕР
    ======================================================================= */
+/* Подвал с реквизитами и ссылками на правовые документы (152-ФЗ) */
+function legalFooter(){
+  const linkStyle = { color:'var(--ink-2)', textDecoration:'none', fontSize:'12px' };
+  return el('footer', {
+    style:{ borderTop:'1px solid var(--border)', padding:'18px 16px', marginTop:'24px',
+            background:'#FAFAF7', fontSize:'12px', color:'var(--ink-3)',
+            display:'flex', flexWrap:'wrap', gap:'14px 24px',
+            alignItems:'flex-start', justifyContent:'space-between' }
+  },
+    el('div', { style:{ flex:'1 1 260px' }},
+      el('div', { style:{ fontWeight:'700', color:'var(--ink-2)', marginBottom:'4px' }},
+        '🐝 ЗебРус · Краш-тест 2026'),
+      el('div', null, '© 2026 ИП Хачатрян Ольга Александровна · ИНН 504305749797')),
+    el('div', { style:{ display:'flex', gap:'18px', flexWrap:'wrap' }},
+      el('a', { href:'https://zebrus.tb.ru/page2', target:'_blank', rel:'noopener', style: linkStyle }, 'Политика конфиденциальности'),
+      el('a', { href:'https://zebrus.tb.ru/page3', target:'_blank', rel:'noopener', style: linkStyle }, 'Согласие на обработку ПДН'),
+      el('a', { href:'https://zebrus.tb.ru/page4', target:'_blank', rel:'noopener', style: linkStyle }, 'Оферта'),
+      el('a', { href:'https://parashut-26.github.io/krash-test-2026/', target:'_blank', rel:'noopener', style: linkStyle }, 'О школе')));
+}
+
 function render(){
   const root = document.getElementById('root');
 
@@ -7262,7 +7314,7 @@ function render(){
   root.innerHTML = '';
 
   if(STATE.view === 'login'){
-    root.append(viewLogin());
+    root.append(viewLogin(), legalFooter());
     if(STATE.toast) root.append(el('div', { class:'toast' }, STATE.toast));
     return;
   }
@@ -7287,6 +7339,7 @@ function render(){
       shellHeader('student'),
       shellTabs('student', tabs, STATE.studentTab, k => { STATE.studentTab = k; render(); }),
       el('main', { class:'main' }, content),
+      legalFooter(),
       chatFab()
     );
   }
@@ -7308,6 +7361,7 @@ function render(){
       shellHeader('curator'),
       shellTabs('curator', tabs, STATE.curatorTab, k => { STATE.curatorTab = k; render(); }),
       el('main', { class:'main' }, content),
+      legalFooter(),
       chatFab()
     );
   }
@@ -7341,6 +7395,7 @@ function render(){
       shellHeader('teacher'),
       shellTabs('teacher', tabs, STATE.teacherTab, k => { STATE.teacherTab = k; render(); }),
       el('main', { class:'main' }, content),
+      legalFooter(),
       chatFab()
     );
   }
