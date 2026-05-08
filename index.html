@@ -3683,17 +3683,8 @@ function viewStudentTheory(){
         onclick: () => { STATE.variantMode = true; render(); }
       }, '🎲 Собрать вариант ЕГЭ')));
 
-  /* Образцы сочинений */
-  const samplesCard = el('div', { class:'card', style:{ marginTop:'16px', marginBottom:'20px' }});
-  samplesCard.append(
-    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px' }},
-      el('h2', null, '📝 Образцы сочинений (задание 27)'),
-      chip('новое', 'green')));
-  SAMPLES.forEach(s => samplesCard.append(sampleCard(s)));
-  wrap.append(samplesCard);
-
-  /* Сетка 26 */
-  const grid = el('div', { class:'card' });
+  /* Сетка 26 — задания идут первыми, потому что теория и практика важнее */
+  const grid = el('div', { class:'card', style:{ marginTop:'16px' }});
   grid.append(
     el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', flexWrap:'wrap', gap:'10px' }},
       el('h2', null, 'Задания 1–26'),
@@ -3704,6 +3695,16 @@ function viewStudentTheory(){
     el('div', { class:'theory-grid' },
       EGE_TASKS.map(t => theoryCard(t))));
   wrap.append(grid);
+
+  /* Образцы сочинений — после заданий, как доп.материал */
+  const samplesCard = el('div', { class:'card', style:{ marginTop:'20px' }});
+  samplesCard.append(
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px' }},
+      el('h2', null, '📝 Образцы сочинений (задание 27)'),
+      chip('новое', 'green')));
+  SAMPLES.forEach(s => samplesCard.append(sampleCard(s)));
+  wrap.append(samplesCard);
+
   return wrap;
 }
 
