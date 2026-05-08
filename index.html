@@ -698,18 +698,11 @@ async function loadProfileDirect(access_token){
     throw e;
   }
 
-  /* Если профиля нет — НЕ создаём через POST (RLS заблокирует),
-     вместо этого чистим localStorage и считаем что юзер не залогинен.
-     Это случается когда:
-     1) старый JWT в кэше, а профиль уже удалён
-     2) JWT с другого окружения/проекта */
+  /* Если профиль не нашли — просто возвращаем null, не трогаем сессию.
+     Пользователь увидит ошибку «не удалось загрузить профиль»
+     и сможет нажать «🧹 Очистить сохранённую сессию» сам. */
   if(!profile){
-    console.warn('→ Профиля для user_id=' + userId + ' не найдено. Чистим сессию.');
-    try {
-      Object.keys(localStorage).filter(k => /^sb-/.test(k)).forEach(k => localStorage.removeItem(k));
-      Object.keys(sessionStorage).filter(k => /^sb-/.test(k)).forEach(k => sessionStorage.removeItem(k));
-      if(sb && sb.auth) await sb.auth.signOut({ scope: 'local' }).catch(() => {});
-    } catch(e){}
+    console.warn('→ Профиля для user_id=' + userId + ' не найдено. Возможно RLS блокирует или профиль не создан.');
     return null;
   }
 
