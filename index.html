@@ -1498,10 +1498,13 @@ async function ensureGroupChatRoom(){
 async function loadChatMessages(){
   if(!sb || !STATE.chatRoomId) return;
   try {
-    /* PostgREST embed автора (left join на profiles по author_id) */
+    /* PostgREST embed автора (left join на profiles по author_id).
+       У chat_messages два FK на profiles (author_id и marked_helped_by),
+       поэтому явно указываем имя связи: profiles!chat_messages_author_id_fkey */
     const arr = await restRequest('GET',
       '/chat_messages?room_id=eq.' + STATE.chatRoomId +
-      '&select=id,author_id,body,marked_helped_by,created_at,profiles(full_name,role)' +
+      '&select=id,author_id,body,marked_helped_by,created_at,' +
+      'author:profiles!chat_messages_author_id_fkey(full_name,role)' +
       '&order=created_at.asc&limit=200');
     if(Array.isArray(arr)){
       STATE.chatMessages = arr;
@@ -8119,8 +8122,10 @@ function chatPanel(role){
 /* Бабл из DB-формата (с author_id, profiles.full_name, profiles.role) */
 function chatBubbleDb(m, role, meId){
   const mine = m.author_id === meId;
-  const authorName = (m.profiles && m.profiles.full_name) || 'Участник';
-  const authorRole = m.profiles && m.profiles.role;
+  /* author — алиас на profiles!chat_messages_author_id_fkey */
+  const author = m.author || m.profiles || null;
+  const authorName = (author && author.full_name) || 'Участник';
+  const authorRole = author && author.role;
   const canMark = (role === 'teacher' || role === 'curator') && !mine && !m.marked_helped_by;
   const wasMarked = !!m.marked_helped_by;
   const time = (m.created_at ? new Date(m.created_at).toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' }) : '');
