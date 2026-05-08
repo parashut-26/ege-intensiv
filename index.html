@@ -5008,13 +5008,28 @@ function viewTeacherOverview(){
       '🟡 серым — отметились сами · 🟢 зелёным — отметили вы'));
   row.append(attendBox);
 
-  /* Слабые места */
+  /* Слабые места — реальные данные из GROUP_STATS.byTask */
   const weakBox = el('div', { class:'card' });
   weakBox.append(
     el('h2', { style:{ marginBottom:'10px' }}, '⚠️ Слабые места группы'),
     el('p', { style:{ color:'var(--ink-2)', fontSize:'12px', marginBottom:'14px' }},
       'Темы с самым высоким процентом ошибок. Стоит уделить внимание на вебинаре.'));
-  WEAK_TOPICS.forEach(t => weakBox.append(weakTopicRow(t)));
+  const realWeak = realWeakTopicsFromGroupStats();
+  if(realWeak === null){
+    weakBox.append(el('p', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'8px 0' }},
+      '⏳ Загружаем статистику группы…'));
+  } else if(!realWeak.length){
+    weakBox.append(el('p', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'8px 0' }},
+      'Пока недостаточно данных. Нужно минимум 2 попытки на одно задание, чтобы тема попала в слабые.'));
+  } else {
+    realWeak.forEach(t => {
+      weakBox.append(weakTopicRow(t));
+      weakBox.append(el('div', {
+        style:{ marginTop:'-6px', marginBottom:'10px', marginLeft:'170px',
+          fontSize:'11px', color:'var(--ink-3)' }
+      }, t.count + ' попыток'));
+    });
+  }
   row.append(weakBox);
   wrap.append(row);
 
@@ -5028,6 +5043,30 @@ function viewTeacherOverview(){
   ESSAYS.slice(0, 3).forEach(e => essayQueue.append(essayRow(e, false)));
   wrap.append(essayQueue);
   return wrap;
+}
+
+/* Считает реальные «слабые места» из GROUP_STATS.byTask.
+   Возвращает массив {name, pct (% ошибок), level, taskN, count}, отсортированный
+   по убыванию ошибок, top 6. Возвращает null, если статистика ещё не загружена. */
+function realWeakTopicsFromGroupStats(){
+  if(!GROUP_STATS || !GROUP_STATS.byTask) return null;
+  return Object.entries(GROUP_STATS.byTask)
+    .filter(([_, t]) => t.count >= 2 && t.max > 0)
+    .map(([n, t]) => {
+      const successPct = Math.round(t.score / t.max * 100);
+      const errPct = 100 - successPct;
+      const taskN = +n;
+      const topic = (EGE_TASKS.find(x => x.n === taskN) || {}).topic || ('Задание ' + taskN);
+      return {
+        name: '№' + taskN + ' · ' + topic,
+        pct: errPct,
+        level: errPct >= 50 ? 'red' : errPct >= 30 ? 'orange' : 'green',
+        taskN,
+        count: t.count
+      };
+    })
+    .sort((a, b) => b.pct - a.pct)
+    .slice(0, 6);
 }
 
 function weakTopicRow(t){
@@ -6843,12 +6882,28 @@ function viewTeacherAnalytics(){
         el('span', null, '0'), el('span', null, '6'), el('span', null, '12'), el('span', null, '18'), el('span', null, '24'))));
   wrap.append(grid);
 
-  wrap.append(
-    el('div', { class:'card', style:{ marginTop:'18px' }},
-      el('h3', null, '🎯 Слабые места по заданиям ЕГЭ'),
-      el('p', { style:{ color:'var(--ink-2)', fontSize:'12px', marginTop:'4px', marginBottom:'14px' }},
-        'Темы, где группа теряет больше всего баллов.'),
-      el('div', null, WEAK_TOPICS.map(weakTopicRow))));
+  const weakAnalytics = realWeakTopicsFromGroupStats();
+  const weakCard = el('div', { class:'card', style:{ marginTop:'18px' }},
+    el('h3', null, '🎯 Слабые места по заданиям ЕГЭ'),
+    el('p', { style:{ color:'var(--ink-2)', fontSize:'12px', marginTop:'4px', marginBottom:'14px' }},
+      'Темы, где группа теряет больше всего баллов.'));
+  if(weakAnalytics === null){
+    weakCard.append(el('p', { style:{ color:'var(--ink-3)', fontSize:'13px' }}, '⏳ Загружаем статистику…'));
+  } else if(!weakAnalytics.length){
+    weakCard.append(el('p', { style:{ color:'var(--ink-3)', fontSize:'13px' }},
+      'Пока недостаточно данных. Нужно минимум 2 попытки на одно задание, чтобы тема попала в слабые.'));
+  } else {
+    const wrapWeak = el('div');
+    weakAnalytics.forEach(t => {
+      wrapWeak.append(weakTopicRow(t));
+      wrapWeak.append(el('div', {
+        style:{ marginTop:'-6px', marginBottom:'10px', marginLeft:'170px',
+          fontSize:'11px', color:'var(--ink-3)' }
+      }, t.count + ' попыток'));
+    });
+    weakCard.append(wrapWeak);
+  }
+  wrap.append(weakCard);
   return wrap;
 }
 
