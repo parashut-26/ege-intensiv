@@ -455,6 +455,9 @@ const STATE = {
   dmRoomId: null,           // открытая ЛС-комната
   dmMessages: [],
   dmPartner: null,          // {id, name, role} собеседника в открытой ЛС
+  /* === Непрочитанные === */
+  unreadByRoom: {},         // {roomId: число непрочитанных}
+  totalUnread: 0,           // суммарно для иконки FAB
   testOpen: null,
   essayOpen: null,
   essayBy: null,           // 'curator' | 'teacher' — кто проверяет
@@ -1016,6 +1019,9 @@ async function authSignOut(){
   STATE.view = 'login';
   STATE.authStage = 'idle';
   STATE.authEmail = '';
+  /* Останавливаем все фоновые опросы — иначе они продолжат работу с null-токеном */
+  stopChatPolling();
+  stopUnreadBgPoll();
   render();
 }
 
@@ -1094,7 +1100,11 @@ async function restoreSession(){
         else STATE.view = 'student';
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats()]).then(() => render()).catch(() => {});
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats()]).then(() => {
+          render();
+          /* После основных загрузок — стартуем фоновый чат-poll */
+          startUnreadBgPoll();
+        }).catch(() => {});
         return;
       } else {
         STATE.authLoading = false;
@@ -1150,7 +1160,11 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats()]).then(() => render()).catch(() => {});
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats()]).then(() => {
+          render();
+          /* После основных загрузок — стартуем фоновый чат-poll */
+          startUnreadBgPoll();
+        }).catch(() => {});
   } else {
     STATE.view = 'login';
   }
@@ -1533,9 +1547,6 @@ async function ensureGroupChatRoom(){
 async function loadChatMessages(){
   if(!sb || !STATE.chatRoomId) return;
   try {
-    /* PostgREST embed автора (left join на profiles по author_id).
-       У chat_messages два FK на profiles (author_id и marked_helped_by),
-       поэтому явно указываем имя связи: profiles!chat_messages_author_id_fkey */
     const arr = await restRequest('GET',
       '/chat_messages?room_id=eq.' + STATE.chatRoomId +
       '&select=id,author_id,body,marked_helped_by,created_at,' +
@@ -1544,9 +1555,10 @@ async function loadChatMessages(){
     if(Array.isArray(arr)){
       STATE.chatMessages = arr;
       STATE.chatLastError = null;
+      /* Раз пользователь сейчас смотрит в эту комнату — отмечаем её прочитанной */
+      markRoomAsRead(STATE.chatRoomId);
     }
   } catch(e){
-    /* Не шумим в консоль на каждом тике polling'а — только в state, чтобы UI показал плашку */
     STATE.chatLastError = e.message;
   }
 }
@@ -1675,6 +1687,8 @@ async function loadDmMessages(){
     if(Array.isArray(arr)){
       STATE.dmMessages = arr;
       STATE.chatLastError = null;
+      /* Этот ЛС-диалог сейчас открыт — отмечаем прочитанным */
+      markRoomAsRead(STATE.dmRoomId);
     }
   } catch(e){
     STATE.chatLastError = e.message;
@@ -1688,6 +1702,90 @@ async function sendDmMessage(text){
     { room_id: STATE.dmRoomId, author_id: MY_PROFILE.id, body: text },
     { prefer: 'return=minimal' });
   await loadDmMessages();
+}
+
+/* === НЕПРОЧИТАННЫЕ === */
+
+/* localStorage: ISO-метка времени последнего просмотра комнаты */
+function getLastSeenForRoom(roomId){
+  if(!roomId) return null;
+  try { return localStorage.getItem('zebrus_chat_lastseen_' + roomId) || null; }
+  catch(e){ return null; }
+}
+function markRoomAsRead(roomId){
+  if(!roomId) return;
+  try { localStorage.setItem('zebrus_chat_lastseen_' + roomId, new Date().toISOString()); } catch(e){}
+  /* Локально сразу убираем счётчик — без ожидания следующего polling-тика */
+  if(STATE.unreadByRoom[roomId]){
+    STATE.totalUnread = Math.max(0, STATE.totalUnread - STATE.unreadByRoom[roomId]);
+    delete STATE.unreadByRoom[roomId];
+  }
+}
+
+/* Получить список всех известных комнат текущего пользователя:
+   общая + все его ЛС. Если их ещё не загружали — подгрузим. */
+async function getKnownRoomIds(){
+  if(!sb || !MY_PROFILE) return [];
+  const ids = [];
+  if(STATE.chatRoomId){
+    ids.push(STATE.chatRoomId);
+  } else {
+    try {
+      const found = await restRequest('GET',
+        '/chat_rooms?kind=eq.group&intensive_id=is.null&select=id&limit=1');
+      if(Array.isArray(found) && found.length){
+        STATE.chatRoomId = found[0].id;
+        ids.push(STATE.chatRoomId);
+      }
+    } catch(e){ /* migration не прогнана / 502 — переживём */ }
+  }
+  if(STATE.dmList === null){
+    try { await loadDmList(); } catch(e){}
+  }
+  if(Array.isArray(STATE.dmList)){
+    STATE.dmList.forEach(d => ids.push(d.roomId));
+  }
+  return ids;
+}
+
+/* Один тик: запросить новые сообщения по всем комнатам и пересчитать счётчики */
+async function pollUnreadCounts(){
+  if(!sb || !MY_PROFILE) return;
+  const roomIds = await getKnownRoomIds();
+  if(!roomIds.length) return;
+  try {
+    const arr = await restRequest('GET',
+      '/chat_messages?room_id=in.(' + roomIds.join(',') + ')' +
+      '&author_id=neq.' + MY_PROFILE.id +
+      '&select=room_id,created_at' +
+      '&order=created_at.desc&limit=500');
+    if(!Array.isArray(arr)) return;
+    const counts = {};
+    arr.forEach(m => {
+      const lastSeen = getLastSeenForRoom(m.room_id);
+      if(!lastSeen || m.created_at > lastSeen){
+        counts[m.room_id] = (counts[m.room_id] || 0) + 1;
+      }
+    });
+    STATE.unreadByRoom = counts;
+    STATE.totalUnread = Object.values(counts).reduce((a, b) => a + b, 0);
+  } catch(e){
+    /* Тихо — не пугаем UI на проблемах прокси */
+  }
+}
+
+let CHAT_BG_POLL_TIMER = null;
+/* Запустить фоновый poll: каждые 45 сек пересчитываем непрочитанные.
+   Запускается после логина и работает в течение всей сессии. */
+function startUnreadBgPoll(){
+  if(CHAT_BG_POLL_TIMER) return;
+  pollUnreadCounts().then(() => render());
+  CHAT_BG_POLL_TIMER = setInterval(() => {
+    pollUnreadCounts().then(() => render());
+  }, 45000);
+}
+function stopUnreadBgPoll(){
+  if(CHAT_BG_POLL_TIMER){ clearInterval(CHAT_BG_POLL_TIMER); CHAT_BG_POLL_TIMER = null; }
 }
 
 /* Открыть ЛС с пользователем (создать если нет) — асинхронный helper.
@@ -8309,6 +8407,22 @@ function chatPanel(role){
         }
       }, '×')));
 
+  /* Сколько непрочитанных в каждой вкладке */
+  const groupUnread = STATE.chatRoomId ? (STATE.unreadByRoom[STATE.chatRoomId] || 0) : 0;
+  let dmUnread = 0;
+  if(Array.isArray(STATE.dmList)){
+    STATE.dmList.forEach(d => { dmUnread += STATE.unreadByRoom[d.roomId] || 0; });
+  }
+
+  const tabBadge = (n) => n > 0
+    ? el('span', { style:{
+        display:'inline-flex', alignItems:'center', justifyContent:'center',
+        minWidth:'18px', height:'18px', padding:'0 6px', borderRadius:'999px',
+        background:'var(--red)', color:'#fff', fontSize:'10px', fontWeight:'800',
+        marginLeft:'6px'
+      }}, n > 99 ? '99+' : String(n))
+    : null;
+
   /* Вкладки Общий / ЛС */
   panel.append(
     el('div', { class:'chat-tabs' },
@@ -8318,17 +8432,16 @@ function chatPanel(role){
           STATE.dmRoomId = null; STATE.dmPartner = null;
           stopChatPolling();
           render();
-          /* group polling запустится автоматически в init выше */
           if(STATE.chatRoomId) startChatPolling();
         }
-      }, 'Общий'),
+      }, 'Общий', tabBadge(groupUnread)),
       el('button', { class: channel === 'dm' ? 'active' : '',
         onclick: () => {
           STATE.chatChannel = 'dm';
           stopChatPolling();
           render();
         }
-      }, 'ЛС')));
+      }, 'ЛС', tabBadge(dmUnread))));
 
   /* === ВКЛАДКА «ОБЩИЙ» === */
   if(channel === 'group'){
@@ -8383,14 +8496,16 @@ function chatPanel(role){
         }
       } else {
         STATE.dmList.forEach(d => {
+          const unread = STATE.unreadByRoom[d.roomId] || 0;
           listBox.append(el('div', {
             style:{
               display:'flex', justifyContent:'space-between', alignItems:'center',
               padding:'12px', borderBottom:'1px solid var(--border)',
-              cursor:'pointer', transition:'background .15s'
+              cursor:'pointer', transition:'background .15s',
+              background: unread > 0 ? 'var(--y-soft)' : 'transparent'
             },
             onmouseover: e => e.currentTarget.style.background = 'var(--p-soft)',
-            onmouseout: e => e.currentTarget.style.background = 'transparent',
+            onmouseout: e => e.currentTarget.style.background = unread > 0 ? 'var(--y-soft)' : 'transparent',
             onclick: () => {
               STATE.dmRoomId = d.roomId;
               STATE.dmPartner = { id: d.partnerId, name: d.partnerName, role: d.partnerRole };
@@ -8400,12 +8515,17 @@ function chatPanel(role){
             }
           },
             el('div', null,
-              el('div', { style:{ fontWeight:'700', fontSize:'14px' }}, '👤 ' + d.partnerName),
+              el('div', { style:{ fontWeight: unread > 0 ? '800' : '700', fontSize:'14px' }}, '👤 ' + d.partnerName),
               el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }},
                 d.partnerRole === 'teacher' ? '👩‍🏫 учитель' :
                 d.partnerRole === 'curator' ? '🤝 куратор' :
                 d.partnerRole === 'student' ? '🎒 ученик' : '')),
-            el('span', { style:{ fontSize:'18px', color:'var(--ink-3)' }}, '›')));
+            el('div', { style:{ display:'flex', alignItems:'center', gap:'8px' }},
+              unread > 0 ? el('span', { style:{
+                background:'var(--red)', color:'#fff', borderRadius:'999px',
+                padding:'2px 8px', fontSize:'11px', fontWeight:'800'
+              }}, unread > 99 ? '99+' : String(unread)) : null,
+              el('span', { style:{ fontSize:'18px', color:'var(--ink-3)' }}, '›'))));
         });
       }
       panel.append(listBox);
@@ -8556,10 +8676,22 @@ async function sendChat(){
 }
 
 function chatFab(){
-  return el('button', { class:'chat-fab',
+  const total = STATE.totalUnread || 0;
+  const fab = el('button', { class:'chat-fab',
     onclick: () => { STATE.chatOpen = true; render(); },
-    title: 'Чат'
-  }, '💬', el('span', { class:'dot' }));
+    title: total ? (total + ' новых сообщений') : 'Чат'
+  }, '💬');
+  /* Точка/счётчик только если реально есть непрочитанные */
+  if(total > 0){
+    fab.append(el('span', { class:'dot',
+      style:{ minWidth:'18px', height:'18px', padding:'0 4px',
+              top:'4px', right:'4px',
+              fontSize:'10px', fontWeight:'800',
+              display:'flex', alignItems:'center', justifyContent:'center',
+              color:'#fff' }
+    }, total > 99 ? '99+' : String(total)));
+  }
+  return fab;
 }
 
 /* =======================================================================
