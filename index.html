@@ -420,6 +420,12 @@ const STATE = {
   chatMessages: [],         // массив сообщений из БД (для общего канала)
   chatLoading: false,
   chatLastError: null,
+  /* === ЛС === */
+  dmList: null,             // для учителя/куратора: список их диалогов (null=не загружали, []=пусто)
+  dmListTried: false,
+  dmRoomId: null,           // открытая ЛС-комната
+  dmMessages: [],
+  dmPartner: null,          // {id, name, role} собеседника в открытой ЛС
   testOpen: null,
   essayOpen: null,
   essayBy: null,           // 'curator' | 'teacher' — кто проверяет
@@ -1539,12 +1545,144 @@ function startChatPolling(){
   if(CHAT_POLL_TIMER) return;
   CHAT_POLL_TIMER = setInterval(() => {
     if(!STATE.chatOpen){ stopChatPolling(); return; }
-    loadChatMessages().then(() => render());
+    /* В зависимости от текущего канала тащим разное */
+    if(STATE.chatChannel === 'dm' && STATE.dmRoomId){
+      loadDmMessages().then(() => render());
+    } else if(STATE.chatChannel === 'dm' && !STATE.dmRoomId){
+      /* На списке диалогов — обновляем list, чтобы видеть «новые» */
+      loadDmList().then(() => render());
+    } else {
+      loadChatMessages().then(() => render());
+    }
   }, 7000);
 }
 
 function stopChatPolling(){
   if(CHAT_POLL_TIMER){ clearInterval(CHAT_POLL_TIMER); CHAT_POLL_TIMER = null; }
+}
+
+/* === ЛС (DM) === */
+
+/* Найти или создать DM-комнату с указанным собеседником.
+   Сортировка участников через LEAST/GREATEST требует, чтобы при поиске
+   мы тоже искали в обоих порядках. */
+async function getOrCreateDmRoom(otherUserId){
+  if(!sb || !MY_PROFILE) throw new Error('не авторизован');
+  if(!otherUserId) throw new Error('не указан собеседник');
+  if(otherUserId === MY_PROFILE.id) throw new Error('нельзя писать самому себе');
+  try {
+    /* Ищем существующую: (a=me AND b=other) OR (a=other AND b=me) */
+    const me = MY_PROFILE.id;
+    const found = await restRequest('GET',
+      '/chat_rooms?kind=eq.dm' +
+      '&or=(and(participant_a.eq.' + me + ',participant_b.eq.' + otherUserId + ')' +
+      ',and(participant_a.eq.' + otherUserId + ',participant_b.eq.' + me + '))' +
+      '&select=id&limit=1');
+    if(Array.isArray(found) && found.length) return found[0].id;
+    /* Создаём, ставим себя как participant_a */
+    const created = await restRequest('POST', '/chat_rooms',
+      { kind: 'dm', participant_a: me, participant_b: otherUserId },
+      { prefer: 'return=representation' });
+    const rid = Array.isArray(created) ? created[0].id : (created && created.id);
+    if(!rid) throw new Error('не получили id новой комнаты');
+    return rid;
+  } catch(e){
+    /* Если уникальный индекс отбил INSERT (race condition) — повторяем поиск */
+    if(/duplicate|unique/i.test(e.message)){
+      const me = MY_PROFILE.id;
+      const found = await restRequest('GET',
+        '/chat_rooms?kind=eq.dm' +
+        '&or=(and(participant_a.eq.' + me + ',participant_b.eq.' + otherUserId + ')' +
+        ',and(participant_a.eq.' + otherUserId + ',participant_b.eq.' + me + '))' +
+        '&select=id&limit=1');
+      if(Array.isArray(found) && found.length) return found[0].id;
+    }
+    throw e;
+  }
+}
+
+/* Загрузить список ЛС текущего пользователя:
+   все DM-комнаты, в которых он participant_a или participant_b,
+   с информацией о собеседнике. */
+async function loadDmList(){
+  if(!sb || !MY_PROFILE) return;
+  try {
+    const me = MY_PROFILE.id;
+    const arr = await restRequest('GET',
+      '/chat_rooms?kind=eq.dm' +
+      '&or=(participant_a.eq.' + me + ',participant_b.eq.' + me + ')' +
+      '&select=id,participant_a,participant_b,created_at,' +
+      'pa:profiles!chat_rooms_participant_a_fkey(id,full_name,role),' +
+      'pb:profiles!chat_rooms_participant_b_fkey(id,full_name,role)' +
+      '&order=created_at.desc&limit=100');
+    if(!Array.isArray(arr)){ STATE.dmList = []; return; }
+    STATE.dmList = arr.map(r => {
+      const partner = (r.participant_a === me) ? r.pb : r.pa;
+      return {
+        roomId: r.id,
+        partnerId: partner ? partner.id : null,
+        partnerName: partner ? (partner.full_name || 'Без имени') : 'Удалён',
+        partnerRole: partner ? partner.role : null,
+        createdAt: r.created_at
+      };
+    });
+    console.log('✓ ЛС загружено: ' + STATE.dmList.length);
+  } catch(e){
+    console.warn('loadDmList упал:', e.message);
+    STATE.chatLastError = e.message;
+    STATE.dmList = [];
+  }
+}
+
+/* Загрузить сообщения открытой ЛС */
+async function loadDmMessages(){
+  if(!sb || !STATE.dmRoomId) return;
+  try {
+    const arr = await restRequest('GET',
+      '/chat_messages?room_id=eq.' + STATE.dmRoomId +
+      '&select=id,author_id,body,marked_helped_by,created_at,' +
+      'author:profiles!chat_messages_author_id_fkey(full_name,role)' +
+      '&order=created_at.asc&limit=200');
+    if(Array.isArray(arr)){
+      STATE.dmMessages = arr;
+      STATE.chatLastError = null;
+    }
+  } catch(e){
+    STATE.chatLastError = e.message;
+  }
+}
+
+async function sendDmMessage(text){
+  if(!sb || !MY_PROFILE) throw new Error('не авторизован');
+  if(!STATE.dmRoomId) throw new Error('нет открытой ЛС');
+  await restRequest('POST', '/chat_messages',
+    { room_id: STATE.dmRoomId, author_id: MY_PROFILE.id, body: text },
+    { prefer: 'return=minimal' });
+  await loadDmMessages();
+}
+
+/* Открыть ЛС с пользователем (создать если нет) — асинхронный helper */
+async function openDmWith(otherUserId){
+  STATE.chatLoading = true;
+  render();
+  try {
+    const rid = await getOrCreateDmRoom(otherUserId);
+    STATE.dmRoomId = rid;
+    STATE.chatChannel = 'dm';
+    await loadDmMessages();
+    /* Подгрузим заодно профиль собеседника, чтобы показать имя в шапке */
+    const arr = await restRequest('GET',
+      '/profiles?id=eq.' + otherUserId + '&select=id,full_name,role&limit=1');
+    if(Array.isArray(arr) && arr.length){
+      STATE.dmPartner = { id: arr[0].id, name: arr[0].full_name, role: arr[0].role };
+    }
+  } catch(e){
+    STATE.chatLastError = e.message;
+    showToast('⚠ Не удалось открыть ЛС: ' + e.message);
+  } finally {
+    STATE.chatLoading = false;
+    render();
+  }
 }
 
 /* === ДОСТИЖЕНИЯ И ПЧЁЛКИ ===
@@ -5560,7 +5698,20 @@ function modalStudentDetail(){
       el('div', null,
         el('h2', { style:{ marginBottom:'2px' }}, s.name),
         el('div', { style:{ color:'var(--ink-2)', fontSize:'13px' }}, s.email))),
-    el('button', { class:'x', onclick: close }, '×'));
+    el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
+      /* Кнопка «Написать» — открывает чат-панель и стартует ЛС с этим учеником */
+      s.id && /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(s.id) ? el('button', {
+        class:'btn btn-secondary',
+        style:{ fontSize:'13px' },
+        onclick: () => {
+          STATE.studentDetailOpen = null;
+          STATE.chatOpen = true;
+          STATE.chatChannel = 'dm';
+          render();
+          openDmWith(s.id);
+        }
+      }, '💬 Написать') : null,
+      el('button', { class:'x', onclick: close }, '×')));
 
   const body = el('div', { class:'modal-body' });
 
@@ -8038,85 +8189,216 @@ function viewCuratorChat(){
 function chatPanel(role){
   if(!STATE.chatOpen) return null;
   const meId = MY_PROFILE ? MY_PROFILE.id : null;
+  const channel = STATE.chatChannel || 'group';
 
-  /* При первом открытии — обеспечить комнату, загрузить историю, запустить polling.
-     Флаг chatRoomTried выставляем, чтобы не дёргать ensureGroupChatRoom на каждом
-     ре-рендере, если он один раз упал (миграция не прогнана / нет прав). */
-  if(!STATE.chatRoomId && !STATE.chatLoading && !STATE.chatRoomTried){
+  /* Ленивая инициализация по каналу */
+  if(channel === 'group' && !STATE.chatRoomId && !STATE.chatLoading && !STATE.chatRoomTried){
     STATE.chatLoading = true;
     STATE.chatRoomTried = true;
     ensureGroupChatRoom().then(rid => {
       STATE.chatLoading = false;
       if(rid){
         loadChatMessages().then(() => { startChatPolling(); render(); });
+      } else { render(); }
+    });
+  }
+  if(channel === 'dm' && STATE.dmList === null && !STATE.dmListTried){
+    STATE.dmListTried = true;
+    loadDmList().then(() => {
+      /* Для ученика — автоматически открыть ЛС с учителем,
+         если ученик ещё ни с кем не переписывается */
+      if(role === 'student' && (!STATE.dmList || !STATE.dmList.length) && !STATE.dmRoomId){
+        /* Найдём учителя из STUDENTS/CURATORS не получится — берём из profiles */
+        restRequest('GET', '/profiles?role=eq.teacher&select=id,full_name,role&limit=1').then(arr => {
+          if(Array.isArray(arr) && arr.length){
+            openDmWith(arr[0].id);
+          } else { render(); }
+        });
       } else {
+        startChatPolling();
         render();
       }
     });
   }
 
   const panel = el('div', { class:'chat-panel' });
+
+  /* Шапка с заголовком */
+  const headLeft = el('div', null,
+    el('h4', null, '💬 Чат интенсива'),
+    el('div', { style:{ fontSize:'11px', opacity:.8 }},
+      channel === 'dm' && STATE.dmPartner
+        ? '👤 ' + STATE.dmPartner.name
+        : '🐝 Краш-тест 2026 · общий чат'));
   panel.append(
-    el('div', { class:'chat-head' },
-      el('div', null,
-        el('h4', null, '💬 Чат интенсива'),
-        el('div', { style:{ fontSize:'11px', opacity:.8 }}, '🐝 Краш-тест 2026 · общий чат')),
+    el('div', { class:'chat-head' }, headLeft,
       el('button', { style:{ color:'#fff', fontSize:'18px' },
         onclick: () => {
           STATE.chatOpen = false;
-          /* Сбрасываем «пробовали» — на следующем открытии повторим попытку
-             (вдруг учитель тем временем прогнал миграцию) */
           if(!STATE.chatRoomId) STATE.chatRoomTried = false;
           stopChatPolling();
           render();
         }
       }, '×')));
 
-  const msgsBox = el('div', { class:'chat-msgs', id:'chat-msgs' });
-
-  if(!sb || !MY_PROFILE){
-    msgsBox.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px 20px', fontSize:'13px' }},
-      'Войдите через почту, чтобы участвовать в чате интенсива.'));
-  } else if(!STATE.chatRoomId && STATE.chatLoading){
-    msgsBox.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px 20px', fontSize:'13px' }},
-      '⏳ Открываем чат…'));
-  } else if(!STATE.chatRoomId){
-    /* Если упало с 403 — почти наверняка миграция add_chat_policies.sql не прогнана */
-    const isPolicyErr = STATE.chatLastError && /403|forbidden|policy/i.test(STATE.chatLastError);
-    msgsBox.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px 20px', fontSize:'13px', lineHeight:'1.6' }},
-      isPolicyErr
-        ? '⚠ Чат ещё не настроен в БД. Учителю нужно один раз прогнать миграцию sql/add_chat_policies.sql в Supabase SQL Editor — она создаст политики и общую комнату.'
-        : (role === 'teacher'
-            ? 'Не получилось создать комнату. Прогоните sql/add_chat_policies.sql в Supabase — она настроит политики и создаст общий чат.'
-            : 'Чат ещё не создан. Учитель должен открыть его первым.')));
-  } else if(!STATE.chatMessages.length){
-    msgsBox.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px 20px', fontSize:'13px' }},
-      'Сообщений пока нет. Напишите первый — все участники интенсива увидят 💬'));
-  } else {
-    STATE.chatMessages.forEach(m => msgsBox.append(chatBubbleDb(m, role, meId)));
-  }
-
-  if(STATE.chatLastError){
-    msgsBox.append(el('div', { style:{ color:'var(--red)', fontSize:'11px', textAlign:'center', padding:'6px' }},
-      '⚠ ' + STATE.chatLastError));
-  }
-
-  panel.append(msgsBox);
-
+  /* Вкладки Общий / ЛС */
   panel.append(
-    el('div', { class:'chat-input' },
-      el('input', { id:'chat-i', placeholder: MY_PROFILE ? 'Сообщение…' : 'Войдите, чтобы писать',
-        disabled: !MY_PROFILE,
-        onkeydown: e => { if(e.key === 'Enter'){ e.preventDefault(); sendChat(); }}}),
-      el('button', { onclick: () => sendChat(), disabled: !MY_PROFILE }, 'Отправить')));
+    el('div', { class:'chat-tabs' },
+      el('button', { class: channel === 'group' ? 'active' : '',
+        onclick: () => {
+          STATE.chatChannel = 'group';
+          STATE.dmRoomId = null; STATE.dmPartner = null;
+          stopChatPolling();
+          render();
+          /* group polling запустится автоматически в init выше */
+          if(STATE.chatRoomId) startChatPolling();
+        }
+      }, 'Общий'),
+      el('button', { class: channel === 'dm' ? 'active' : '',
+        onclick: () => {
+          STATE.chatChannel = 'dm';
+          stopChatPolling();
+          render();
+        }
+      }, 'ЛС')));
 
-  /* Прокрутка к низу — после next render */
+  /* === ВКЛАДКА «ОБЩИЙ» === */
+  if(channel === 'group'){
+    const msgsBox = el('div', { class:'chat-msgs', id:'chat-msgs' });
+    if(!sb || !MY_PROFILE){
+      msgsBox.append(el('div', { style:emptyMsgStyle() }, 'Войдите через почту, чтобы участвовать в чате интенсива.'));
+    } else if(!STATE.chatRoomId && STATE.chatLoading){
+      msgsBox.append(el('div', { style:emptyMsgStyle() }, '⏳ Открываем чат…'));
+    } else if(!STATE.chatRoomId){
+      const isPolicyErr = STATE.chatLastError && /403|forbidden|policy/i.test(STATE.chatLastError);
+      msgsBox.append(el('div', { style:emptyMsgStyle() },
+        isPolicyErr
+          ? '⚠ Чат ещё не настроен. Учителю нужно прогнать sql/add_chat_policies.sql в Supabase.'
+          : (role === 'teacher'
+              ? 'Не получилось создать комнату. Прогоните sql/add_chat_policies.sql в Supabase.'
+              : 'Чат ещё не создан. Учитель откроет его первым.')));
+    } else if(!STATE.chatMessages.length){
+      msgsBox.append(el('div', { style:emptyMsgStyle() },
+        'Сообщений пока нет. Напишите первый — все участники интенсива увидят 💬'));
+    } else {
+      STATE.chatMessages.forEach(m => msgsBox.append(chatBubbleDb(m, role, meId)));
+    }
+    if(STATE.chatLastError){
+      msgsBox.append(el('div', { style:{ color:'var(--red)', fontSize:'11px', textAlign:'center', padding:'6px' }},
+        '⚠ ' + STATE.chatLastError));
+    }
+    panel.append(msgsBox);
+
+    panel.append(
+      el('div', { class:'chat-input' },
+        el('input', { id:'chat-i', placeholder: MY_PROFILE ? 'Сообщение…' : 'Войдите, чтобы писать',
+          disabled: !MY_PROFILE,
+          onkeydown: e => { if(e.key === 'Enter'){ e.preventDefault(); sendChat(); }}}),
+        el('button', { onclick: () => sendChat(), disabled: !MY_PROFILE }, 'Отправить')));
+  }
+
+  /* === ВКЛАДКА «ЛС» === */
+  if(channel === 'dm'){
+    /* Нет открытой комнаты — показываем список диалогов или приглашение начать */
+    if(!STATE.dmRoomId){
+      const listBox = el('div', { class:'chat-msgs', id:'chat-msgs', style:{ background:'var(--surface)' }});
+      if(STATE.chatLoading){
+        listBox.append(el('div', { style:emptyMsgStyle() }, '⏳ Загружаем…'));
+      } else if(STATE.dmList === null){
+        listBox.append(el('div', { style:emptyMsgStyle() }, '⏳ Загружаем диалоги…'));
+      } else if(!STATE.dmList.length){
+        if(role === 'student'){
+          listBox.append(el('div', { style:emptyMsgStyle() }, '⏳ Открываем чат с учителем…'));
+        } else {
+          listBox.append(el('div', { style:emptyMsgStyle() },
+            'Личных диалогов пока нет. Они появятся, когда ученики напишут вам или вы напишете им из карточки ученика.'));
+        }
+      } else {
+        STATE.dmList.forEach(d => {
+          listBox.append(el('div', {
+            style:{
+              display:'flex', justifyContent:'space-between', alignItems:'center',
+              padding:'12px', borderBottom:'1px solid var(--border)',
+              cursor:'pointer', transition:'background .15s'
+            },
+            onmouseover: e => e.currentTarget.style.background = 'var(--p-soft)',
+            onmouseout: e => e.currentTarget.style.background = 'transparent',
+            onclick: () => {
+              STATE.dmRoomId = d.roomId;
+              STATE.dmPartner = { id: d.partnerId, name: d.partnerName, role: d.partnerRole };
+              stopChatPolling();
+              render();
+              loadDmMessages().then(() => { startChatPolling(); render(); });
+            }
+          },
+            el('div', null,
+              el('div', { style:{ fontWeight:'700', fontSize:'14px' }}, '👤 ' + d.partnerName),
+              el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }},
+                d.partnerRole === 'teacher' ? '👩‍🏫 учитель' :
+                d.partnerRole === 'curator' ? '🤝 куратор' :
+                d.partnerRole === 'student' ? '🎒 ученик' : '')),
+            el('span', { style:{ fontSize:'18px', color:'var(--ink-3)' }}, '›')));
+        });
+      }
+      panel.append(listBox);
+
+      /* Под списком — никакого input'а, только подсказка */
+      panel.append(
+        el('div', { class:'chat-input', style:{ justifyContent:'center', fontSize:'12px', color:'var(--ink-3)' }},
+          role === 'teacher' || role === 'curator'
+            ? 'Откройте карточку ученика, чтобы написать первым'
+            : 'Здесь будут появляться ваши личные переписки'));
+    } else {
+      /* Открытая ЛС — показываем сообщения */
+      const dmHead = el('div', {
+        style:{ padding:'10px 14px', background:'var(--bg)', borderBottom:'1px solid var(--border)',
+                display:'flex', justifyContent:'space-between', alignItems:'center', fontSize:'13px' }
+      },
+        el('div', null,
+          el('button', {
+            style:{ marginRight:'8px', color:'var(--p)', fontWeight:'700', fontSize:'13px' },
+            onclick: () => {
+              STATE.dmRoomId = null; STATE.dmPartner = null;
+              stopChatPolling();
+              loadDmList().then(() => render());
+            }
+          }, '← Все диалоги'),
+          STATE.dmPartner ? el('span', { style:{ fontWeight:'700' }}, '👤 ' + STATE.dmPartner.name) : null));
+      panel.append(dmHead);
+
+      const msgsBox = el('div', { class:'chat-msgs', id:'chat-msgs' });
+      if(!STATE.dmMessages.length){
+        msgsBox.append(el('div', { style:emptyMsgStyle() },
+          'Начните переписку — напишите первое сообщение 💬'));
+      } else {
+        STATE.dmMessages.forEach(m => msgsBox.append(chatBubbleDb(m, role, meId)));
+      }
+      if(STATE.chatLastError){
+        msgsBox.append(el('div', { style:{ color:'var(--red)', fontSize:'11px', textAlign:'center', padding:'6px' }},
+          '⚠ ' + STATE.chatLastError));
+      }
+      panel.append(msgsBox);
+
+      panel.append(
+        el('div', { class:'chat-input' },
+          el('input', { id:'chat-i', placeholder:'Сообщение…',
+            onkeydown: e => { if(e.key === 'Enter'){ e.preventDefault(); sendChat(); }}}),
+          el('button', { onclick: () => sendChat() }, 'Отправить')));
+    }
+  }
+
+  /* Прокрутка к низу */
   setTimeout(() => {
     const box = document.getElementById('chat-msgs');
     if(box) box.scrollTop = box.scrollHeight;
   }, 50);
 
   return panel;
+}
+
+/* Пустой/ошибочный текст в чат-боксе — единый стиль */
+function emptyMsgStyle(){
+  return { color:'var(--ink-3)', textAlign:'center', padding:'30px 20px', fontSize:'13px', lineHeight:'1.6' };
 }
 
 /* Бабл из DB-формата (с author_id, profiles.full_name, profiles.role) */
@@ -8190,10 +8472,13 @@ async function sendChat(){
   i.value = '';
   i.disabled = true;
   try {
-    await sendChatMessage(text);
+    if(STATE.chatChannel === 'dm' && STATE.dmRoomId){
+      await sendDmMessage(text);
+    } else {
+      await sendChatMessage(text);
+    }
     render();
   } catch(e){
-    /* Возвращаем текст в поле, чтобы не потерялся */
     i.value = text;
     showToast('⚠ Не отправилось: ' + e.message);
   } finally {
