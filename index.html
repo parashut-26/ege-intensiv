@@ -5953,7 +5953,17 @@ function modalAttemptDetail(){
       const expectedIdxs = Array.isArray(item.expected)
         ? item.expected.map(v => Number(v)).filter(n => !isNaN(n))
         : [];
-      const isMultiSelect = q && Array.isArray(q.sentences) && q.sentences.length &&
+      /* Слова/предложения лежат в разных полях в разных банках:
+         q.opts — орфоэпия (зад. 4), паронимы (зад. 5)
+         q.sentences — пунктуация и др.
+         q.words — иногда */
+      const choices = (q && (
+        (Array.isArray(q.opts) && q.opts.length && q.opts) ||
+        (Array.isArray(q.sentences) && q.sentences.length && q.sentences) ||
+        (Array.isArray(q.words) && q.words.length && q.words) ||
+        null
+      )) || null;
+      const isMultiSelect = choices &&
         (userIdxs.length || expectedIdxs.length);
 
       if(isMultiSelect){
@@ -5961,7 +5971,7 @@ function modalAttemptDetail(){
         const userSet = new Set(userIdxs);
         const correctSet = new Set(expectedIdxs);
         const sentBox = el('div', { style:{ marginBottom:'8px' }});
-        q.sentences.forEach((s, i) => {
+        choices.forEach((s, i) => {
           const picked = userSet.has(i);
           const isCorrect = correctSet.has(i);
           /* Цвет фона:
@@ -5998,10 +6008,16 @@ function modalAttemptDetail(){
               el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'2px', fontWeight:'700' }}, 'Правильный ответ'),
               el('div', { style:{ fontSize:'13px', wordBreak:'break-word' }}, corrHuman))));
       } else {
-        /* Не multi-select: показываем sentences (если есть) и пары ответов */
-        if(q && Array.isArray(q.sentences) && q.sentences.length){
+        /* Не multi-select: показываем варианты (если есть в любом из полей) */
+        const fallbackList = q && (
+          (Array.isArray(q.opts) && q.opts.length && q.opts) ||
+          (Array.isArray(q.sentences) && q.sentences.length && q.sentences) ||
+          (Array.isArray(q.words) && q.words.length && q.words) ||
+          null
+        );
+        if(fallbackList){
           const sentBox = el('ol', { style:{ margin:'0 0 8px 18px', padding:'0', fontSize:'13px' }});
-          q.sentences.forEach(s => sentBox.append(el('li', { style:{ marginBottom:'4px' }}, s)));
+          fallbackList.forEach(s => sentBox.append(el('li', { style:{ marginBottom:'4px' }}, String(s))));
           card.append(sentBox);
         }
         card.append(
