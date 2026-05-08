@@ -831,6 +831,8 @@ async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, 
     if(score === max_score && max_score > 0){
       awardAchievement('b2').catch(() => {});  /* Точно в цель — без ошибок */
     }
+    /* Обновляем локальную статистику в фоне (для KPI на главной) */
+    loadMyStats().catch(() => {});
     return Array.isArray(inserted) ? inserted[0] : inserted;
   } catch(e){
     console.warn('saveAttempt упал:', e.message);
@@ -1021,7 +1023,7 @@ async function restoreSession(){
         else STATE.view = 'student';
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb()]).then(() => render()).catch(() => {});
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadGroupStats()]).then(() => render()).catch(() => {});
         return;
       } else {
         STATE.authLoading = false;
@@ -1077,7 +1079,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb()]).then(() => render()).catch(() => {});
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadGroupStats()]).then(() => render()).catch(() => {});
   } else {
     STATE.view = 'login';
   }
@@ -1281,6 +1283,95 @@ async function demoteCurator(curatorId){
   await restRequest('PATCH', '/profiles?id=eq.' + encodeURIComponent(curatorId),
     { role: 'student', s_status: 'active', s_type: 'свой' },
     { prefer: 'return=minimal' });
+}
+
+/* === РЕАЛЬНАЯ СТАТИСТИКА УЧЕНИКА (из attempts) === */
+let MY_STATS = { done: 0, total: 26, avg: null, streak: 0 };
+
+async function loadMyStats(){
+  if(!sb || !MY_PROFILE) return;
+  try {
+    const arr = await restRequest('GET', '/attempts?student_id=eq.' + encodeURIComponent(MY_PROFILE.id) +
+      '&select=ege_task_n,score,max_score,created_at&order=created_at.desc&limit=500');
+    if(!Array.isArray(arr)) return;
+    const tasks = new Set(arr.map(a => a.ege_task_n));
+    MY_STATS.done = tasks.size;
+    if(arr.length){
+      let totalScore = 0, totalMax = 0;
+      arr.forEach(a => { totalScore += a.score || 0; totalMax += a.max_score || 0; });
+      MY_STATS.avg = totalMax ? Math.round(totalScore / totalMax * 100) : null;
+    } else {
+      MY_STATS.avg = null;
+    }
+    /* Серия дней — считаем сколько последовательных дней активности от сегодня назад */
+    const dayKeys = new Set();
+    arr.forEach(a => {
+      const d = new Date(a.created_at); d.setHours(0,0,0,0);
+      dayKeys.add(d.toDateString());
+    });
+    let streak = 0;
+    const cur = new Date(); cur.setHours(0,0,0,0);
+    while(dayKeys.has(cur.toDateString())){
+      streak++;
+      cur.setDate(cur.getDate() - 1);
+    }
+    MY_STATS.streak = streak;
+    console.log('✓ Моя статистика: ' + MY_STATS.done + ' заданий, ' + (MY_STATS.avg || 0) + '%, серия ' + MY_STATS.streak);
+  } catch(e){
+    console.warn('loadMyStats упал:', e.message);
+  }
+}
+
+/* === ГРУППОВАЯ СТАТИСТИКА (для учителя) === */
+let GROUP_STATS = null;
+
+async function loadGroupStats(){
+  if(!sb) return;
+  try {
+    /* attempts всей группы за последние 30 дней */
+    const arr = await restRequest('GET', '/attempts?select=student_id,ege_task_n,score,max_score,created_at&order=created_at.desc&limit=2000');
+    if(!Array.isArray(arr)){ GROUP_STATS = null; return; }
+    const today = new Date(); today.setHours(0,0,0,0);
+    const todayStr = today.toDateString();
+    const studentsToday = new Set();
+    let attemptsToday = 0;
+    let totalScore = 0, totalMax = 0;
+    const byStudent = {};   /* {studentId: {count, score, max}} */
+    const byDay = {};       /* {dateString: count} */
+    const byTask = {};      /* {taskN: {count, score, max}} */
+    arr.forEach(a => {
+      const date = new Date(a.created_at);
+      const dStart = new Date(date); dStart.setHours(0,0,0,0);
+      if(dStart.toDateString() === todayStr){
+        studentsToday.add(a.student_id);
+        attemptsToday++;
+      }
+      totalScore += a.score || 0;
+      totalMax += a.max_score || 0;
+      if(!byStudent[a.student_id]) byStudent[a.student_id] = { count: 0, score: 0, max: 0, tasks: new Set() };
+      byStudent[a.student_id].count++;
+      byStudent[a.student_id].score += a.score || 0;
+      byStudent[a.student_id].max += a.max_score || 0;
+      byStudent[a.student_id].tasks.add(a.ege_task_n);
+      const dayKey = dStart.toLocaleDateString('ru-RU', { day:'numeric', month:'short' });
+      byDay[dayKey] = (byDay[dayKey] || 0) + 1;
+      if(!byTask[a.ege_task_n]) byTask[a.ege_task_n] = { count: 0, score: 0, max: 0 };
+      byTask[a.ege_task_n].count++;
+      byTask[a.ege_task_n].score += a.score || 0;
+      byTask[a.ege_task_n].max += a.max_score || 0;
+    });
+    GROUP_STATS = {
+      totalAttempts: arr.length,
+      studentsToday: studentsToday.size,
+      attemptsToday,
+      avgPct: totalMax ? Math.round(totalScore / totalMax * 100) : null,
+      byStudent, byDay, byTask
+    };
+    console.log('✓ Групповая статистика: ' + arr.length + ' попыток, активны сегодня: ' + studentsToday.size);
+  } catch(e){
+    console.warn('loadGroupStats упал:', e.message);
+    GROUP_STATS = null;
+  }
 }
 
 /* === ДОСТИЖЕНИЯ И ПЧЁЛКИ ===
@@ -3258,11 +3349,19 @@ function viewStudentHome(){
 
   const kpi = el('div', { class:'grid grid-4' });
   const realBee = MY_PROFILE ? (MY_PROFILE.bee || 0) : ME_STUDENT.bee;
+  /* Реальная статистика, для демо-режима — мок ME_STUDENT */
+  const useStats = MY_PROFILE ? MY_STATS : { done: ME_STUDENT.done, total: ME_STUDENT.total, avg: ME_STUDENT.avg, streak: ME_STUDENT.streak };
+  const avgLabel = useStats.avg != null ? (useStats.avg + '%') : '—';
+  const avgHint = useStats.avg == null ? 'нет попыток' :
+                  useStats.avg >= 80 ? 'отлично!' :
+                  useStats.avg >= 60 ? 'неплохо' : 'надо подтянуть';
+  const streakHint = useStats.streak === 0 ? 'начни сегодня' :
+                     useStats.streak === 1 ? 'день активна' : 'подряд активна';
   kpi.append(
     kpiCard('Пчёлки', realBee, 'из ' + ME_STUDENT.beeMax + ' возможных', '🐝', 'var(--y-soft)'),
-    kpiCard('Заданий пройдено', ME_STUDENT.done, 'из ' + ME_STUDENT.total, '✅', 'var(--green-soft)'),
-    kpiCard('Средний балл', ME_STUDENT.avg + '%', 'так держать!', '🎯', 'var(--p-soft)'),
-    kpiCard('Серия дней', ME_STUDENT.streak, 'подряд активна', '🔥', '#FFEDD5'));
+    kpiCard('Заданий пройдено', useStats.done, 'из ' + (useStats.total || 26), '✅', 'var(--green-soft)'),
+    kpiCard('Средний балл', avgLabel, avgHint, '🎯', 'var(--p-soft)'),
+    kpiCard('Серия дней', useStats.streak, streakHint, '🔥', '#FFEDD5'));
 
   const map = el('div', { class:'card' });
   map.append(
@@ -4688,21 +4787,117 @@ function viewTeacherOverview(){
         }, 'Открыть →'))));
   }
 
+  /* Реальная статистика группы (если загрузилась) */
+  const gs = GROUP_STATS;
+  const realActiveToday = gs ? gs.studentsToday : 0;
+  const realAvg = gs && gs.avgPct != null ? gs.avgPct + '%' : '—';
+  const realAttempts = gs ? gs.totalAttempts : 0;
+  const notStartedReal = total - (gs ? Object.keys(gs.byStudent).length : 0);
   const kpiRow = el('div', { class:'grid grid-4' });
   kpiRow.append(
     kpiCard('Учеников', total,
       STUDENTS.filter(s => s.type === 'свой').length + ' своих · ' + STUDENTS.filter(s => s.type === 'гость').length + ' гостей',
       '👥', 'var(--p-soft)'),
-    kpiCard('Активны сегодня', activeCount,
-      '↑ ' + Math.round(activeCount / total * 100) + '% от группы', '✅', 'var(--green-soft)'),
-    kpiCard('Средний балл', '78%', '↑ +4% к вчера', '🎯', '#FFEDD5'),
+    kpiCard('Активны сегодня', realActiveToday,
+      total ? '↑ ' + Math.round(realActiveToday / total * 100) + '% от группы' : '—', '✅', 'var(--green-soft)'),
+    kpiCard('Средний балл', realAvg, gs ? realAttempts + ' попыток всего' : 'нет данных', '🎯', '#FFEDD5'),
     el('div', { class:'card kpi card-pink' },
       el('div', { class:'ic-box', style:{ background:'rgba(239,68,68,.18)' }}, '⚠️'),
       el('div', { class:'label' }, 'Не приступали'),
-      el('div', { class:'value' }, notStarted),
-      el('div', { class:'hint' }, 'стоит написать')));
+      el('div', { class:'value' }, notStartedReal),
+      el('div', { class:'hint' }, 'не делали попыток')));
   wrap.append(kpiRow);
   wrap.append(el('div', { style:{ height:'18px' }}));
+
+  /* === АКТИВНОСТЬ ГРУППЫ — детальный дашборд === */
+  if(gs && gs.totalAttempts > 0){
+    const groupCard = el('div', { class:'card', style:{ marginBottom:'18px' }});
+    groupCard.append(
+      el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', flexWrap:'wrap', gap:'8px' }},
+        el('h2', null, '📊 Активность группы'),
+        el('button', { class:'btn btn-secondary btn-sm',
+          onclick: async () => { showToast('⏳ Обновляю…'); await loadGroupStats(); render(); }
+        }, '🔄 Обновить')));
+
+    /* Лидерборд: топ-5 по решённым заданиям */
+    const leaderboard = Object.entries(gs.byStudent)
+      .map(([sid, st]) => {
+        const sObj = STUDENTS.find(s => s.id === sid);
+        return {
+          id: sid,
+          name: (sObj && sObj.name) || '—',
+          color: (sObj && sObj.color) || '#A78BFA',
+          attempts: st.count,
+          tasks: st.tasks.size,
+          avg: st.max ? Math.round(st.score / st.max * 100) : 0
+        };
+      })
+      .sort((a, b) => b.tasks - a.tasks || b.avg - a.avg)
+      .slice(0, 5);
+
+    const lbBox = el('div', { style:{ marginBottom:'18px' }});
+    lbBox.append(el('h4', { style:{ marginBottom:'10px' }}, '🏆 Топ-5 по активности'));
+    if(!leaderboard.length){
+      lbBox.append(el('p', { style:{ color:'var(--ink-3)', fontStyle:'italic' }}, 'Пока никто не делал попыток'));
+    } else {
+      leaderboard.forEach((row, i) => {
+        const medals = ['🥇', '🥈', '🥉', '4️⃣', '5️⃣'];
+        lbBox.append(el('div', {
+          style:{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 12px', background:'var(--surface-soft)', borderRadius:'10px', marginBottom:'6px' }
+        },
+          el('span', { style:{ fontSize:'20px', minWidth:'28px' }}, medals[i] || (i+1)),
+          avatarChip(row.name, row.color, 32),
+          el('div', { style:{ flex:1, minWidth:0 }},
+            el('div', { style:{ fontWeight:'700', fontSize:'13px' }}, row.name),
+            el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }},
+              row.tasks + ' заданий · ' + row.attempts + ' попыток · ' + row.avg + '%')),
+          el('div', { style:{ fontWeight:'800', color: row.avg >= 70 ? 'var(--green)' : 'var(--warn)' }},
+            row.avg + '%')));
+      });
+    }
+    groupCard.append(lbBox);
+
+    /* График активности по дням (последние 7 дней) */
+    const days = Object.entries(gs.byDay).slice(0, 7).reverse();
+    if(days.length){
+      const maxCount = Math.max(...days.map(d => d[1]));
+      const chartBox = el('div', { style:{ marginBottom:'14px' }});
+      chartBox.append(el('h4', { style:{ marginBottom:'10px' }}, '📈 Попытки по дням'));
+      const bars = el('div', { style:{ display:'flex', gap:'8px', alignItems:'flex-end', height:'120px', padding:'10px 0', borderBottom:'1px solid var(--border)' }});
+      days.forEach(([day, count]) => {
+        const heightPct = maxCount ? Math.round(count / maxCount * 100) : 0;
+        bars.append(el('div', { style:{ flex:1, display:'flex', flexDirection:'column', alignItems:'center', gap:'4px' }},
+          el('span', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)' }}, count),
+          el('div', { style:{ width:'100%', height: Math.max(heightPct, 3) + '%', background:'linear-gradient(180deg,var(--y),var(--o-to))', borderRadius:'6px 6px 0 0', minHeight:'4px' }}),
+          el('span', { style:{ fontSize:'10px', color:'var(--ink-3)', whiteSpace:'nowrap' }}, day)));
+      });
+      chartBox.append(bars);
+      groupCard.append(chartBox);
+    }
+
+    /* Самые слабые задания группы (где средний балл < 70%) */
+    const weakTasks = Object.entries(gs.byTask)
+      .filter(([_, t]) => t.count >= 2 && t.score / t.max < 0.7)
+      .map(([n, t]) => ({ n: +n, pct: Math.round(t.score / t.max * 100), count: t.count }))
+      .sort((a, b) => a.pct - b.pct)
+      .slice(0, 5);
+    if(weakTasks.length){
+      const weakBox = el('div', null,
+        el('h4', { style:{ marginBottom:'10px' }}, '⚠ Слабые места группы'));
+      weakTasks.forEach(t => {
+        const topic = (EGE_TASKS.find(x => x.n === t.n) || {}).topic || '';
+        weakBox.append(el('div', {
+          style:{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 12px', background:'#FFFBEB', borderRadius:'8px', marginBottom:'6px', fontSize:'13px' }
+        },
+          el('span', null, el('b', null, '№' + t.n), ' · ' + topic),
+          el('span', { style:{ fontWeight:'700', color: t.pct < 50 ? 'var(--red)' : 'var(--warn)' }},
+            t.pct + '% · ' + t.count + ' попыток')));
+      });
+      groupCard.append(weakBox);
+    }
+
+    wrap.append(groupCard);
+  }
 
   /* Посещаемость + слабые места + сочинения */
   const row = el('div', { class:'grid grid-2' });
