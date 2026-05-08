@@ -1574,12 +1574,48 @@ async function sendChatMessage(text){
   await loadChatMessages();
 }
 
+/* Стоимость «помогло другу» в пчёлках */
+const HELPED_BEES = 10;
+
 async function markChatMessageHelped(messageId){
-  if(!sb || !MY_PROFILE) return;
+  if(!sb || !MY_PROFILE) return null;
+  /* 1. Подтянем сообщение — нужен author_id и проверка, что ещё не помечено */
+  const arr = await restRequest('GET',
+    '/chat_messages?id=eq.' + messageId +
+    '&select=id,author_id,body,marked_helped_by,room_id&limit=1');
+  if(!Array.isArray(arr) || !arr.length) throw new Error('сообщение не найдено');
+  const msg = arr[0];
+  if(msg.marked_helped_by) return { alreadyHelped: true };
+  if(msg.author_id === MY_PROFILE.id) throw new Error('нельзя пометить своё сообщение');
+
+  /* 2. Помечаем как «помогло» */
   await restRequest('PATCH', '/chat_messages?id=eq.' + messageId,
     { marked_helped_by: MY_PROFILE.id },
     { prefer: 'return=minimal' });
-  await loadChatMessages();
+
+  /* 3. Начисляем пчёлки автору через INSERT в bee_transactions.
+     БД-триггер trg_chat_help_insert (миграция add_chat_help_trigger.sql)
+     сам обновит profiles.bee — это работает и для куратора, у которого
+     нет прав на UPDATE чужих профилей, и атомарно. */
+  try {
+    await restRequest('POST', '/bee_transactions', {
+      student_id: msg.author_id,
+      amount: HELPED_BEES,
+      reason: 'помог другу в чате',
+      source_kind: 'chat_help',
+      emoji: '🤝'
+    }, { prefer: 'return=minimal' });
+  } catch(e){
+    console.warn('Не удалось начислить пчёлки за помогло:', e.message);
+  }
+
+  /* 4. Обновим UI текущего канала */
+  if(STATE.chatChannel === 'dm' && STATE.dmRoomId){
+    await loadDmMessages();
+  } else {
+    await loadChatMessages();
+  }
+  return { alreadyHelped: false, beesAwarded: HELPED_BEES, authorId: msg.author_id };
 }
 
 function startChatPolling(){
@@ -8614,12 +8650,16 @@ function chatBubbleDb(m, role, meId){
       el('button', { class:'helped-btn',
         onclick: async () => {
           try {
-            await markChatMessageHelped(m.id);
-            showToast('🤝 ' + authorName + ' помог другу');
+            const result = await markChatMessageHelped(m.id);
+            if(result && result.alreadyHelped){
+              showToast('Уже отмечено как «помогло»');
+            } else {
+              showToast('🤝 ' + authorName + ' помог другу · +' + HELPED_BEES + ' 🐝');
+            }
             render();
           } catch(e){ showToast('⚠ ' + e.message); }
         }
-      }, '🤝 пометить «помогло»'));
+      }, '🤝 пометить «помогло» · +' + HELPED_BEES + ' 🐝'));
   }
   return bubble;
 }
