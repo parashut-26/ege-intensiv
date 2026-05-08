@@ -486,6 +486,7 @@ const STATE = {
   studentDetailOpen: null,        // id ученика — открыта детальная карточка у учителя
   attemptDetailOpen: null,        // id попытки — открыта модалка с разбором ответов
   studentAttempts: {},            // кэш попыток конкретного ученика: { studentId: [{...}, ...] }
+  studentActivity: {},            // кэш активности (bee_transactions): { studentId: [...] }
   _onboardingDismissed: false,    // ученик закрыл onboarding-модалку (не показывать снова в этой сессии)
   helpedMsgs: {},
   /* === Авторизация === */
@@ -938,6 +939,22 @@ async function loadStudentAttempts(studentId){
     return Array.isArray(arr) ? arr : [];
   } catch(e){
     console.warn('loadStudentAttempts упал:', e.message);
+    return [];
+  }
+}
+
+/* Активность конкретного ученика — bee_transactions (учитель/куратор имеет
+   право читать всех по RLS bee_read). Используется в карточке ученика. */
+async function loadStudentActivity(studentId){
+  if(!sb) return [];
+  if(!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(studentId)) return [];
+  try {
+    const arr = await restRequest('GET',
+      '/bee_transactions?student_id=eq.' + studentId +
+      '&select=amount,reason,emoji,source_kind,created_at&order=created_at.desc&limit=30');
+    return Array.isArray(arr) ? arr : [];
+  } catch(e){
+    console.warn('loadStudentActivity упал:', e.message);
     return [];
   }
 }
@@ -5890,6 +5907,15 @@ function modalStudentDetail(){
     loadStudentAttempts(sid).then(arr => { cache[sid] = arr; render(); });
   }
 
+  /* Подгрузка активности (bee_transactions) этого ученика */
+  const actCache = STATE.studentActivity || (STATE.studentActivity = {});
+  let activity = actCache[sid];
+  if(activity === undefined && sb){
+    actCache[sid] = null;
+    activity = null;
+    loadStudentActivity(sid).then(arr => { actCache[sid] = arr; render(); });
+  }
+
   /* Группировка попыток по заданиям + агрегаты */
   const byTask = {};
   let totalScore = 0, totalMax = 0;
@@ -5959,6 +5985,37 @@ function modalStudentDetail(){
     });
     body.append(weak);
   }
+
+  /* Лента активности — bee_transactions ученика */
+  const actCard = el('div', { class:'card', style:{ marginBottom:'14px' }});
+  actCard.append(el('h4', { style:{ marginBottom:'8px' }}, '📈 Активность'));
+  actCard.append(el('p', { style:{ fontSize:'12px', color:'var(--ink-2)', marginTop:'-4px', marginBottom:'10px' }},
+    'Что и когда происходило в системе: попытки, достижения, сообщения, помощь.'));
+  if(activity === null){
+    actCard.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'10px', fontSize:'13px' }}, '⏳ Загружаем…'));
+  } else if(!activity || !activity.length){
+    actCard.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'10px', fontSize:'13px' }},
+      'У ученика пока нет активности в системе.'));
+  } else {
+    activity.slice(0, 12).forEach(a => {
+      const emoji = a.emoji || (a.amount >= 0 ? '🐝' : '➖');
+      const reason = a.reason || (a.source_kind === 'achievement' ? 'достижение' : 'активность');
+      const sign = a.amount >= 0 ? '+' : '';
+      actCard.append(
+        el('div', { class:'act-item' },
+          el('div', { class:'act-left' },
+            el('span', { class:'act-ic' }, emoji),
+            el('div', null,
+              el('div', { class:'act-text' }, reason),
+              el('div', { class:'act-meta' }, humanWhen(a.created_at)))),
+          el('span', { class:'act-points' }, sign + (a.amount || 0) + ' 🐝')));
+    });
+    if(activity.length > 12){
+      actCard.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textAlign:'center', marginTop:'6px' }},
+        '…и ещё ' + (activity.length - 12)));
+    }
+  }
+  body.append(actCard);
 
   /* История попыток по заданиям */
   if(list === null){
