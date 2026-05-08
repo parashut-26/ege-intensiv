@@ -3,6 +3,12 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<!-- Запрет кэширования HTML — чтобы PWA-ярлык на телефоне всегда тянул свежую версию.
+     На GitHub Pages по умолчанию max-age=600, и iOS-Safari может держать HTML вообще
+     пока не перезапустишь приложение. Эти три тега снимают проблему. -->
+<meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate" />
+<meta http-equiv="pragma" content="no-cache" />
+<meta http-equiv="expires" content="0" />
 <title>ЗебРус · Краш-тест 2026 — прототип платформы</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -3624,6 +3630,21 @@ function shellHeader(role){
       onclick: () => { STATE.view = role==='teacher' ? 'student' : role==='student' ? 'curator' : 'teacher'; render(); }
     }, '↔ Сменить роль'));
   }
+  /* Кнопка «Обновить» — для PWA-ярлыка на телефоне, где браузер агрессивно
+     кэширует HTML. Перезагружает страницу принудительно, минуя кэш. */
+  right.append(
+    el('button', { class:'role-switch',
+      title:'Загрузить свежую версию',
+      style:{ padding:'6px 10px' },
+      onclick: () => {
+        /* location.reload(true) deprecated, но всё ещё работает; добавим
+           cache-busting query, чтобы наверняка обойти кэш на iOS. */
+        const u = new URL(window.location.href);
+        u.searchParams.set('_v', Date.now());
+        window.location.replace(u.toString());
+      }
+    }, '🔄'));
+
   right.append(
     el('button', { class:'role-switch',
       onclick: () => {
