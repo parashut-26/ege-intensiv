@@ -2128,10 +2128,21 @@ async function uploadEssayAudio(blob){
   if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
   const ext = (blob.type || '').includes('mp4') ? 'm4a' : 'webm';
   const path = MY_PROFILE.id + '/voice_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
-  const { error: upErr } = await sb.storage.from('essays').upload(path, blob, {
+  /* Логируем подробности — что именно не нравится Supabase Storage,
+     чтобы при ошибке в консоли была видна реальная причина. */
+  console.log('uploadEssayAudio: bucket=essays, path=' + path + ', size=' + blob.size + ' B, type=' + blob.type);
+  const { error: upErr, data: upData } = await sb.storage.from('essays').upload(path, blob, {
     cacheControl: '3600', upsert: false, contentType: blob.type || 'audio/webm'
   });
-  if(upErr) throw new Error('Storage: ' + upErr.message);
+  if(upErr){
+    console.error('Storage upload error:', upErr);
+    /* upErr может быть Error-объект или объект Supabase; вытаскиваем
+       statusCode/message/error поля чтобы показать пользователю. */
+    const code = upErr.statusCode || upErr.status || '?';
+    const msg  = upErr.message || upErr.error || JSON.stringify(upErr);
+    throw new Error('Storage ' + code + ': ' + msg);
+  }
+  console.log('uploadEssayAudio OK:', upData);
   return sb.storage.from('essays').getPublicUrl(path).data.publicUrl;
 }
 
