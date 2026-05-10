@@ -2139,13 +2139,27 @@ async function uploadToStorage(bucket, path, blob, mime){
         'Authorization': 'Bearer ' + token,
         'apikey': SUPABASE_KEY,
         'Content-Type': contentType,
-        'x-upsert': 'false',
+        /* upsert=true чтобы ретрай (после 502 от прокси) не падал с 409 Duplicate.
+           Имя файла содержит timestamp+random, перезаписи чужого не будет. */
+        'x-upsert': 'true',
         'cache-control': '3600'
       },
       body: blob
     });
     if(r.ok) return baseUrl;
     const txt = await r.text();
+    /* 409 Duplicate — это означает что файл УЖЕ был залит (предыдущая попытка
+       пробила upload, но прокси вернул 502 из-за бага с ответом). Считаем это
+       успехом и возвращаем base URL. */
+    if(r.status === 400 || r.status === 409){
+      try {
+        const j = JSON.parse(txt);
+        if((j.statusCode === '409' || j.statusCode === 409) || /already exists|duplicate/i.test(j.message || j.error || '')){
+          console.log('Storage: файл уже залит (предыдущий upload прошёл, прокси соврал) — считаем успехом');
+          return baseUrl;
+        }
+      } catch(e){}
+    }
     const err = new Error('Storage ' + r.status + ': ' + (txt || 'нет тела ответа'));
     err.status = r.status;
     err.body = txt;
