@@ -189,6 +189,12 @@ h1{font-size:28px;line-height:1.15} h2{font-size:22px} h3{font-size:17px} h4{fon
 .chip-warn{background:var(--warn-soft);color:#92400E}
 .chip-grey{background:#F1F5F9;color:#475569}
 .chip-teal{background:var(--teal-soft);color:#115E59}
+.chip-btn{border:0;cursor:pointer;font-family:inherit;transition:transform .08s,box-shadow .08s,outline-color .08s;outline:1.5px solid transparent}
+.chip-btn:hover{transform:translateY(-1px)}
+.chip-btn.chip-active{outline-color:var(--ink-1);box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.th-sort{cursor:pointer;user-select:none;transition:background .12s}
+.th-sort:hover{background:var(--surface-soft)}
+.th-sort-active{color:var(--ink-1)}
 
 /* ============ ПРОГРЕСС ============ */
 .bar{height:8px;background:var(--p-soft);border-radius:999px;overflow:hidden}
@@ -496,6 +502,10 @@ const STATE = {
   attemptDetailOpen: null,        // id попытки — открыта модалка с разбором ответов
   studentAttempts: {},            // кэш попыток конкретного ученика: { studentId: [{...}, ...] }
   studentActivity: {},            // кэш активности (bee_transactions): { studentId: [...] }
+  /* === Фильтры/сортировка таблицы учеников === */
+  studentsFilter: 'all',          // 'all' | 'pending' | 'active' | 'lagging' | 'low-progress' | 'inactive-week' | 'unpaid'
+  studentsSearch: '',             // строка поиска по имени или email
+  studentsSort: { key: 'name', dir: 'asc' }, // ключ: name|type|progress|bee|avg|att|paid|status; dir: asc|desc
   _onboardingDismissed: false,    // ученик закрыл onboarding-модалку (не показывать снова в этой сессии)
   helpedMsgs: {},
   /* === Авторизация === */
@@ -1503,11 +1513,13 @@ async function loadGroupStats(){
       }
       totalScore += a.score || 0;
       totalMax += a.max_score || 0;
-      if(!byStudent[a.student_id]) byStudent[a.student_id] = { count: 0, score: 0, max: 0, tasks: new Set() };
+      if(!byStudent[a.student_id]) byStudent[a.student_id] = { count: 0, score: 0, max: 0, tasks: new Set(), lastAt: 0 };
       byStudent[a.student_id].count++;
       byStudent[a.student_id].score += a.score || 0;
       byStudent[a.student_id].max += a.max_score || 0;
       byStudent[a.student_id].tasks.add(a.ege_task_n);
+      const tms = date.getTime();
+      if(tms > byStudent[a.student_id].lastAt) byStudent[a.student_id].lastAt = tms;
       const dayKey = dStart.toLocaleDateString('ru-RU', { day:'numeric', month:'short' });
       byDay[dayKey] = (byDay[dayKey] || 0) + 1;
       if(!byTask[a.ege_task_n]) byTask[a.ege_task_n] = { count: 0, score: 0, max: 0 };
@@ -6022,29 +6034,162 @@ function viewTeacherStudents(){
 
   /* Таблица учеников */
   const table = el('div', { class:'card', style:{ padding:0, overflowX:'auto', overflowY:'hidden', WebkitOverflowScrolling:'touch' }});
+
+  /* === Подсчёты для счётчиков на чипах фильтров === */
+  const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+  const nowMs = Date.now();
+  const byStud = (GROUP_STATS && GROUP_STATS.byStudent) || {};
+  const stCount = s => {
+    const st = byStud[s.id];
+    const progress = st ? Math.round((st.tasks.size / 26) * 100) : 0;
+    const lastAt = st ? st.lastAt : 0;
+    return { progress, lastAt };
+  };
+  const cntAll        = STUDENTS.length;
+  const cntPending    = STUDENTS.filter(s => s.status === 'pending').length;
+  const cntActive     = STUDENTS.filter(s => s.status === 'active').length;
+  const cntLagging    = STUDENTS.filter(s => s.status === 'lagging').length;
+  const cntLowProg    = STUDENTS.filter(s => s.status !== 'pending' && stCount(s).progress < 30).length;
+  const cntInactive7  = STUDENTS.filter(s => {
+    if(s.status === 'pending') return false;
+    const { lastAt } = stCount(s);
+    return !lastAt || (nowMs - lastAt) > WEEK_MS;
+  }).length;
+  const cntUnpaid     = STUDENTS.filter(s => !s.paid).length;
+
+  /* === Кликабельный чип-фильтр === */
+  const filterChip = (key, label, count, kind) => {
+    const active = STATE.studentsFilter === key;
+    return el('button', {
+      class: 'chip-btn chip chip-' + kind + (active ? ' chip-active' : ''),
+      onclick: () => { STATE.studentsFilter = key; render(); }
+    }, label + ' ' + count);
+  };
+
+  /* Поле поиска с активным oninput → STATE + render */
+  const searchInput = el('input', {
+    placeholder: '🔍 Поиск по имени или e-mail…',
+    value: STATE.studentsSearch || '',
+    style: { flex:1, minWidth:'200px', padding:'9px 14px', borderRadius:'10px', border:'1px solid var(--border-2)' }
+  });
+  searchInput.oninput = e => { STATE.studentsSearch = e.target.value || ''; render(); };
+  /* После ререндера фокус и каретка скачут — сохраним их */
+  setTimeout(() => {
+    if(STATE.studentsSearch && document.activeElement !== searchInput){
+      const el2 = document.querySelector('.students-search-input');
+      if(el2 && el2.value === STATE.studentsSearch){ el2.focus(); el2.setSelectionRange(el2.value.length, el2.value.length); }
+    }
+  }, 0);
+  searchInput.classList.add('students-search-input');
+
   table.append(
-    el('div', { style:{ padding:'14px 16px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
-      el('input', { placeholder:'🔍 Поиск по имени или e-mail…',
-        style:{ flex:1, minWidth:'200px', padding:'9px 14px', borderRadius:'10px', border:'1px solid var(--border-2)' }}),
-      chip('Все ' + STUDENTS.length, 'grey'),
-      chip('Ждут одобрения ' + STUDENTS.filter(s => s.status === 'pending').length, 'warn'),
-      chip('Активные ' + STUDENTS.filter(s => s.status === 'active').length, 'green'),
-      chip('Не приступали ' + STUDENTS.filter(s => s.status === 'lagging').length, 'red')));
+    el('div', { class:'students-filterbar', style:{ padding:'14px 16px', borderBottom:'1px solid var(--border)', display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
+      searchInput,
+      filterChip('all',          'Все',                cntAll,       'grey'),
+      filterChip('pending',      '⏳ Ждут одобрения',  cntPending,   'warn'),
+      filterChip('active',       '● Активные',         cntActive,    'green'),
+      filterChip('lagging',      '⚠ Не приступали',    cntLagging,   'red'),
+      filterChip('low-progress', '📉 Прогресс <30%',   cntLowProg,   'warn'),
+      filterChip('inactive-week','💤 Без активности 7 дн.', cntInactive7, 'grey'),
+      filterChip('unpaid',       '💳 Не оплатили',     cntUnpaid,    'red')));
+
+  /* === Применяем фильтр + поиск === */
+  const q = (STATE.studentsSearch || '').trim().toLowerCase();
+  let visible = STUDENTS.filter(s => {
+    /* Поиск по имени/email */
+    if(q){
+      const hay = ((s.name || '') + ' ' + (s.email || '')).toLowerCase();
+      if(hay.indexOf(q) === -1) return false;
+    }
+    const f = STATE.studentsFilter;
+    if(f === 'all') return true;
+    if(f === 'pending')  return s.status === 'pending';
+    if(f === 'active')   return s.status === 'active';
+    if(f === 'lagging')  return s.status === 'lagging';
+    if(f === 'unpaid')   return !s.paid;
+    if(f === 'low-progress'){
+      if(s.status === 'pending') return false;
+      return stCount(s).progress < 30;
+    }
+    if(f === 'inactive-week'){
+      if(s.status === 'pending') return false;
+      const { lastAt } = stCount(s);
+      return !lastAt || (nowMs - lastAt) > WEEK_MS;
+    }
+    return true;
+  });
+
+  /* === Сортировка === */
+  const sortKey = STATE.studentsSort && STATE.studentsSort.key || 'name';
+  const sortDir = STATE.studentsSort && STATE.studentsSort.dir === 'desc' ? -1 : 1;
+  const STATUS_ORDER = { pending: 0, active: 1, lagging: 2 };
+  const sortVal = s => {
+    const st = byStud[s.id];
+    const progress = st ? Math.round((st.tasks.size / 26) * 100) : -1;
+    const avg = st && st.max ? Math.round((st.score / st.max) * 100) : -1;
+    const att = WEBINARS.length ? attendedDaysCount(s.id) : -1;
+    if(sortKey === 'name')     return (s.name || '').toLowerCase();
+    if(sortKey === 'type')     return s.type === 'свой' ? 0 : 1;
+    if(sortKey === 'progress') return progress;
+    if(sortKey === 'bee')      return s.bee == null ? -1 : s.bee;
+    if(sortKey === 'avg')      return avg;
+    if(sortKey === 'att')      return att;
+    if(sortKey === 'paid')     return s.paid ? 1 : 0;
+    if(sortKey === 'status')   return STATUS_ORDER[s.status] != null ? STATUS_ORDER[s.status] : 9;
+    return 0;
+  };
+  visible = visible.slice().sort((a, b) => {
+    const va = sortVal(a), vb = sortVal(b);
+    let cmp;
+    if(typeof va === 'string' || typeof vb === 'string'){
+      cmp = String(va).localeCompare(String(vb), 'ru');
+    } else {
+      cmp = (va < vb) ? -1 : (va > vb ? 1 : 0);
+    }
+    if(cmp !== 0) return cmp * sortDir;
+    /* стабильный фоллбэк по имени */
+    return (a.name || '').localeCompare(b.name || '', 'ru');
+  });
+
+  /* === Кликабельный заголовок с индикатором сортировки === */
+  const sortTh = (key, label, extraStyle) => {
+    const active = sortKey === key;
+    const arrow = active ? (sortDir === 1 ? ' ▲' : ' ▼') : '';
+    return el('th', {
+      class: 'th-sort' + (active ? ' th-sort-active' : ''),
+      style: extraStyle || null,
+      onclick: () => {
+        if(STATE.studentsSort.key === key){
+          STATE.studentsSort.dir = STATE.studentsSort.dir === 'asc' ? 'desc' : 'asc';
+        } else {
+          STATE.studentsSort.key = key;
+          STATE.studentsSort.dir = 'asc';
+        }
+        render();
+      }
+    }, label + arrow);
+  };
 
   const tbl = el('table', { class:'table' });
   tbl.append(
     el('thead', null, el('tr', null,
-      el('th', null, 'Ученик'),
-      el('th', null, 'Тип'),
-      el('th', null, 'Прогресс'),
-      el('th', null, 'Пчёлки'),
-      el('th', null, 'Балл'),
-      el('th', null, 'Посещения'),
-      el('th', null, 'Оплата'),
-      el('th', null, 'Статус'),
+      sortTh('name',     'Ученик'),
+      sortTh('type',     'Тип'),
+      sortTh('progress', 'Прогресс'),
+      sortTh('bee',      'Пчёлки'),
+      sortTh('avg',      'Балл'),
+      sortTh('att',      'Посещения'),
+      sortTh('paid',     'Оплата'),
+      sortTh('status',   'Статус'),
       el('th', { style:{ textAlign:'right' }}, ''))));
   const tbody = el('tbody', null);
-  STUDENTS.forEach(s => tbody.append(studentRow(s)));
+  if(!visible.length){
+    tbody.append(el('tr', null,
+      el('td', { colspan: 9, style:{ textAlign:'center', padding:'40px 16px', color:'var(--ink-3)' }},
+        'Никого не нашлось. Попробуйте другой фильтр или сбросьте поиск.')));
+  } else {
+    visible.forEach(s => tbody.append(studentRow(s)));
+  }
   tbl.append(tbody);
   table.append(tbl);
   wrap.append(table);
