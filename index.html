@@ -2131,6 +2131,15 @@ async function uploadToStorage(bucket, path, blob, mime){
   const token = getAccessToken();
   if(!token) throw new Error('нет access_token');
   const contentType = mime || blob.type || 'application/octet-stream';
+  /* Проверяет, лежит ли файл в Storage. Используем когда прокси соврал
+     с 502 «Failed writing» — реально файл мог быть залит. */
+  const verifyExists = async (baseUrl) => {
+    try {
+      const r = await fetch(baseUrl + '/storage/v1/object/public/' + bucket + '/' + path, { method: 'HEAD' });
+      return r.ok;
+    } catch(e){ return false; }
+  };
+
   const tryUpload = async (baseUrl) => {
     const url = baseUrl + '/storage/v1/object/' + bucket + '/' + path;
     const r = await fetch(url, {
@@ -2139,8 +2148,6 @@ async function uploadToStorage(bucket, path, blob, mime){
         'Authorization': 'Bearer ' + token,
         'apikey': SUPABASE_KEY,
         'Content-Type': contentType,
-        /* upsert=true чтобы ретрай (после 502 от прокси) не падал с 409 Duplicate.
-           Имя файла содержит timestamp+random, перезаписи чужого не будет. */
         'x-upsert': 'true',
         'cache-control': '3600'
       },
@@ -2148,17 +2155,28 @@ async function uploadToStorage(bucket, path, blob, mime){
     });
     if(r.ok) return baseUrl;
     const txt = await r.text();
-    /* 409 Duplicate — это означает что файл УЖЕ был залит (предыдущая попытка
-       пробила upload, но прокси вернул 502 из-за бага с ответом). Считаем это
-       успехом и возвращаем base URL. */
+    /* 409 Duplicate — файл уже был залит */
     if(r.status === 400 || r.status === 409){
       try {
         const j = JSON.parse(txt);
         if((j.statusCode === '409' || j.statusCode === 409) || /already exists|duplicate/i.test(j.message || j.error || '')){
-          console.log('Storage: файл уже залит (предыдущий upload прошёл, прокси соврал) — считаем успехом');
+          console.log('Storage: файл уже залит (Duplicate) — считаем успехом');
           return baseUrl;
         }
       } catch(e){}
+    }
+    /* 502 «proxy: Failed writing received data to disk» — типовой баг
+       PHP-прокси на reg.ru. Файл на самом деле УЖЕ в Storage, прокси
+       просто не смог вернуть ответ. Проверим через HEAD. */
+    if(r.status === 502 && /Failed writing received data/i.test(txt)){
+      console.log('Storage: прокси словил 502 на ответе. Проверяем, залит ли файл…');
+      /* Чуть подождём — иногда eventual consistency у Supabase Storage */
+      await new Promise(rs => setTimeout(rs, 300));
+      if(await verifyExists(SUPABASE_DIRECT_URL) || await verifyExists(SUPABASE_URL)){
+        console.log('Storage: файл на месте, считаем успехом');
+        return baseUrl;
+      }
+      console.warn('Storage: HEAD не нашёл файл, повторяем upload');
     }
     const err = new Error('Storage ' + r.status + ': ' + (txt || 'нет тела ответа'));
     err.status = r.status;
