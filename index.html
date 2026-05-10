@@ -2165,26 +2165,35 @@ async function uploadToStorage(bucket, path, blob, mime){
     err.body = txt;
     throw err;
   };
-  /* 1) Через прокси, до 3 попыток с быстрым бэкоффом */
-  const proxyBackoffs = [400, 800, 1500];
+  /* Для Storage порядок ОБРАТНЫЙ: сначала прямой URL, потом прокси.
+     Причина: на прокси (reg.ru PHP) Storage-ответы стабильно ловят 502
+     «Failed writing received data» из-за PHP-cURL бага; а прямой
+     hyczawwuehrqsqqosgub.supabase.co для /storage/v1 не блокируется
+     российскими провайдерами (блокируется только /auth/v1). Так что
+     прямой — быстрее и надёжнее. Прокси оставляем как страховку,
+     вдруг у кого-то конкретного провайдер режет supabase.co целиком.
+
+     Для основной авторизации/REST порядок остаётся прежним (прокси первым)
+     в restRequest — там auth заблокирован напрямую. */
   let lastErr;
+  try { return await tryUpload(SUPABASE_DIRECT_URL); }
+  catch(e){
+    lastErr = e;
+    /* На 4xx не падаем в фоллбэк — это не сетевая проблема */
+    if(e.status && e.status >= 400 && e.status < 500) throw e;
+    console.warn('Прямой Supabase отказал, пробуем через прокси:', e.message);
+  }
+  /* Fallback через прокси с 2 ретраями (вдруг и тут проскочит) */
+  const proxyBackoffs = [400, 1000];
   for(let i = 0; i < proxyBackoffs.length + 1; i++){
     try { return await tryUpload(SUPABASE_URL); }
     catch(e){
       lastErr = e;
-      /* На 4xx не повторяем — это не проблема прокси */
       if(e.status && e.status >= 400 && e.status < 500) break;
       if(i < proxyBackoffs.length) await new Promise(r => setTimeout(r, proxyBackoffs[i]));
     }
   }
-  /* 2) Fallback: прямой Supabase. У некоторых RU-провайдеров проходит,
-     а PHP-прокси сегодня в чёрной полосе. */
-  console.warn('Прокси отказал, пробуем напрямую:', lastErr && lastErr.message);
-  try { return await tryUpload(SUPABASE_DIRECT_URL); }
-  catch(e){
-    /* Если и прямой не работает (РФ-блокировка) — пробрасываем первоначальную ошибку прокси */
-    throw lastErr || e;
-  }
+  throw lastErr;
 }
 
 async function uploadEssayAudio(blob){
