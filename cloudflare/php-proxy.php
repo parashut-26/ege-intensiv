@@ -20,7 +20,9 @@ $SUPABASE_HOST = 'hyczawwuehrqsqqosgub.supabase.co';
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
     header('Access-Control-Allow-Origin: *');
     header('Access-Control-Allow-Methods: GET, POST, PUT, PATCH, DELETE, OPTIONS, HEAD');
-    header('Access-Control-Allow-Headers: authorization, x-client-info, apikey, content-type, prefer, range, x-supabase-api-version, accept, accept-language, accept-profile, content-profile, x-requested-with');
+    // x-upsert / cache-control / x-upload-id шлёт Supabase Storage SDK при upload.
+    // Без них preflight отбрасывал запрос и заливка падала с "Load failed".
+    header('Access-Control-Allow-Headers: authorization, x-client-info, apikey, content-type, prefer, range, x-supabase-api-version, accept, accept-language, accept-profile, content-profile, x-requested-with, x-upsert, cache-control, x-upload-id, tus-resumable, upload-length, upload-metadata, upload-offset');
     header('Access-Control-Max-Age: 86400');
     http_response_code(204);
     exit;
