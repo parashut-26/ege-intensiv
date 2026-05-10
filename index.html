@@ -2124,26 +2124,63 @@ async function submitEssay(opts){
 }
 
 /* === Голосовые комментарии: запись + загрузка === */
+/* Универсальный загрузчик в Supabase Storage — обходит баг PHP-прокси с
+   502 «Failed writing received data to disk» через ретрай и фоллбэк на
+   прямой URL Supabase (на случай если прокси сегодня в плохом настроении). */
+async function uploadToStorage(bucket, path, blob, mime){
+  const token = getAccessToken();
+  if(!token) throw new Error('нет access_token');
+  const contentType = mime || blob.type || 'application/octet-stream';
+  const tryUpload = async (baseUrl) => {
+    const url = baseUrl + '/storage/v1/object/' + bucket + '/' + path;
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + token,
+        'apikey': SUPABASE_KEY,
+        'Content-Type': contentType,
+        'x-upsert': 'false',
+        'cache-control': '3600'
+      },
+      body: blob
+    });
+    if(r.ok) return baseUrl;
+    const txt = await r.text();
+    const err = new Error('Storage ' + r.status + ': ' + (txt || 'нет тела ответа'));
+    err.status = r.status;
+    err.body = txt;
+    throw err;
+  };
+  /* 1) Через прокси, до 3 попыток с быстрым бэкоффом */
+  const proxyBackoffs = [400, 800, 1500];
+  let lastErr;
+  for(let i = 0; i < proxyBackoffs.length + 1; i++){
+    try { return await tryUpload(SUPABASE_URL); }
+    catch(e){
+      lastErr = e;
+      /* На 4xx не повторяем — это не проблема прокси */
+      if(e.status && e.status >= 400 && e.status < 500) break;
+      if(i < proxyBackoffs.length) await new Promise(r => setTimeout(r, proxyBackoffs[i]));
+    }
+  }
+  /* 2) Fallback: прямой Supabase. У некоторых RU-провайдеров проходит,
+     а PHP-прокси сегодня в чёрной полосе. */
+  console.warn('Прокси отказал, пробуем напрямую:', lastErr && lastErr.message);
+  try { return await tryUpload(SUPABASE_DIRECT_URL); }
+  catch(e){
+    /* Если и прямой не работает (РФ-блокировка) — пробрасываем первоначальную ошибку прокси */
+    throw lastErr || e;
+  }
+}
+
 async function uploadEssayAudio(blob){
   if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
   const ext = (blob.type || '').includes('mp4') ? 'm4a' : 'webm';
   const path = MY_PROFILE.id + '/voice_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
-  /* Логируем подробности — что именно не нравится Supabase Storage,
-     чтобы при ошибке в консоли была видна реальная причина. */
   console.log('uploadEssayAudio: bucket=essays, path=' + path + ', size=' + blob.size + ' B, type=' + blob.type);
-  const { error: upErr, data: upData } = await sb.storage.from('essays').upload(path, blob, {
-    cacheControl: '3600', upsert: false, contentType: blob.type || 'audio/webm'
-  });
-  if(upErr){
-    console.error('Storage upload error:', upErr);
-    /* upErr может быть Error-объект или объект Supabase; вытаскиваем
-       statusCode/message/error поля чтобы показать пользователю. */
-    const code = upErr.statusCode || upErr.status || '?';
-    const msg  = upErr.message || upErr.error || JSON.stringify(upErr);
-    throw new Error('Storage ' + code + ': ' + msg);
-  }
-  console.log('uploadEssayAudio OK:', upData);
-  return sb.storage.from('essays').getPublicUrl(path).data.publicUrl;
+  const baseUrl = await uploadToStorage('essays', path, blob, blob.type || 'audio/webm');
+  /* Public URL формируем сами — на основе того бакета, через который реально прошла загрузка */
+  return baseUrl + '/storage/v1/object/public/essays/' + path;
 }
 
 /* Виджет «Записать / Стоп / Прослушать / Удалить».
