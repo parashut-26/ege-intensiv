@@ -1417,6 +1417,59 @@ const DAYS = [
   { id: 'exam', kind: 'exam', date: '4 июня', title: 'ЭКЗАМЕН', subtitle: 'вперёд!' },
 ];
 
+/* === Helpers для расчёта текущего дня интенсива по реальной дате === */
+const _RUS_MONTHS = {
+  'января':0, 'февраля':1, 'марта':2, 'апреля':3,
+  'мая':4, 'июня':5, 'июля':6, 'августа':7,
+  'сентября':8, 'октября':9, 'ноября':10, 'декабря':11
+};
+function parseRusDate(str, year){
+  if(!str) return null;
+  const m = String(str).trim().match(/^(\d+)\s+([а-я]+)/i);
+  if(!m) return null;
+  const day = parseInt(m[1], 10);
+  const mon = _RUS_MONTHS[m[2].toLowerCase()];
+  if(mon == null) return null;
+  return new Date(year || 2026, mon, day);
+}
+/* Возвращает день из DAYS, чья дата совпадает с сегодняшней. null если нет. */
+function getRealTodayDay(){
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  for(const d of DAYS){
+    const dd = parseRusDate(d.date);
+    if(dd && dd.getTime() === today.getTime()) return d;
+  }
+  return null;
+}
+/* Сколько дней до старта (первого work-дня). >0 — до старта, 0 — сегодня, <0 — прошло. */
+function daysUntilStart(){
+  const first = DAYS.find(d => d.kind === 'work');
+  if(!first) return null;
+  const start = parseRusDate(first.date);
+  if(!start) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.round((start.getTime() - today.getTime()) / 86400000);
+}
+/* Сколько дней после экзамена (последнего дня). >0 — интенсив завершён. */
+function daysAfterEnd(){
+  const last = DAYS[DAYS.length - 1];
+  if(!last) return null;
+  const end = parseRusDate(last.date);
+  if(!end) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  return Math.round((today.getTime() - end.getTime()) / 86400000);
+}
+/* Склонение: pluralDays(1) → 'день', (2-4) → 'дня', (5+) → 'дней' */
+function pluralRu(n, forms){
+  const a = Math.abs(n) % 100;
+  const b = a % 10;
+  if(a > 10 && a < 20) return forms[2];
+  if(b > 1 && b < 5)   return forms[1];
+  if(b === 1)          return forms[0];
+  return forms[2];
+}
+
 const ME_STUDENT = {
   id: 's-anya', name: 'Аня', fullname: 'Анна Соколова', email: 'anya.sokol@mail.ru',
   type: 'свой', status: 'активна', avatarColor: '#FB7185',
@@ -4616,13 +4669,37 @@ function shouldShowSplashToday(){
 }
 
 function viewStudentHome(){
-  const today = DAYS.find(d => d.id === COURSE.todayDayId);
+  /* Умная плашка: вычисляем по реальной дате */
+  const today = getRealTodayDay();
+  const untilStart = daysUntilStart();
+  const afterEnd = daysAfterEnd();
+
+  let heroLabel, heroTitle, heroSub;
+  if(today){
+    heroLabel = '● Сейчас идёт';
+    heroTitle = 'День ' + today.id + ' · ' + (today.title || '').split('+')[0].trim();
+    heroSub   = today.date + ' · ' + (today.summary || '');
+  } else if(untilStart != null && untilStart > 0){
+    heroLabel = '🚀 До старта';
+    heroTitle = 'Старт через ' + untilStart + ' ' + pluralRu(untilStart, ['день','дня','дней']);
+    heroSub   = 'Краш-тест начнётся ' + (DAYS.find(d => d.kind === 'work') || {}).date;
+  } else if(afterEnd != null && afterEnd > 0){
+    heroLabel = '🏁 Интенсив завершён';
+    heroTitle = 'Молодец, ты дошёл до экзамена!';
+    heroSub   = 'Удачи на настоящем ЕГЭ 🐝';
+  } else {
+    /* fallback на старую логику */
+    const fallback = DAYS.find(d => d.id === COURSE.todayDayId) || DAYS[0];
+    heroLabel = '● Сейчас открыто';
+    heroTitle = 'День ' + fallback.id + ' · ' + (fallback.title || '').split('+')[0].trim();
+    heroSub   = fallback.date + ' · ' + (fallback.summary || '');
+  }
 
   const hero = el('div', { class:'card card-orange', style:{ padding:'24px' }});
   hero.append(
-    el('span', { class:'chip', style:{ background:'rgba(0,0,0,.15)', color:'#1f1f1f' }}, '● Сейчас открыто'),
-    el('h2', { style:{ marginTop:'10px', fontSize:'28px' }}, 'День ' + today.id + ' · ' + today.title.split('+')[0].trim()),
-    el('div', { style:{ marginTop:'4px', fontSize:'14px', color:'#1f1f1f' }}, today.date + ' · ' + today.summary),
+    el('span', { class:'chip', style:{ background:'rgba(0,0,0,.15)', color:'#1f1f1f' }}, heroLabel),
+    el('h2', { style:{ marginTop:'10px', fontSize:'28px' }}, heroTitle),
+    el('div', { style:{ marginTop:'4px', fontSize:'14px', color:'#1f1f1f' }}, heroSub),
     el('div', { style:{ marginTop:'16px', display:'flex', gap:'10px', flexWrap:'wrap' }},
       el('button', { class:'btn btn-primary',
         onclick: () => { STATE.studentTab='days'; render(); }
@@ -4761,7 +4838,8 @@ function mapDayCard(d){
         el('h3', null, d.title),
         el('div', { class:'small', style:{ color:'rgba(255,255,255,.85)' }}, d.subtitle)));
   }
-  const isToday = d.id === COURSE.todayDayId;
+  const realToday = getRealTodayDay();
+  const isToday = realToday ? d.id === realToday.id : false;
   return el('div', {
     class: 'day-card ' + (isToday ? 'today' : 'work'),
     onclick: () => { STATE.studentTab='days'; render(); }
@@ -4790,8 +4868,12 @@ function viewStudentDays(){
 }
 
 function dayBlock(d){
-  const isToday = d.id === COURSE.todayDayId;
-  const locked = d.id > COURSE.todayDayId;
+  const realToday = getRealTodayDay();
+  const isToday = realToday ? d.id === realToday.id : false;
+  /* locked — день в будущем относительно сегодня */
+  const dDate = parseRusDate(d.date);
+  const t0 = new Date(); t0.setHours(0,0,0,0);
+  const locked = dDate ? dDate.getTime() > t0.getTime() : false;
   const card = el('div', { class:'card', style:{ marginBottom:'16px', opacity: locked ? '.65' : '1' }});
   card.append(
     el('div', { style:{ marginBottom:'14px' }},
@@ -6200,7 +6282,15 @@ function viewTeacherOverview(){
       el('div', null,
         el('h1', null, 'Сводка по интенсиву'),
         el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }},
-          COURSE.product + ' · ' + COURSE.rangeLabel + ' · идёт День ' + COURSE.todayDayId)),
+          COURSE.product + ' · ' + COURSE.rangeLabel + ' · ' + (function(){
+            const t = getRealTodayDay();
+            if(t) return 'идёт День ' + t.id;
+            const u = daysUntilStart();
+            if(u != null && u > 0) return 'до старта ' + u + ' ' + pluralRu(u, ['день','дня','дней']);
+            const a = daysAfterEnd();
+            if(a != null && a > 0) return 'завершён';
+            return 'идёт День ' + COURSE.todayDayId;
+          })())),
       el('button', { class:'btn btn-secondary',
         onclick: () => showToast('Откроется экспорт в Excel/CSV')
       }, '⬇ Экспорт')));
