@@ -2122,13 +2122,17 @@ async function loadAchievementsFromDb(){
       console.log('achievement_defs пуст — оставляем моки');
       return;
     }
-    /* Подгружаем разблокированные текущего пользователя (если он залогинен) */
+    /* Подгружаем разблокированные текущего пользователя (если он залогинен).
+       Без ретраев и без warn — не критично если PHP-прокси иногда отдаёт 502;
+       при следующем рендере перезагрузится. */
     let unlockedIds = new Set();
     if(MY_PROFILE && MY_PROFILE.id){
       try {
-        const ua = await restRequest('GET', '/user_achievements?student_id=eq.' + encodeURIComponent(MY_PROFILE.id) + '&select=achievement_id');
+        const ua = await restRequest('GET',
+          '/user_achievements?student_id=eq.' + encodeURIComponent(MY_PROFILE.id) + '&select=achievement_id',
+          null, { noRetry: true });
         if(Array.isArray(ua)) unlockedIds = new Set(ua.map(r => r.achievement_id));
-      } catch(e){ console.warn('user_achievements:', e.message); }
+      } catch(_){ /* тихо: достижения не критичны для UX */ }
     }
     ACHIEVEMENTS = defs.map(d => ({
       id: d.id,
