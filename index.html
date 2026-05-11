@@ -239,6 +239,17 @@ body.no-anim .fade-in{animation:none}
   70%  { opacity:1 }
   100% { transform:translate(var(--dx),var(--dy)) rotate(var(--rot)); opacity:0 }
 }
+/* Летящая пчёлка к счётчику — на каждый правильный ответ */
+.flying-bee{position:fixed;font-size:28px;pointer-events:none;z-index:9997;transform:translate(-50%,-50%) scale(.4);animation:flyBee .95s cubic-bezier(.45,-.1,.55,1.2) forwards;will-change:transform,opacity}
+@keyframes flyBee{
+  0%   { transform:translate(-50%,-50%) scale(.4) rotate(0); opacity:0 }
+  12%  { transform:translate(-50%,-50%) scale(1.25) rotate(-10deg); opacity:1 }
+  85%  { opacity:1 }
+  100% { transform:translate(calc(-50% + var(--dx)),calc(-50% + var(--dy))) scale(.55) rotate(20deg); opacity:0 }
+}
+/* «Пыхающий» счётчик при попадании пчёлки */
+.bee-pop{animation:beePop .4s ease-out}
+@keyframes beePop{ 0%,100%{transform:scale(1)} 50%{transform:scale(1.2)} }
 
 /* ============ ПРОГРЕСС ============ */
 .bar{height:8px;background:var(--p-soft);border-radius:999px;overflow:hidden}
@@ -3784,6 +3795,34 @@ function showToast(text){
 }
 
 /* =======================================================================
+   ПЧЁЛКА ЛЕТИТ К СЧЁТЧИКУ — на каждый правильный ответ в тесте.
+   Создаёт элемент 🐝 в position:fixed, летит от вопроса к .bee-counter
+   в шапке, в конце счётчик пульсирует. Как «монетка в кошелёк». */
+function flyBeeToCounter(fromRect){
+  const counter = document.querySelector('.bee-counter');
+  if(!counter || !fromRect) return;
+  const to = counter.getBoundingClientRect();
+  const bee = document.createElement('div');
+  bee.textContent = '🐝';
+  bee.className = 'flying-bee';
+  const startX = fromRect.left + fromRect.width / 2;
+  const startY = fromRect.top + fromRect.height / 2;
+  const endX = to.left + to.width / 2;
+  const endY = to.top + to.height / 2;
+  bee.style.left = startX + 'px';
+  bee.style.top  = startY + 'px';
+  bee.style.setProperty('--dx', (endX - startX) + 'px');
+  bee.style.setProperty('--dy', (endY - startY) + 'px');
+  document.body.appendChild(bee);
+  /* В конце анимации убираем элемент и заставляем счётчик «пыхнуть» */
+  setTimeout(() => {
+    bee.remove();
+    counter.classList.add('bee-pop');
+    setTimeout(() => counter.classList.remove('bee-pop'), 400);
+  }, 950);
+}
+
+/* =======================================================================
    САЛЮТ ИЗ ПЧЁЛОК — когда ученик ответил правильно на все вопросы.
    Создаёт ~24 пчёлки, разлетающихся вверх и в стороны, затухают за 2с.
    ======================================================================= */
@@ -5439,7 +5478,7 @@ function modalTest(taskN){
 
   const body = el('div', { class:'modal-body' });
   bank.forEach((q, i) => {
-    const block = el('div', { style:{ marginBottom:'18px', padding:'16px', border:'1px solid var(--border)', borderRadius:'14px', background:'var(--surface-soft)' }});
+    const block = el('div', { 'data-q-i': String(i), style:{ marginBottom:'18px', padding:'16px', border:'1px solid var(--border)', borderRadius:'14px', background:'var(--surface-soft)' }});
     block.append(el('div', { style:{ fontWeight:'700', marginBottom:'10px' }}, (i+1) + '. ' + q.q));
 
     /* Задание 22: формат как в задании 8 — предложения А-Д уже в q.errors,
@@ -5746,11 +5785,25 @@ function modalTest(taskN){
                   const allNow = bank.every(isAnswered);
                   if(!allNow){ showToast('Заполните все вопросы'); return; }
                   STATE.testChecked = true; render();
-                  /* Салют из пчёлок при 100% правильных */
-                  const correctNow = bank.filter(isCorrect).length;
-                  if(correctNow === bank.length && bank.length > 0){
-                    setTimeout(celebrateBees, 250);
-                  }
+                  /* Через RAF — DOM уже обновлён, можем измерять getBoundingClientRect.
+                     Пускаем пчёлку из каждого правильного ответа к счётчику
+                     с шагом 130мс (лесенкой), и салют при 100%. */
+                  requestAnimationFrame(() => {
+                    let flown = 0;
+                    bank.forEach((q, i) => {
+                      if(!isCorrect(q, i)) return;
+                      const block = document.querySelector('[data-q-i="' + i + '"]');
+                      if(!block) return;
+                      const rect = block.getBoundingClientRect();
+                      setTimeout(() => flyBeeToCounter(rect), flown * 130);
+                      flown++;
+                    });
+                    const correctNow = bank.filter(isCorrect).length;
+                    if(correctNow === bank.length && bank.length > 0){
+                      /* Салют запускаем после того как последняя пчёлка прилетит */
+                      setTimeout(celebrateBees, flown * 130 + 600);
+                    }
+                  });
                 }
               }, '✓ Проверить')))));
 }
