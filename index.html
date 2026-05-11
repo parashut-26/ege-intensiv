@@ -195,6 +195,12 @@ h1{font-size:28px;line-height:1.15} h2{font-size:22px} h3{font-size:17px} h4{fon
 .th-sort{cursor:pointer;user-select:none;transition:background .12s}
 .th-sort:hover{background:var(--surface-soft)}
 .th-sort-active{color:var(--ink-1)}
+.my-tasks-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(96px,1fr));gap:8px}
+.my-task-tile{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:12px 8px;border-radius:12px;border:1px solid;cursor:pointer;font-family:inherit;transition:transform .08s,box-shadow .08s;min-height:88px}
+.my-task-tile:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.08)}
+.my-task-tile .mtt-n{font-size:12px;font-weight:700;opacity:.75;letter-spacing:.04em;text-transform:uppercase}
+.my-task-tile .mtt-pct{font-size:22px;font-weight:800;margin:2px 0}
+.my-task-tile .mtt-meta{font-size:10px;opacity:.7}
 
 /* ============ ПРОГРЕСС ============ */
 .bar{height:8px;background:var(--p-soft);border-radius:999px;overflow:hidden}
@@ -509,6 +515,9 @@ const STATE = {
   /* === Сводный отчёт «ученики × задания» === */
   reportAttempts: undefined,      // undefined=не пробовали, null=загружается, [...] = массив попыток
   reportTried: false,
+  /* === Личная сводная ученика «26 заданий × мои попытки» === */
+  myReport: undefined,            // undefined=не пробовали, null=загружается, [...] = массив попыток
+  myReportTried: false,
   _onboardingDismissed: false,    // ученик закрыл onboarding-модалку (не показывать снова в этой сессии)
   helpedMsgs: {},
   /* === Авторизация === */
@@ -4190,7 +4199,11 @@ function viewStudentHome(){
       'Сегодня Краш-тест в самом разгаре. Поехали 🐝'),
     hero, el('div', { style:{ height:'16px' }}),
     kpi, el('div', { style:{ height:'16px' }}),
-    map, el('div', { style:{ height:'16px' }}),
+    map, el('div', { style:{ height:'16px' }}));
+  /* Личная сводная по 26 заданиям ЕГЭ — между картой и достижениями */
+  const myReport = myReportCard();
+  if(myReport){ wrap.append(myReport); wrap.append(el('div', { style:{ height:'16px' }})); }
+  wrap.append(
     ach, el('div', { style:{ height:'16px' }}),
     activity);
   return wrap;
@@ -8121,6 +8134,90 @@ function reportSummaryCard(){
   tbl.append(tbody);
   scroll.append(tbl);
   card.append(scroll);
+  return card;
+}
+
+/* =======================================================================
+   УЧЕНИК · ЛИЧНАЯ СВОДНАЯ ПО 26 ЗАДАНИЯМ ЕГЭ
+   ======================================================================= */
+
+/* Грузим попытки только текущего ученика (один запрос с фильтром). */
+async function loadMyReport(){
+  if(!sb || !MY_PROFILE){ return; }
+  if(STATE.myReportTried) return;
+  STATE.myReportTried = true;
+  STATE.myReport = null;
+  try {
+    const arr = await restRequest('GET',
+      '/attempts?student_id=eq.' + MY_PROFILE.id +
+      '&select=ege_task_n,score,max_score,created_at&order=created_at.desc&limit=2000');
+    STATE.myReport = Array.isArray(arr) ? arr : [];
+  } catch(e){
+    console.warn('loadMyReport упал:', e.message);
+    STATE.myReport = [];
+  }
+  render();
+}
+
+/* Карточка-сетка из 26 плиток. На клик плитки — открыть карточку задания. */
+function myReportCard(){
+  if(!sb || !MY_PROFILE) return null;
+  if(STATE.myReport === undefined){
+    setTimeout(loadMyReport, 0);
+  }
+  const card = el('div', { class:'card' });
+  card.append(
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'8px', flexWrap:'wrap', gap:'8px' }},
+      el('h2', null, '📊 Мои результаты по заданиям'),
+      el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }}, 'нажми на задание — откроется тренажёр')));
+  card.append(
+    el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'14px' }},
+      'Процент лучшей твоей попытки по каждому из 26 заданий. Если задание серое — ты его ещё не пробовала.'));
+
+  if(STATE.myReport == null){
+    card.append(el('p', { style:{ color:'var(--ink-3)', fontSize:'13px' }}, '⏳ Загружаем твои попытки…'));
+    return card;
+  }
+
+  /* Строим best[taskN] = {pct, score, max, count} */
+  const best = {};
+  STATE.myReport.forEach(a => {
+    if(!a || !a.ege_task_n || !a.max_score) return;
+    const pct = Math.round((a.score || 0) / a.max_score * 100);
+    const cur = best[a.ege_task_n];
+    if(!cur || pct > cur.pct){
+      best[a.ege_task_n] = { pct, score: a.score || 0, max: a.max_score, count: (cur ? cur.count : 0) + 1 };
+    } else {
+      cur.count++;
+    }
+  });
+
+  /* Итоговая полоска прогресса: сколько заданий пробовала */
+  const tried = Object.keys(best).length;
+  card.append(
+    el('div', { style:{ marginBottom:'14px' }},
+      el('div', { style:{ display:'flex', justifyContent:'space-between', fontSize:'12px', color:'var(--ink-2)', marginBottom:'6px' }},
+        el('span', null, 'Пройдено заданий'),
+        el('b', null, tried + ' из 26')),
+      el('div', { class:'bar thin' }, el('i', { style:{ width: Math.round(tried / 26 * 100) + '%' }}))));
+
+  /* Сетка 26 плиток */
+  const grid = el('div', { class:'my-tasks-grid' });
+  for(let n = 1; n <= 26; n++){
+    const b = best[n];
+    const cl = reportCellColor(b ? b.pct : null);
+    const tile = el('button', {
+      class: 'my-task-tile',
+      style: { background: cl.bg, color: cl.fg, borderColor: b ? cl.bg : 'var(--border)' },
+      title: b ? ('Лучший: ' + b.score + ' / ' + b.max + ' (' + b.count + ' попыт.)') : 'Ещё не пробовала',
+      onclick: () => { STATE.theoryOpen = n; STATE.taskTab = 'practice'; render(); }
+    },
+      el('div', { class:'mtt-n' }, '№' + n),
+      el('div', { class:'mtt-pct' }, b ? (b.pct + '%') : '—'),
+      el('div', { class:'mtt-meta' }, b ? (b.count + ' попыт.') : 'нет попыток'));
+    grid.append(tile);
+  }
+  card.append(grid);
   return card;
 }
 
