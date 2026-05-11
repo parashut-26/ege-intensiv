@@ -10115,14 +10115,19 @@ function _renderNow(){
     if(existing) existing.remove();
   }
 
-  /* Восстанавливаем позиции прокрутки после ререндера */
-  requestAnimationFrame(() => {
-    const newModal = document.querySelector('.modal-body');
-    if(newModal && savedModalScroll) newModal.scrollTop = savedModalScroll;
-    const newChat = document.querySelector('.chat-msgs');
-    if(newChat && savedChatScroll) newChat.scrollTop = savedChatScroll;
-    if(savedWindowScroll) window.scrollTo(0, savedWindowScroll);
-  });
+  /* Восстанавливаем позиции прокрутки СИНХРОННО — до первого paint.
+     Раньше делали через RAF, и между сбросом scrollTop=0 и установкой
+     savedScroll успевал нарисоваться «прыгающий» кадр. Сейчас:
+     1. Принудительный reflow через offsetHeight, чтобы layout посчитался.
+     2. Восстанавливаем scroll и window.scrollTo до возврата из render(). */
+  const newModal = document.querySelector('.modal-body');
+  const newChat = document.querySelector('.chat-msgs');
+  /* Принудительный layout-flush */
+  if(newModal) void newModal.offsetHeight;
+  else if(root.firstChild) void root.offsetHeight;
+  if(newModal && savedModalScroll) newModal.scrollTop = savedModalScroll;
+  if(newChat && savedChatScroll) newChat.scrollTop = savedChatScroll;
+  if(savedWindowScroll) window.scrollTo(0, savedWindowScroll);
 }
 
 /* Стартуем с восстановления сессии (если есть) */
