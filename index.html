@@ -4085,7 +4085,7 @@ async function loadWalkMaterials(walkKey){
   try {
     const arr = await restRequest('GET',
       '/walk_materials?walk_key=eq.' + encodeURIComponent(walkKey) +
-      '&select=id,kind,title,storage_path,url,size_bytes,created_at,uploaded_by' +
+      '&select=id,kind,title,storage_path,url,text_content,size_bytes,created_at,uploaded_by' +
       '&order=created_at.desc');
     return Array.isArray(arr) ? arr : [];
   } catch(e){ console.warn('loadWalkMaterials:', e.message); return []; }
@@ -4093,7 +4093,7 @@ async function loadWalkMaterials(walkKey){
 
 async function addWalkMaterial(walkKey, opts){
   if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
-  /* opts: { kind, title, file?, url? } */
+  /* opts: { kind, title, file?, url?, text? } */
   let storagePath = null, sizeBytes = null;
   if(opts.file){
     const ext = (opts.file.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'bin'])[1].toLowerCase();
@@ -4105,13 +4105,33 @@ async function addWalkMaterial(walkKey, opts){
   const payload = {
     walk_key: walkKey,
     kind: opts.kind,
-    title: opts.title || (opts.file ? opts.file.name : null) || opts.url || 'Без названия',
+    title: opts.title || (opts.file ? opts.file.name : null) || opts.url || (opts.text ? opts.text.slice(0, 60) : null) || 'Без названия',
     storage_path: storagePath,
     url: opts.url || null,
+    text_content: opts.text || null,
     size_bytes: sizeBytes,
     uploaded_by: MY_PROFILE.id
   };
   await restRequest('POST', '/walk_materials', payload, { prefer:'return=minimal' });
+}
+
+/* Распознаёт YouTube/Vimeo и возвращает embed-URL для iframe, либо null. */
+function videoEmbedUrl(url){
+  if(!url) return null;
+  let m;
+  /* youtu.be/<id> */
+  m = url.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/);
+  if(m) return 'https://www.youtube.com/embed/' + m[1];
+  /* youtube.com/watch?v=<id> */
+  m = url.match(/[?&]v=([A-Za-z0-9_-]{6,})/);
+  if(m && /youtube\.com/.test(url)) return 'https://www.youtube.com/embed/' + m[1];
+  /* youtube.com/embed/<id> */
+  m = url.match(/youtube\.com\/embed\/([A-Za-z0-9_-]{6,})/);
+  if(m) return 'https://www.youtube.com/embed/' + m[1];
+  /* vimeo.com/<id> */
+  m = url.match(/vimeo\.com\/(?:video\/)?(\d{5,})/);
+  if(m) return 'https://player.vimeo.com/video/' + m[1];
+  return null;
 }
 
 async function deleteWalkMaterial(id, storagePath){
@@ -4186,8 +4206,12 @@ function modalWalkMaterials(){
 
 function walkMaterialRow(m, walkKey, isTeacher){
   const row = el('div', { style:{ padding:'12px', border:'1px solid var(--border)', borderRadius:'12px', marginBottom:'10px', background:'var(--surface-soft)' }});
+  const kindIcon = m.kind === 'audio' ? '🎧 ' :
+                   m.kind === 'image' ? '🖼 ' :
+                   m.kind === 'text'  ? '📝 ' :
+                   m.kind === 'link'  ? '🔗 ' : '';
   const title = el('div', { style:{ fontWeight:'700', marginBottom:'6px' }},
-    (m.kind === 'audio' ? '🎧 ' : m.kind === 'image' ? '🖼 ' : '🔗 ') + (m.title || 'Без названия'));
+    kindIcon + (m.title || 'Без названия'));
   const head = el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'8px' }}, title);
   if(isTeacher){
     head.append(el('button', { class:'btn-icon', title:'Удалить',
@@ -4210,9 +4234,31 @@ function walkMaterialRow(m, walkKey, isTeacher){
   } else if(m.kind === 'image' && m.storage_path){
     row.append(el('img', { src: walkMaterialPublicUrl(m.storage_path),
       style:{ maxWidth:'100%', maxHeight:'320px', borderRadius:'8px', marginTop:'4px', display:'block' }}));
+  } else if(m.kind === 'text' && m.text_content){
+    /* Текст-сообщение — блок-цитата */
+    row.append(el('div', {
+      style:{
+        marginTop:'4px', padding:'12px 14px', background:'#FEF3C7',
+        borderLeft:'3px solid var(--y)', borderRadius:'6px',
+        whiteSpace:'pre-wrap', fontSize:'14px', lineHeight:'1.5', color:'var(--ink)'
+      }
+    }, m.text_content));
   } else if(m.kind === 'link' && m.url){
+    /* Если это YouTube/Vimeo — встраиваем iframe-превью */
+    const embed = videoEmbedUrl(m.url);
+    if(embed){
+      const wrap = el('div', { style:{ position:'relative', paddingBottom:'56.25%', height:0, marginTop:'4px', borderRadius:'8px', overflow:'hidden', background:'#000' }});
+      const iframe = el('iframe', {
+        src: embed,
+        allow: 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture',
+        allowfullscreen: 'true',
+        style:{ position:'absolute', top:0, left:0, width:'100%', height:'100%', border:0 }
+      });
+      wrap.append(iframe);
+      row.append(wrap);
+    }
     row.append(el('a', { href: m.url, target:'_blank', rel:'noopener noreferrer',
-      style:{ color:'var(--p)', wordBreak:'break-all', fontSize:'13px' }}, m.url));
+      style:{ color:'var(--p)', wordBreak:'break-all', fontSize:'12px', marginTop:'6px', display:'block' }}, m.url));
   }
   return row;
 }
@@ -4258,6 +4304,29 @@ function walkMaterialAddForm(walkKey){
           finally { STATE.walkMaterialsBusy = false; render(); }
         }})));
   wrap.append(imgRow);
+
+  /* Текстовое сообщение */
+  const textRow = el('div', { style:{ marginBottom:'10px' }});
+  const textArea = el('textarea', { rows:'3', placeholder:'Мотивационное сообщение, цитата, напоминание…',
+    style:{ width:'100%', padding:'10px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'13px', resize:'vertical', fontFamily:'inherit' }});
+  const textTitle = el('input', { type:'text', placeholder:'Заголовок (необязательно)',
+    style:{ width:'100%', padding:'8px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'13px', marginTop:'6px' }});
+  textRow.append(textArea, textTitle,
+    el('button', { class:'btn btn-y btn-sm', style:{ marginTop:'8px' },
+      onclick: async () => {
+        const t = (textArea.value || '').trim();
+        if(!t){ showToast('Введите текст'); return; }
+        if(STATE.walkMaterialsBusy){ showToast('⏳ Уже загружается'); return; }
+        STATE.walkMaterialsBusy = true;
+        try {
+          await addWalkMaterial(walkKey, { kind:'text', text: t, title: textTitle.value });
+          delete STATE.walkMaterialsCache[walkKey];
+          showToast('✅ Текст добавлен');
+          textArea.value = ''; textTitle.value = '';
+        } catch(err){ showToast('⚠ ' + err.message); }
+        finally { STATE.walkMaterialsBusy = false; render(); }
+      }}, '📝 Добавить текст'));
+  wrap.append(textRow);
 
   /* Ссылка */
   const linkRow = el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' }});
