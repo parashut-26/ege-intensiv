@@ -75,21 +75,23 @@ serve(async (req) => {
     return json({ error: 'user_id_and_text_required' }, 400);
   }
 
-  // Защита: ученик может слать только сам себе (для тестов).
-  // Учитель/куратор — кому угодно.
-  if (senderRole === 'student' && body.user_id !== senderId) {
-    return json({ error: 'forbidden_other_user' }, 403);
-  }
-
-  // Достаём telegram_id адресата
+  // Достаём профиль адресата (нужен и для роли-проверки, и для telegram_id)
   const { data: target, error } = await sbAdmin
     .from('profiles')
-    .select('telegram_id, tg_notify_enabled')
+    .select('telegram_id, tg_notify_enabled, role')
     .eq('id', body.user_id)
     .maybeSingle();
 
   if (error || !target) {
     return json({ error: 'target_not_found' }, 404);
+  }
+
+  // Защита: ученик может слать сам себе ИЛИ собеседнику с ролью teacher/curator.
+  // Учитель/куратор — кому угодно.
+  if (senderRole === 'student' && body.user_id !== senderId) {
+    if (target.role !== 'teacher' && target.role !== 'curator') {
+      return json({ error: 'forbidden_other_user' }, 403);
+    }
   }
   if (!target.telegram_id) {
     return json({ ok: false, reason: 'no_telegram_link' });

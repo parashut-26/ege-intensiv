@@ -1877,12 +1877,16 @@ async function sendDmMessage(text){
 }
 
 /* Универсальный fire-and-forget вызов edge-функции tg-send.
-   Ошибки и timeouts глушим — для UX это не критичная операция. */
+   Логируем каждый шаг для диагностики — потом тихие console.log можно убрать. */
 function notifyViaTelegram(userId, text, link){
-  if(!sb || !MY_PROFILE || !userId) return;
+  console.log('[TG] notifyViaTelegram вызван', { userId, hasSb: !!sb, hasProfile: !!MY_PROFILE, textLen: (text||'').length });
+  if(!sb){ console.warn('[TG] sb пуст — отмена'); return; }
+  if(!MY_PROFILE){ console.warn('[TG] MY_PROFILE пуст — отмена'); return; }
+  if(!userId){ console.warn('[TG] userId пуст — отмена'); return; }
   const token = getAccessToken();
-  if(!token) return;
+  if(!token){ console.warn('[TG] нет access_token — отмена'); return; }
   const url = SUPABASE_URL + '/functions/v1/tg-send';
+  console.log('[TG] POST →', url);
   fetch(url, {
     method: 'POST',
     headers: {
@@ -1891,7 +1895,8 @@ function notifyViaTelegram(userId, text, link){
       'apikey': SUPABASE_KEY,
     },
     body: JSON.stringify({ user_id: userId, text: text, link: link || null }),
-  }).catch(e => console.warn('notifyViaTelegram упал:', e.message));
+  }).then(r => r.text().then(t => console.log('[TG] ответ', r.status, t)))
+    .catch(e => console.warn('[TG] fetch упал:', e.message));
 }
 
 /* === НЕПРОЧИТАННЫЕ === */
@@ -10132,6 +10137,14 @@ function _renderNow(){
   const savedModalScroll = (document.querySelector('.modal-body') || {}).scrollTop || 0;
   const savedChatScroll = (document.querySelector('.chat-msgs') || {}).scrollTop || 0;
   const savedWindowScroll = window.scrollY || 0;
+  /* Сохраняем введённый текст в инпуте чата и фокус — при polling каждые
+     7 сек DOM пересоздаётся, и иначе ввод пропадал прямо во время набора. */
+  const _chatInputEl = document.getElementById('chat-i');
+  const _chatInputValue = _chatInputEl ? _chatInputEl.value : null;
+  const _chatInputFocused = _chatInputEl && document.activeElement === _chatInputEl;
+  const _chatInputCaret = _chatInputFocused
+    ? { start: _chatInputEl.selectionStart, end: _chatInputEl.selectionEnd }
+    : null;
 
   root.innerHTML = '';
 
@@ -10288,6 +10301,21 @@ function _renderNow(){
   if(newModal && savedModalScroll) newModal.scrollTop = savedModalScroll;
   if(newChat && savedChatScroll) newChat.scrollTop = savedChatScroll;
   if(savedWindowScroll) window.scrollTo(0, savedWindowScroll);
+  /* Восстанавливаем введённый текст и фокус в чат-инпуте — иначе при
+     polling каждые 7 сек юзер теряет набранное на полпути. */
+  if(_chatInputValue !== null){
+    const newInput = document.getElementById('chat-i');
+    if(newInput){
+      newInput.value = _chatInputValue;
+      if(_chatInputFocused){
+        newInput.focus();
+        if(_chatInputCaret){
+          try { newInput.setSelectionRange(_chatInputCaret.start, _chatInputCaret.end); }
+          catch(_){}
+        }
+      }
+    }
+  }
 }
 
 /* Стартуем с восстановления сессии (если есть) */
