@@ -541,6 +541,7 @@ const STATE = {
   variantMode: false,      // сборка случайного варианта
   toast: null,
   showOnboarding: false,
+  onboardingStep: 1,              // 1..ONBOARDING_STEPS.length — текущий слайд тура
   theoryOpen: null,        // номер задания
   taskTab: 'theory',       // 'theory' | 'practice' — какая вкладка открыта в карточке задания
   attendanceOpen: false,   // открыта модалка посещаемости
@@ -575,6 +576,12 @@ const STATE = {
   walkMaterialsOpen: null,        // 'walk1'/'walk2'/'walk3' — какой walk-модал открыт
   walkMaterialsCache: {},         // кэш списков по walk_key
   walkMaterialsBusy: false,       // флаг загрузки нового материала
+  /* === Чек-лист готовности (Сводка учителя) === */
+  readiness: null,                // { students, tgCount, webCount, walkCount } или null
+  readinessLoading: false,
+  /* === Фильтры сочинений у учителя === */
+  essaysFilter: 'all',            // 'all' | 'new' | 'pre_checked' | 'in_progress' | 'done'
+  essaysSearch: '',
   _onboardingDismissed: false,    // ученик закрыл onboarding-модалку (не показывать снова в этой сессии)
   helpedMsgs: {},
   /* === Авторизация === */
@@ -4077,6 +4084,103 @@ function telegramLinkCard(){
 }
 
 /* =======================================================================
+   ЧЕК-ЛИСТ ГОТОВНОСТИ К ИНТЕНСИВУ — для Сводки учителя.
+   Подсчитывает: записанных учеников, привязок Telegram, вебинаров,
+   материалов в прогулочных днях. ======================================================================= */
+async function loadReadinessCheck(){
+  if(!sb || STATE.readinessLoading) return;
+  STATE.readinessLoading = true;
+  try {
+    const tgArr   = await restRequest('GET', '/profiles?role=eq.student&telegram_id=not.is.null&select=id');
+    const webArr  = await restRequest('GET', '/day_activities?kind=eq.webinar&select=id');
+    const walkArr = await restRequest('GET', '/walk_materials?select=id');
+    STATE.readiness = {
+      students: STUDENTS.length,
+      tgCount:  Array.isArray(tgArr)   ? tgArr.length   : 0,
+      webCount: Array.isArray(webArr)  ? webArr.length  : 0,
+      walkCount:Array.isArray(walkArr) ? walkArr.length : 0,
+    };
+  } catch(e){
+    console.warn('readiness check failed:', e.message);
+    STATE.readiness = null;
+  }
+  STATE.readinessLoading = false;
+  render();
+}
+
+function readinessCard(){
+  if(STATE.view !== 'teacher') return null;
+  if(!STUDENTS_LOADED) return null;
+  if(!STATE.readiness){
+    if(!STATE.readinessLoading) setTimeout(loadReadinessCheck, 0);
+    return null;
+  }
+  const r = STATE.readiness;
+  const untilStart = daysUntilStart();
+  const afterEnd   = daysAfterEnd();
+  /* Чек-лист релевантен только если интенсив ещё не начался или только что начался */
+  if(afterEnd != null && afterEnd > 1) return null;
+
+  const items = [
+    {
+      label: 'Учеников записано',
+      value: r.students,
+      ok:   r.students > 0,
+      tip:  r.students === 0 ? 'Импортируй список через вкладку «Ученики»' : null
+    },
+    {
+      label: 'Привязали Telegram',
+      value: r.tgCount + ' из ' + r.students,
+      ok:   r.students > 0 && r.tgCount === r.students,
+      warn: r.tgCount > 0 && r.tgCount < r.students,
+      tip:  r.tgCount < r.students
+        ? 'Напомни ученикам нажать «🤖 Привязать Telegram» в Профиле — иначе уведомлений о вебинарах не получат'
+        : null
+    },
+    {
+      label: 'Вебинары настроены',
+      value: r.webCount + ' из 6',
+      ok:   r.webCount >= 6,
+      tip:  r.webCount < 6 ? 'Не все вебинары в day_activities — проверь расписание' : null
+    },
+    {
+      label: 'Материалов в прогулочных днях',
+      value: r.walkCount,
+      ok:   r.walkCount > 0,
+      warn: r.walkCount === 0,
+      tip:  r.walkCount === 0
+        ? 'Загрузи подкасты/картинки/тексты в дни прогулок — это контент между интенсивами'
+        : null
+    },
+  ];
+
+  const card = el('div', { class:'card', style:{ marginBottom:'16px', background:'var(--y-soft)', border:'1px solid var(--y)' }});
+  card.append(
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'10px', flexWrap:'wrap', gap:'8px' }},
+      el('h3', { style:{ margin:0 }},
+        '🐝 Готовность к старту' +
+        (untilStart != null && untilStart > 0 ? ' · до старта ' + untilStart + ' ' + pluralRu(untilStart, ['день','дня','дней']) : '')),
+      el('button', { class:'btn btn-secondary btn-sm',
+        onclick: () => { STATE.readiness = null; loadReadinessCheck(); }
+      }, '↻')));
+
+  items.forEach(it => {
+    const icon = it.ok ? '✅' : it.warn ? '⚠️' : '⏳';
+    const valColor = it.ok ? 'var(--green)' : it.warn ? 'var(--warn)' : 'var(--ink-2)';
+    card.append(el('div', {
+      style:{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 0', borderTop:'1px solid rgba(0,0,0,.05)' }
+    },
+      el('span', { style:{ fontSize:'18px', width:'24px' }}, icon),
+      el('div', { style:{ flex:1 }},
+        el('div', { style:{ fontWeight:'700', fontSize:'14px' }}, it.label),
+        it.tip ? el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'2px' }}, it.tip) : null),
+      el('div', { style:{ fontWeight:'800', fontSize:'15px', color: valColor }}, it.value)));
+  });
+
+  return card;
+}
+
+/* =======================================================================
    МАТЕРИАЛЫ МОТИВАЦИОННЫХ ДНЕЙ (walk-дней)
    Загрузка аудио/картинок/ссылок учителем, просмотр учеником.
    ======================================================================= */
@@ -4683,29 +4787,86 @@ function viewLogin(){
    ======================================================================= */
 function dismissOnboarding(){
   STATE.showOnboarding = false;
+  STATE.onboardingStep = 1;
   try { localStorage.setItem('zebrus_onboarded', 'true'); } catch(e){}
   render();
 }
+/* Многошаговый тур по приложению — показывается при первом входе ученика. */
+const ONBOARDING_STEPS = [
+  {
+    emoji: '🐝',
+    title: 'Привет! Это твой кабинет в Краш-тесте 2026',
+    body: 'За 3 дня перед ЕГЭ мы вместе подтянем орфографию, пунктуацию и сочинение. Это короткая экскурсия по приложению.'
+  },
+  {
+    emoji: '📅',
+    title: 'Дни интенсива',
+    body: 'Каждый день открывается по расписанию. Внутри — утренняя разминка, дневной вебинар, разбор варианта ЕГЭ и (в первый день) сочинение. Между днями — прогулки с подкастами от учителя.'
+  },
+  {
+    emoji: '🎯',
+    title: 'Тренажёр и пчёлки',
+    body: 'За правильные ответы прилетают 🐝 пчёлки. Можно решить 5, 10 или все 35 вопросов в тренажёре. Свои результаты по 26 заданиям ЕГЭ — на главной в блоке «Мои результаты».'
+  },
+  {
+    emoji: '💬',
+    title: 'Чат с учителем',
+    body: 'Общий канал интенсива и личные сообщения — внизу справа жми на 💬. Учитель и кураторы ответят на любой вопрос — даже ночью.'
+  },
+  {
+    emoji: '🤖',
+    title: 'Уведомления в Telegram',
+    body: 'Чтобы получать о вебинарах, проверенных сочинениях и новых сообщениях — привяжи Telegram в Профиле. Это занимает 10 секунд.'
+  },
+];
+
 function modalOnboarding(){
+  const step = Math.max(1, Math.min(ONBOARDING_STEPS.length, STATE.onboardingStep || 1));
+  const s = ONBOARDING_STEPS[step - 1];
+  const isFirst = step === 1;
+  const isLast = step === ONBOARDING_STEPS.length;
+
   return el('div', { class:'modal-bg', onclick: e => { if(e.target.classList.contains('modal-bg')){ dismissOnboarding(); }} },
-    el('div', { class:'modal onboarding' },
-      el('div', { class:'modal-head' },
-        el('h3', null, '🐝 Как работают пчёлки'),
+    el('div', { class:'modal onboarding', style:{ maxWidth:'500px' }},
+      el('div', { class:'modal-head', style:{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'14px 20px' }},
+        el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', fontWeight:'700', letterSpacing:'.04em' }},
+          step + ' из ' + ONBOARDING_STEPS.length),
         el('button', { class:'x', onclick: () => dismissOnboarding() }, '×')),
-      el('div', { class:'modal-body' },
-        el('p', null, 'Пчёлки — это очки за то, что ты делаешь в Краш-тесте. Их можно получить разными способами:'),
-        el('ul', null,
-          el('li', null, el('span', { class:'ic' }, '☀️'), 'За посещение вебинаров и разминок'),
-          el('li', null, el('span', { class:'ic' }, '🎯'), 'За правильные ответы и сдачу заданий'),
-          el('li', null, el('span', { class:'ic' }, '🤝'), 'За помощь одноклассникам в чате'),
-          el('li', null, el('span', { class:'ic' }, '📈'), 'За улучшение результатов')),
-        el('p', { style:{ marginTop:'12px' }},
-          'Никакого «топа» и сравнения — каждое достижение можно открыть, если ты просто работаешь. На вкладке «Достижения» у каждого бейджа написано, как его получить.')),
-      el('div', { class:'modal-foot' },
-        el('span', null, ''),
-        el('button', { class:'btn btn-y',
-          onclick: () => dismissOnboarding()
-        }, 'Понятно, поехали 🐝'))));
+      el('div', { class:'modal-body', style:{ textAlign:'center', padding:'14px 24px 8px' }},
+        el('div', { style:{ fontSize:'72px', lineHeight:1, margin:'4px 0 12px' }}, s.emoji),
+        el('h2', { style:{ marginBottom:'12px', fontSize:'22px' }}, s.title),
+        el('p', { style:{ color:'var(--ink-2)', lineHeight:'1.55' }}, s.body)),
+      /* Точки-индикаторы */
+      el('div', { style:{ display:'flex', justifyContent:'center', gap:'6px', padding:'12px 0 16px' }},
+        ONBOARDING_STEPS.map((_, i) => el('span', {
+          style:{
+            width: i === step - 1 ? '20px' : '8px',
+            height:'8px',
+            borderRadius:'4px',
+            background: i === step - 1 ? 'var(--y)' : 'var(--border-2)',
+            transition:'all .2s'
+          }
+        }))),
+      el('div', { class:'modal-foot', style:{ display:'flex', justifyContent:'space-between', gap:'8px', padding:'14px 20px' }},
+        el('button', {
+          class: 'btn btn-secondary',
+          style:{ visibility: isFirst ? 'hidden' : 'visible' },
+          onclick: () => { STATE.onboardingStep = step - 1; render(); }
+        }, '← Назад'),
+        isLast
+          ? el('button', { class:'btn btn-y',
+              onclick: () => {
+                dismissOnboarding();
+                /* На последнем шаге → ведём на Профиль для привязки Telegram */
+                if(MY_PROFILE && !MY_PROFILE.telegram_id){
+                  STATE.studentTab = 'profile';
+                  render();
+                }
+              }
+            }, 'Поехали 🐝')
+          : el('button', { class:'btn btn-y',
+              onclick: () => { STATE.onboardingStep = step + 1; render(); }
+            }, 'Дальше →'))));
 }
 
 /* =======================================================================
@@ -6600,6 +6761,10 @@ function viewTeacherOverview(){
   const tgCard = telegramLinkCard();
   if(tgCard) wrap.append(tgCard);
 
+  /* Чек-лист готовности — до и во время интенсива */
+  const rdCard = readinessCard();
+  if(rdCard) wrap.append(rdCard);
+
   /* Алерт-плашки показываем ТОЛЬКО когда реальные данные из БД пришли,
      иначе при перезагрузке они на секунду «выскакивают» из мок-данных
      и пропадают — отсюда «дёргание» страницы. */
@@ -8359,6 +8524,21 @@ function viewTeacherEssays(){
   const norm = e => ({ ...e, status: e.status === 'submitted' ? 'new' : e.status });
   const essays = allEssays.map(norm);
 
+  /* Счётчики по статусам — для чипов-фильтров */
+  const cntAll  = essays.length;
+  const cntNew  = essays.filter(e => e.status === 'new').length;
+  const cntPre  = essays.filter(e => e.status === 'pre_checked').length;
+  const cntWip  = essays.filter(e => e.status === 'in_progress').length;
+  const cntDone = essays.filter(e => e.status === 'done').length;
+
+  const filterChip = (key, label, count, kind) => {
+    const active = (STATE.essaysFilter || 'all') === key;
+    return el('button', {
+      class: 'chip-btn chip chip-' + kind + (active ? ' chip-active' : ''),
+      onclick: () => { STATE.essaysFilter = key; render(); }
+    }, label + ' ' + count);
+  };
+
   wrap.append(
     el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px', flexWrap:'wrap', gap:'10px' }},
       el('div', null,
@@ -8372,19 +8552,49 @@ function viewTeacherEssays(){
           showToast('✓ Загружено: ' + DB_ESSAYS.length);
           render();
         }
-      }, '🔄 Обновить')),
-    el('div', { style:{ display:'flex', gap:'8px', marginBottom:'14px', flexWrap:'wrap' }},
-      chip('Новые ' + essays.filter(e => e.status === 'new').length, 'red'),
-      chip('🤝 От кураторов ' + essays.filter(e => e.status === 'pre_checked').length, 'teal'),
-      chip('В работе ' + essays.filter(e => e.status === 'in_progress').length, 'warn'),
-      chip('Готовы ' + essays.filter(e => e.status === 'done').length, 'green')));
+      }, '🔄 Обновить')));
+
+  /* Поиск по имени ученика */
+  const searchInput = el('input', {
+    placeholder:'🔍 Поиск по имени ученика…',
+    value: STATE.essaysSearch || '',
+    style:{ flex:'1 1 220px', minWidth:'200px', padding:'9px 14px', borderRadius:'10px', border:'1px solid var(--border-2)' }
+  });
+  searchInput.classList.add('essays-search-input');
+  searchInput.oninput = e => { STATE.essaysSearch = e.target.value || ''; render(); };
+
+  wrap.append(
+    el('div', { style:{ display:'flex', gap:'8px', marginBottom:'14px', flexWrap:'wrap', alignItems:'center' }},
+      searchInput,
+      filterChip('all',         'Все',                   cntAll,  'grey'),
+      filterChip('new',         '🆕 Новые',              cntNew,  'red'),
+      filterChip('pre_checked', '🤝 От кураторов',       cntPre,  'teal'),
+      filterChip('in_progress', '⏳ В работе',           cntWip,  'warn'),
+      filterChip('done',        '✅ Готовы',             cntDone, 'green')));
+
+  /* Фильтрация */
+  const filter = STATE.essaysFilter || 'all';
+  const q = (STATE.essaysSearch || '').trim().toLowerCase();
+  let visible = essays.filter(e => {
+    if(filter !== 'all' && e.status !== filter) return false;
+    if(q){
+      const hay = (e.studentName || '').toLowerCase();
+      if(hay.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
 
   if(!essays.length){
     wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)', padding:'30px' }},
       'Пока нет сданных сочинений. Когда ученики начнут сдавать — появятся здесь.'));
     return wrap;
   }
-  essays.forEach(e => wrap.append(essayRow(e, false)));
+  if(!visible.length){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)', padding:'30px' }},
+      'Под текущий фильтр ничего не подошло. Попробуй другой статус или очисти поиск.'));
+    return wrap;
+  }
+  visible.forEach(e => wrap.append(essayRow(e, false)));
   return wrap;
 }
 
