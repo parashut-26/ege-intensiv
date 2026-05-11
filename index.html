@@ -4103,12 +4103,14 @@ async function loadReadinessCheck(){
     }
   };
   const tgArr   = await safeGet('/profiles?role=eq.student&telegram_id=not.is.null&select=id', []);
-  const webArr  = await safeGet('/day_activities?kind=eq.webinar&select=id', []);
   const walkArr = await safeGet('/walk_materials?select=id', []);
+  /* Вебинары уже загружены в WEBINARS — не дёргаем прокси ещё раз
+     (он капризничал именно на /day_activities). */
+  const webCountLocal = Array.isArray(WEBINARS) ? WEBINARS.length : null;
   STATE.readiness = {
     students:  STUDENTS.length,
     tgCount:   tgArr   === null ? null : tgArr.length,
-    webCount:  webArr  === null ? null : webArr.length,
+    webCount:  webCountLocal,
     walkCount: walkArr === null ? null : walkArr.length,
   };
   STATE.readinessLoading = false;
