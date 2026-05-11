@@ -1864,6 +1864,34 @@ async function sendDmMessage(text){
     { room_id: STATE.dmRoomId, author_id: MY_PROFILE.id, body: text },
     { prefer: 'return=minimal' });
   await loadDmMessages();
+  /* TG-уведомление собеседнику. Не ждём ответа — в фоне (fire-and-forget).
+     Если у получателя нет привязки или отключены уведомления, edge-функция
+     просто вернёт ok:false без побочных эффектов. */
+  if(STATE.dmPartner && STATE.dmPartner.id){
+    const myName = (MY_PROFILE.full_name || 'Кто-то').split(/\s+/)[0];
+    const preview = text.length > 220 ? text.slice(0, 220) + '…' : text;
+    notifyViaTelegram(STATE.dmPartner.id,
+      '💬 <b>' + escHtml(myName) + '</b> написал в чат:\n\n' + escHtml(preview),
+      'https://zebrus.online');
+  }
+}
+
+/* Универсальный fire-and-forget вызов edge-функции tg-send.
+   Ошибки и timeouts глушим — для UX это не критичная операция. */
+function notifyViaTelegram(userId, text, link){
+  if(!sb || !MY_PROFILE || !userId) return;
+  const token = getAccessToken();
+  if(!token) return;
+  const url = SUPABASE_URL + '/functions/v1/tg-send';
+  fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + token,
+      'apikey': SUPABASE_KEY,
+    },
+    body: JSON.stringify({ user_id: userId, text: text, link: link || null }),
+  }).catch(e => console.warn('notifyViaTelegram упал:', e.message));
 }
 
 /* === НЕПРОЧИТАННЫЕ === */
@@ -3809,6 +3837,94 @@ function showToast(text){
   STATE.toast = text;
   render();
   setTimeout(() => { STATE.toast = null; render(); }, 2400);
+}
+
+/* =======================================================================
+   TELEGRAM-ПРИВЯЗКА — карточка для профиля.
+   Показывает либо «🤖 Привязать Telegram» (deep-link на бота с одноразовым
+   токеном), либо «✅ Telegram подключён» + кнопка «Отвязать».
+   ======================================================================= */
+const TG_BOT_USERNAME = 'ZRMoveBot';
+
+/* Сгенерировать короткий токен привязки (12 hex символов). */
+function _genTgLinkToken(){
+  const buf = new Uint8Array(6);
+  (window.crypto || self.crypto).getRandomValues(buf);
+  return Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function telegramLinkCard(){
+  if(!MY_PROFILE) return null;
+  const card = el('div', { class:'card', style:{ marginBottom:'16px' }});
+
+  if(MY_PROFILE.telegram_id){
+    /* Уже привязан */
+    card.append(
+      el('div', { style:{ display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap' }},
+        el('span', { style:{ fontSize:'28px' }}, '✅'),
+        el('div', { style:{ flex:1, minWidth:'180px' }},
+          el('h3', { style:{ marginBottom:'2px' }}, 'Telegram подключён'),
+          el('div', { style:{ color:'var(--ink-2)', fontSize:'13px' }},
+            MY_PROFILE.telegram_name
+              ? ('Уведомления приходят сюда: ' + MY_PROFILE.telegram_name)
+              : 'Уведомления приходят в Telegram')),
+        el('button', { class:'btn btn-secondary btn-sm',
+          onclick: async () => {
+            if(!confirm('Отключить уведомления в Telegram? Бот перестанет писать.')) return;
+            try {
+              await restRequest('PATCH', '/profiles?id=eq.' + MY_PROFILE.id,
+                { telegram_id: null, telegram_name: null }, { prefer:'return=minimal' });
+              MY_PROFILE.telegram_id = null;
+              MY_PROFILE.telegram_name = null;
+              showToast('Telegram отключён');
+              render();
+            } catch(e){ showToast('⚠ ' + e.message); }
+          }
+        }, 'Отвязать')));
+    return card;
+  }
+
+  /* Не привязан */
+  card.append(
+    el('div', { style:{ display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap' }},
+      el('span', { style:{ fontSize:'28px' }}, '🤖'),
+      el('div', { style:{ flex:1, minWidth:'200px' }},
+        el('h3', { style:{ marginBottom:'2px' }}, 'Уведомления в Telegram'),
+        el('div', { style:{ color:'var(--ink-2)', fontSize:'13px' }},
+          'Чтобы получать о проверенных сочинениях, новых сообщениях и вебинарах.')),
+      el('button', { class:'btn btn-teal',
+        onclick: async () => {
+          /* 1. Генерим токен и сохраняем в БД на свой профиль */
+          const token = _genTgLinkToken();
+          try {
+            await restRequest('PATCH', '/profiles?id=eq.' + MY_PROFILE.id,
+              { telegram_link_token: token }, { prefer:'return=minimal' });
+          } catch(e){ showToast('⚠ ' + e.message); return; }
+          /* 2. Открываем глубокую ссылку на бота */
+          const url = 'https://t.me/' + TG_BOT_USERNAME + '?start=' + token;
+          window.open(url, '_blank');
+          showToast('Открой Telegram и нажми «Запустить»');
+          /* 3. Через несколько секунд проверим, привязалось ли (polling 3 раза) */
+          let tries = 0;
+          const poll = async () => {
+            tries++;
+            try {
+              const arr = await restRequest('GET',
+                '/profiles?id=eq.' + MY_PROFILE.id + '&select=telegram_id,telegram_name');
+              if(Array.isArray(arr) && arr[0] && arr[0].telegram_id){
+                MY_PROFILE.telegram_id = arr[0].telegram_id;
+                MY_PROFILE.telegram_name = arr[0].telegram_name;
+                showToast('✅ Telegram привязан');
+                render();
+                return;
+              }
+            } catch(_){}
+            if(tries < 6) setTimeout(poll, 5000);  /* 6 × 5с = 30с */
+          };
+          setTimeout(poll, 4000);
+        }
+      }, '🤖 Привязать Telegram')));
+  return card;
 }
 
 /* =======================================================================
@@ -5894,6 +6010,9 @@ function viewStudentProfile(){
     el('h1', null, '👤 Профиль'),
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'20px' }},
       'Твои данные, уведомления и статус.'));
+  /* Карточка привязки Telegram (если есть профиль из БД) */
+  const tgCard = telegramLinkCard();
+  if(tgCard) wrap.append(tgCard);
 
   /* Реальные данные профиля если залогинены, иначе моки */
   const realName = MY_PROFILE && MY_PROFILE.full_name ? MY_PROFILE.full_name : ME_STUDENT.fullname;
@@ -5994,6 +6113,10 @@ function viewTeacherOverview(){
       el('button', { class:'btn btn-secondary',
         onclick: () => showToast('Откроется экспорт в Excel/CSV')
       }, '⬇ Экспорт')));
+
+  /* Привязка Telegram — у учителя своя карточка */
+  const tgCard = telegramLinkCard();
+  if(tgCard) wrap.append(tgCard);
 
   /* Алерт-плашки показываем ТОЛЬКО когда реальные данные из БД пришли,
      иначе при перезагрузке они на секунду «выскакивают» из мок-данных
@@ -9483,7 +9606,11 @@ function viewCuratorStudents(){
   wrap.append(
     el('h1', null, '👥 Ученики'),
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'20px' }},
-      'Вы видите прогресс всех учеников. Можете писать им в чате и помечать ответы как «помогло».'),
+      'Вы видите прогресс всех учеников. Можете писать им в чате и помечать ответы как «помогло».'));
+  /* Привязка Telegram — куратору тоже */
+  const tgCard = telegramLinkCard();
+  if(tgCard) wrap.append(tgCard);
+  wrap.append(
     el('div', { class:'card', style:{ padding:0, overflowX:'auto', overflowY:'hidden', WebkitOverflowScrolling:'touch' }},
       el('table', { class:'table' },
         el('thead', null, el('tr', null,
