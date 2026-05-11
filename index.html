@@ -506,6 +506,9 @@ const STATE = {
   studentsFilter: 'all',          // 'all' | 'pending' | 'active' | 'lagging' | 'low-progress' | 'inactive-week' | 'unpaid'
   studentsSearch: '',             // строка поиска по имени или email
   studentsSort: { key: 'name', dir: 'asc' }, // ключ: name|type|progress|bee|avg|att|paid|status; dir: asc|desc
+  /* === Сводный отчёт «ученики × задания» === */
+  reportAttempts: undefined,      // undefined=не пробовали, null=загружается, [...] = массив попыток
+  reportTried: false,
   _onboardingDismissed: false,    // ученик закрыл onboarding-модалку (не показывать снова в этой сессии)
   helpedMsgs: {},
   /* === Авторизация === */
@@ -7940,6 +7943,188 @@ function critRow(c, lockK2K3){
 }
 
 /* =======================================================================
+   УЧИТЕЛЬ · СВОДНАЯ ТАБЛИЦА «УЧЕНИКИ × ЗАДАНИЯ ЕГЭ»
+   ======================================================================= */
+
+/* Грузим все попытки (для интенсива хватит 5000 строк). Только один раз. */
+async function loadReportAttempts(){
+  if(!sb) return;
+  if(STATE.reportTried) return;
+  STATE.reportTried = true;
+  STATE.reportAttempts = null;  /* null = идёт загрузка */
+  try {
+    const arr = await restRequest('GET',
+      '/attempts?select=student_id,ege_task_n,score,max_score,created_at&order=created_at.desc&limit=5000');
+    STATE.reportAttempts = Array.isArray(arr) ? arr : [];
+  } catch(e){
+    console.warn('loadReportAttempts упал:', e.message);
+    STATE.reportAttempts = [];
+  }
+  render();
+}
+
+/* Строит матрицу best[studentId][taskN] = { pct, score, max, count }.
+   pct — процент ЛУЧШЕЙ попытки ученика по этому заданию. */
+function buildReportMatrix(attempts){
+  const m = {};       /* m[sid][taskN] */
+  const tasksSeen = new Set();
+  attempts.forEach(a => {
+    if(!a || !a.student_id || !a.ege_task_n || !a.max_score) return;
+    const pct = Math.round((a.score || 0) / a.max_score * 100);
+    tasksSeen.add(a.ege_task_n);
+    const row = m[a.student_id] || (m[a.student_id] = {});
+    const cur = row[a.ege_task_n];
+    if(!cur || pct > cur.pct){
+      row[a.ege_task_n] = { pct, score: a.score || 0, max: a.max_score, count: (cur ? cur.count : 0) + 1 };
+    } else {
+      cur.count++;
+    }
+  });
+  return { m, tasksSeen };
+}
+
+/* Цвет ячейки по проценту. */
+function reportCellColor(pct){
+  if(pct == null) return { bg:'transparent', fg:'var(--ink-3)' };
+  if(pct >= 80)   return { bg:'var(--green-soft)', fg:'#065F46' };
+  if(pct >= 50)   return { bg:'var(--warn-soft)',  fg:'#92400E' };
+  return                  { bg:'var(--red-soft)',   fg:'#991B1B' };
+}
+
+/* CSV-экспорт. UTF-8 BOM + ; разделитель + кавычки — Excel «съест» как родной. */
+function exportReportCSV(matrix, tasksList){
+  const sep = ';';
+  const esc = v => {
+    const s = (v == null) ? '' : String(v);
+    if(s.indexOf(sep) >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0){
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  };
+  const headers = ['Ученик', 'Email'];
+  tasksList.forEach(n => headers.push('Задание ' + n));
+  headers.push('Сдано');
+  headers.push('Итого (средний %)');
+  const lines = [headers.map(esc).join(sep)];
+
+  /* Сортируем учеников по имени */
+  const studs = STUDENTS.slice().sort((a, b) =>
+    (a.name || '').localeCompare(b.name || '', 'ru'));
+
+  studs.forEach(s => {
+    const row = [s.name || '', s.email || ''];
+    const cells = matrix.m[s.id] || {};
+    let sumPct = 0, doneN = 0;
+    tasksList.forEach(n => {
+      const c = cells[n];
+      if(c){ row.push(c.pct + '% (' + c.score + '/' + c.max + ')'); sumPct += c.pct; doneN++; }
+      else { row.push(''); }
+    });
+    row.push(doneN + ' / ' + tasksList.length);
+    row.push(doneN ? Math.round(sumPct / doneN) + '%' : '');
+    lines.push(row.map(esc).join(sep));
+  });
+
+  const BOM = '﻿';
+  const blob = new Blob([BOM + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const stamp = new Date().toISOString().slice(0,10);
+  a.download = 'zebrus-svodka-' + stamp + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast('✓ Файл скачан — откройте в Excel');
+}
+
+/* Карточка со сводной таблицей. Запускает загрузку, если ещё не пробовали. */
+function reportSummaryCard(){
+  if(!sb) return null;
+  if(STATE.reportAttempts === undefined){
+    /* Триггерим загрузку — после первого render() карточки */
+    setTimeout(loadReportAttempts, 0);
+  }
+  const card = el('div', { class:'card', style:{ marginTop:'18px' }});
+  card.append(
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px', marginBottom:'10px' }},
+      el('div', null,
+        el('h3', null, '📋 Сводная: ученики × задания ЕГЭ'),
+        el('p', { style:{ color:'var(--ink-2)', fontSize:'12px', marginTop:'4px' }},
+          'В ячейке — процент лучшей попытки ученика по этому заданию. Зелёный — от 80%, жёлтый — от 50%, красный — ниже.'))));
+
+  if(STATE.reportAttempts == null){
+    card.append(el('p', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'12px 0' }}, '⏳ Загружаем попытки…'));
+    return card;
+  }
+  if(!STATE.reportAttempts.length){
+    card.append(el('p', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'12px 0' }},
+      'Пока никто не делал попыток. Когда ученики начнут — появится таблица.'));
+    return card;
+  }
+
+  const matrix = buildReportMatrix(STATE.reportAttempts);
+  /* Показываем все 26 заданий ЕГЭ — даже те, по которым ещё нет попыток (=пустые столбцы). */
+  const tasksList = []; for(let n = 1; n <= 26; n++) tasksList.push(n);
+
+  /* Кнопка экспорта */
+  card.firstChild.append(el('button', {
+    class:'btn btn-teal',
+    onclick: () => exportReportCSV(matrix, tasksList)
+  }, '📥 Экспорт CSV (Excel)'));
+
+  /* Таблица: горизонтальный свайп при узком экране */
+  const scroll = el('div', { style:{ overflowX:'auto', overflowY:'hidden', WebkitOverflowScrolling:'touch', borderTop:'1px solid var(--border)' }});
+  const tbl = el('table', { class:'table report-table', style:{ minWidth:'1100px', fontSize:'12px' }});
+  const head = el('tr', null,
+    el('th', { style:{ position:'sticky', left:0, background:'var(--surface)', zIndex:2, minWidth:'160px' }}, 'Ученик'));
+  tasksList.forEach(n => head.append(
+    el('th', { style:{ textAlign:'center', padding:'8px 6px', minWidth:'48px' }}, '№' + n)));
+  head.append(
+    el('th', { style:{ textAlign:'center' }}, 'Сдано'),
+    el('th', { style:{ textAlign:'center' }}, 'Итого'));
+  tbl.append(el('thead', null, head));
+
+  const tbody = el('tbody', null);
+  const studs = STUDENTS.slice().sort((a, b) =>
+    (a.name || '').localeCompare(b.name || '', 'ru'));
+  studs.forEach(s => {
+    const tr = el('tr', null);
+    tr.append(el('td', {
+      style:{ position:'sticky', left:0, background:'var(--surface)', zIndex:1, fontWeight:'700', minWidth:'160px' }},
+      s.name || '—'));
+    const row = matrix.m[s.id] || {};
+    let sum = 0, done = 0;
+    tasksList.forEach(n => {
+      const c = row[n];
+      if(c){
+        const cl = reportCellColor(c.pct);
+        tr.append(el('td', {
+          style:{ background: cl.bg, color: cl.fg, textAlign:'center', padding:'6px', fontWeight:'700' },
+          title: 'Лучшая попытка: ' + c.score + ' / ' + c.max + ' (' + c.count + ' попыт.)'
+        }, c.pct + '%'));
+        sum += c.pct; done++;
+      } else {
+        tr.append(el('td', { style:{ textAlign:'center', color:'var(--ink-3)', padding:'6px' }}, '—'));
+      }
+    });
+    tr.append(el('td', { style:{ textAlign:'center', fontWeight:'700' }},
+      done + ' / ' + tasksList.length));
+    const avg = done ? Math.round(sum / done) : null;
+    const cl2 = reportCellColor(avg);
+    tr.append(el('td', {
+      style:{ background: cl2.bg, color: cl2.fg, textAlign:'center', padding:'6px', fontWeight:'700' }
+    }, avg != null ? avg + '%' : '—'));
+    tbody.append(tr);
+  });
+  tbl.append(tbody);
+  scroll.append(tbl);
+  card.append(scroll);
+  return card;
+}
+
+/* =======================================================================
    УЧИТЕЛЬ · АНАЛИТИКА
    ======================================================================= */
 function viewTeacherAnalytics(){
@@ -7997,6 +8182,11 @@ function viewTeacherAnalytics(){
     weakCard.append(wrapWeak);
   }
   wrap.append(weakCard);
+
+  /* Сводная таблица результатов по заданиям ЕГЭ + CSV-экспорт */
+  const report = reportSummaryCard();
+  if(report) wrap.append(report);
+
   return wrap;
 }
 
