@@ -1141,7 +1141,12 @@ function checkAuthErrorInUrl(){
   return friendly;
 }
 
+/* Флаг защиты от race: пока restoreSession() в работе, onAuthStateChange
+   не должен дёргать свой обречённый loadMyProfile. Иначе после успеха
+   restoreSession sigTimeout в onAuthStateChange выкинет на login. */
+let _AUTH_BOOTSTRAP_RUNNING = false;
 async function restoreSession(){
+  _AUTH_BOOTSTRAP_RUNNING = true;
   STATE.authLoading = true;
   render();   /* Показать «Загрузка…» сразу, до сетевых вызовов */
 
@@ -1153,6 +1158,7 @@ async function restoreSession(){
     STATE.authStage = 'idle';
     STATE.authError = urlErr;
     STATE.view = 'login';
+    _AUTH_BOOTSTRAP_RUNNING = false;
     render();
     return;
   }
@@ -1160,6 +1166,7 @@ async function restoreSession(){
   if(!sb){
     STATE.authLoading = false;
     STATE.authMode = 'demo';
+    _AUTH_BOOTSTRAP_RUNNING = false;
     render();
     return;
   }
@@ -1198,6 +1205,7 @@ async function restoreSession(){
         if(profile.role === 'teacher') STATE.view = 'teacher';
         else if(profile.role === 'curator') STATE.view = 'curator';
         else STATE.view = 'student';
+        _AUTH_BOOTSTRAP_RUNNING = false;
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
         Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance())]).then(() => {
@@ -1209,6 +1217,7 @@ async function restoreSession(){
       } else {
         STATE.authLoading = false;
         STATE.view = 'login';
+        _AUTH_BOOTSTRAP_RUNNING = false;
         console.warn('Не удалось загрузить профиль — показываем форму входа');
         render();
         return;
@@ -1217,6 +1226,7 @@ async function restoreSession(){
       console.warn('loadProfileDirect упал:', e.message);
       STATE.authLoading = false;
       STATE.view = 'login';
+      _AUTH_BOOTSTRAP_RUNNING = false;
       render();
       return;
     }
@@ -1269,6 +1279,7 @@ async function restoreSession(){
   } else {
     STATE.view = 'login';
   }
+  _AUTH_BOOTSTRAP_RUNNING = false;
   render();
 }
 
@@ -1280,6 +1291,12 @@ if(sb){
       /* Если профиль уже загружен (например, через restoreSession) — выходим, чтобы не гонять запросы */
       if(MY_PROFILE && (STATE.view === 'teacher' || STATE.view === 'curator' || STATE.view === 'student')){
         console.log('SIGNED_IN: профиль уже загружен, пропускаем повторный запрос');
+        return;
+      }
+      /* Если restoreSession ещё в работе — он сам разберётся с профилем,
+         не запускаем параллельный (и обречённый в РФ) auth.getUser. */
+      if(_AUTH_BOOTSTRAP_RUNNING){
+        console.log('SIGNED_IN: restoreSession ещё в работе, пропускаем');
         return;
       }
       STATE.authLoading = false;
