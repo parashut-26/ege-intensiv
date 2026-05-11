@@ -1530,13 +1530,14 @@ async function loadCuratorsFromDb(){
   /* Стираем мок-кураторов до запроса — чтобы «Кураторы (N)» не прыгало. */
   CURATORS = [];
   try {
-    const arr = await restRequest('GET', '/profiles?role=eq.curator&select=id,full_name,email,avatar_color,curator_perms&order=full_name.asc');
+    const arr = await restRequest('GET', '/profiles?role=eq.curator&select=id,full_name,email,avatar_color,avatar_url,curator_perms&order=full_name.asc');
     if(!Array.isArray(arr)){ return; }
     CURATORS = arr.map((p, i) => ({
       id: p.id,
       name: p.full_name || (p.email ? p.email.split('@')[0] : 'Куратор'),
       email: p.email || '',
       color: p.avatar_color || _AVATAR_COLORS[i % _AVATAR_COLORS.length],
+      avatarUrl: p.avatar_url || null,
       perms: { ..._DEFAULT_CURATOR_PERMS, ...(p.curator_perms || {}) },
       _db: true
     }));
@@ -2619,7 +2620,7 @@ async function loadStudentsFromDb(){
      В демо-режиме (без sb) сюда не заходим — моки остаются. */
   STUDENTS = [];
   try {
-    const arr = await restRequest('GET', '/profiles?role=eq.student&select=id,full_name,email,s_type,s_status,bee,avatar_color&order=full_name.asc');
+    const arr = await restRequest('GET', '/profiles?role=eq.student&select=id,full_name,email,s_type,s_status,bee,avatar_color,avatar_url&order=full_name.asc');
     if(!Array.isArray(arr)){ console.warn('students load: не массив'); return; }
     STUDENTS = arr.map((p, i) => ({
       id: p.id,
@@ -2631,6 +2632,7 @@ async function loadStudentsFromDb(){
       avg: null,        // вычислим позже из attempts
       progress: null,   // вычислим позже из attempts
       color: p.avatar_color || _AVATAR_COLORS[i % _AVATAR_COLORS.length],
+      avatarUrl: p.avatar_url || null,
       paid: false,      // отдельная таблица payments — подтянем позже
       paidAmount: 0
     }));
@@ -4538,12 +4540,88 @@ function logo(size){
   return node;
 }
 
-function avatarChip(name, color, size){
+function avatarChip(name, color, size, avatarUrl){
   const sz = size || 34;
-  const init = name.split(' ').map(s => s[0]).join('').slice(0,2).toUpperCase();
+  const init = (name || '?').split(' ').map(s => s[0]).join('').slice(0,2).toUpperCase();
+  if(avatarUrl){
+    /* Рисуем загруженный аватар. Кеш-бастер по url уже встроен — обновляется автоматически. */
+    return el('span', { class:'avatar-sm',
+      style:{
+        width: sz+'px', height: sz+'px',
+        backgroundImage: 'url("' + avatarUrl + '")',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundColor: color || '#8B5CF6'
+      },
+      'aria-label': name || 'аватар'
+    });
+  }
   return el('span', { class:'avatar-sm',
     style:{ background: color || '#8B5CF6', width:sz+'px', height:sz+'px', fontSize: Math.round(sz*0.36)+'px' }
   }, init);
+}
+
+/* Большой аватар + кнопка «изменить» поверх. Только для своего профиля. */
+function avatarUploader(avatarUrl, name, color){
+  const wrap = el('div', { style:{ position:'relative', width:'72px', height:'72px', flexShrink:0 }});
+  wrap.append(avatarChip(name, color, 72, avatarUrl));
+  /* «Камера» поверх — кнопка загрузки */
+  const fileInput = el('input', { type:'file', accept:'image/*', style:{ display:'none' },
+    onchange: async ev => {
+      const f = ev.target.files[0];
+      if(!f) return;
+      try {
+        showToast('⏳ Загружаю аватар…');
+        await uploadMyAvatar(f);
+        showToast('✓ Аватар обновлён');
+        render();
+      } catch(e){ showToast('⚠ ' + e.message); }
+      finally { ev.target.value = ''; }
+    }});
+  const btn = el('button', {
+    title:'Загрузить новый аватар',
+    style:{
+      position:'absolute', right:'-4px', bottom:'-4px',
+      width:'28px', height:'28px', borderRadius:'50%',
+      background:'var(--y)', border:'2px solid #fff',
+      cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center',
+      fontSize:'14px', padding:0, lineHeight:1, boxShadow:'0 1px 4px rgba(0,0,0,.15)'
+    },
+    onclick: () => fileInput.click()
+  }, '📸');
+  wrap.append(fileInput, btn);
+  return wrap;
+}
+
+/* Карточка «Мой профиль» с большим аватаром и кнопкой загрузки.
+   Используется в Сводке учителя и в списке учеников у куратора. */
+function myProfileAvatarCard(){
+  if(!MY_PROFILE) return null;
+  const name = MY_PROFILE.full_name || 'Профиль';
+  const color = MY_PROFILE.avatar_color || '#8B5CF6';
+  const card = el('div', { class:'card', style:{ marginBottom:'16px' }});
+  card.append(
+    el('div', { style:{ display:'flex', alignItems:'center', gap:'14px' }},
+      avatarUploader(MY_PROFILE.avatar_url || null, name, color),
+      el('div', { style:{ flex:1 }},
+        el('div', { style:{ fontWeight:'700', fontSize:'15px' }}, name),
+        el('div', { style:{ fontSize:'13px', color:'var(--ink-2)' }}, MY_PROFILE.email || '—'),
+        el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px' }},
+          'Нажми 📸 на аватаре, чтобы загрузить свой'))));
+  return card;
+}
+
+/* Загрузить новый аватар: Storage → PATCH profiles.avatar_url → обновить MY_PROFILE. */
+async function uploadMyAvatar(file){
+  if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
+  const ext = (file.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'jpg'])[1].toLowerCase();
+  /* Имя файла включает timestamp — чтобы кэш браузера обновился сразу */
+  const path = MY_PROFILE.id + '/avatar_' + Date.now() + '.' + ext;
+  await uploadToStorage('avatars', path, file, file.type || 'image/jpeg');
+  const publicUrl = SUPABASE_DIRECT_URL + '/storage/v1/object/public/avatars/' + path;
+  await restRequest('PATCH', '/profiles?id=eq.' + MY_PROFILE.id,
+    { avatar_url: publicUrl }, { prefer:'return=minimal' });
+  MY_PROFILE.avatar_url = publicUrl;
 }
 
 function chip(text, kind){
@@ -4916,9 +4994,15 @@ function shellHeader(role){
     right.append(el('span', { class:'bee-counter' }, '🐝 ', el('b', null, beeCount)));
   }
   if(role === 'teacher') right.append(el('span', { class:'bell' }, '🔔', el('span', { class:'dot' })));
+  /* Если у MY_PROFILE есть avatar_url — рисуем картинку, иначе инициалы */
+  const myAvatarUrl = MY_PROFILE && MY_PROFILE.avatar_url ? MY_PROFILE.avatar_url : null;
+  const headerAvatar = myAvatarUrl
+    ? el('span', { class:'avatar',
+        style:{ backgroundImage:'url("' + myAvatarUrl + '")', backgroundSize:'cover', backgroundPosition:'center' }})
+    : el('span', { class:'avatar' }, me.init);
   right.append(
     el('span', { class:'user-pill' },
-      el('span', { class:'avatar' }, me.init),
+      headerAvatar,
       el('span', { class:'who' },
         el('b', null, me.name),
         el('span', null, me.sub))));
@@ -6706,10 +6790,11 @@ function viewStudentProfile(){
   const realType = MY_PROFILE && MY_PROFILE.s_type ? MY_PROFILE.s_type : ME_STUDENT.type;
   const realStatus = MY_PROFILE && MY_PROFILE.s_status ? MY_PROFILE.s_status : 'active';
 
+  const myAvatarUrl = MY_PROFILE && MY_PROFILE.avatar_url ? MY_PROFILE.avatar_url : null;
   const main = el('div', { class:'card', style:{ marginBottom:'16px' }});
   main.append(
     el('div', { style:{ display:'flex', gap:'16px', alignItems:'center', marginBottom:'18px' }},
-      avatarChip(realName, ME_STUDENT.avatarColor, 56),
+      avatarUploader(myAvatarUrl, realName, ME_STUDENT.avatarColor),
       el('div', null,
         el('h2', null, realName),
         el('div', { style:{ color:'var(--ink-2)' }}, realEmail),
@@ -6807,6 +6892,10 @@ function viewTeacherOverview(){
       el('button', { class:'btn btn-secondary',
         onclick: () => showToast('Откроется экспорт в Excel/CSV')
       }, '⬇ Экспорт')));
+
+  /* Аватар и профиль учителя */
+  const avCard = myProfileAvatarCard();
+  if(avCard) wrap.append(avCard);
 
   /* Привязка Telegram — у учителя своя карточка */
   const tgCard = telegramLinkCard();
@@ -7378,7 +7467,7 @@ function studentRow(s){
   return el('tr', null,
     el('td', null,
       el('div', { style:{ display:'flex', gap:'10px', alignItems:'center' }},
-        avatarChip(s.name, s.color),
+        avatarChip(s.name, s.color, 34, s.avatarUrl),
         el('div', null,
           el('div', { style:{ fontWeight:'700' }}, s.name),
           el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, s.email)))),
@@ -7522,7 +7611,7 @@ function modalStudentDetail(){
 
   const head = el('div', { class:'modal-head' },
     el('div', { style:{ display:'flex', alignItems:'center', gap:'14px' }},
-      avatarChip(s.name, s.color, 56),
+      avatarChip(s.name, s.color, 56, s.avatarUrl),
       el('div', null,
         el('h2', { style:{ marginBottom:'2px' }}, s.name),
         el('div', { style:{ color:'var(--ink-2)', fontSize:'13px' }}, s.email))),
@@ -10391,6 +10480,9 @@ function viewCuratorStudents(){
     el('h1', null, '👥 Ученики'),
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'20px' }},
       'Вы видите прогресс всех учеников. Можете писать им в чате и помечать ответы как «помогло».'));
+  /* Аватар куратора */
+  const avCard = myProfileAvatarCard();
+  if(avCard) wrap.append(avCard);
   /* Привязка Telegram — куратору тоже */
   const tgCard = telegramLinkCard();
   if(tgCard) wrap.append(tgCard);
