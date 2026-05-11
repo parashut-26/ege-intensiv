@@ -107,22 +107,26 @@ serve(async (req) => {
       .is('webinar_reminded_at', null);
     if (e1) throw e1;
 
+    console.log('[CRON] webinars без reminded_at:', (webinars || []).length);
     for (const w of (webinars || []) as any[]) {
       const day = w.day;
-      if (!day || !day.day_date || !w.start_at) continue;
-      // Соберём timestamp начала вебинара (предположим МСК = UTC+3)
-      // start_at — это TIME (например "13:00:00")
+      if (!day || !day.day_date || !w.start_at){
+        console.log('[CRON] webinar skip — нет day/start_at', { id: w.id, day });
+        continue;
+      }
       const startTs = new Date(day.day_date + 'T' + w.start_at + '+03:00').getTime();
       const now = Date.now();
-      const delta = startTs - now;  // ms до старта
-      if (delta < 55 * 60 * 1000 || delta > 65 * 60 * 1000) continue;
-      // В окне 55-65 мин до старта — шлём
+      const deltaMin = (startTs - now) / 60000;
+      console.log('[CRON] webinar', { id: w.id, day_date: day.day_date, start_at: w.start_at, deltaMin });
+      if (deltaMin < 55 || deltaMin > 65) continue;
       const ids = await recipientsForIntensive(day.intensive_id, false);
+      console.log('[CRON] webinar получателей:', ids.length, 'intensive_id:', day.intensive_id);
       const text = '🎙 <b>Вебинар через час!</b>\n\n' +
                    '📅 ' + day.day_date + ', начало в ' + w.start_at.slice(0, 5) + '\n' +
                    '📚 ' + (w.title || day.title || 'Урок интенсива');
       for (const tgId of ids) {
-        await sendTg(tgId, text, 'https://zebrus.online');
+        const ok = await sendTg(tgId, text, 'https://zebrus.online');
+        console.log('[CRON] sendTg', tgId, ok ? 'OK' : 'FAIL');
       }
       await sb.from('day_activities').update({ webinar_reminded_at: nowIso }).eq('id', w.id);
       result.webinars_notified++;
