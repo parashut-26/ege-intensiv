@@ -204,17 +204,34 @@ body.no-anim .fade-in{animation:none}
 .my-task-tile .mtt-n{font-size:12px;font-weight:700;opacity:.75;letter-spacing:.04em;text-transform:uppercase}
 .my-task-tile .mtt-pct{font-size:22px;font-weight:800;margin:2px 0}
 .my-task-tile .mtt-meta{font-size:10px;opacity:.7}
-/* Splash «Краш-тест 2026» — фирменная картинка один раз в день при входе */
-.splash-car-overlay{position:fixed;inset:0;z-index:9999;background:#0F0B1F;display:flex;align-items:center;justify-content:center;overflow:hidden;animation:splashFadeOut .35s ease-in 1.35s forwards;pointer-events:none}
-.splash-image{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain;display:block;animation:splashZoomIn .6s ease-out both}
-@keyframes splashZoomIn{
-  from { opacity:0; transform:scale(1.05) }
-  to   { opacity:1; transform:scale(1) }
+/* Splash «Краш-тест 2026» — машина едет по жёлтому занавесу,
+   потом «тянет» его за собой вправо, открывая кабинет.
+   Тайминги: 0-25% — занавес проявляется, 25-67% — машина едет к центру,
+   67-100% — машина и занавес синхронно уезжают вправо. */
+.splash-car-overlay{position:fixed;inset:0;z-index:9999;overflow:hidden;pointer-events:none}
+.splash-curtain{position:absolute;inset:0;background:linear-gradient(180deg,#FEF3C7 0%,#FDE68A 70%,#FCD34D 100%);animation:splashCurtainShow 2.1s cubic-bezier(.4,.05,.5,1) forwards;will-change:transform,opacity}
+.splash-banner{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center}
+.splash-bee{font-size:80px;display:block;animation:splashBeeBounce 1.6s ease-in-out infinite}
+.splash-name{font-size:48px;font-weight:800;color:#1F2937;letter-spacing:.02em;margin-top:6px}
+.splash-sub{font-size:15px;font-weight:700;color:#854D0E;margin-top:8px;text-transform:uppercase;letter-spacing:.12em}
+.splash-running-car{position:absolute;bottom:14vh;left:-340px;width:300px;height:97px;z-index:2;animation:splashCarRun 2.1s linear forwards;will-change:left}
+.splash-running-car svg{width:100%;height:100%;display:block;animation:splashShake .08s linear infinite}
+.splash-running-car .splash-smoke{animation:splashSmoke .35s ease-out infinite}
+@keyframes splashCurtainShow{
+  0%   { opacity:0; transform:translateX(0) }
+  20%  { opacity:1; transform:translateX(0) }
+  67%  { opacity:1; transform:translateX(0) }
+  100% { opacity:1; transform:translateX(calc(100vw + 200px)) }
 }
-@keyframes splashFadeOut{
-  from { opacity:1 }
-  to   { opacity:0; visibility:hidden }
+@keyframes splashCarRun{
+  0%   { left:-340px }
+  20%  { left:-340px }
+  67%  { left:calc(50vw - 150px) }
+  100% { left:calc(100vw + 200px) }
 }
+@keyframes splashShake{ 0%,100%{transform:translateY(0)} 50%{transform:translateY(-1px)} }
+@keyframes splashSmoke{ 0%{opacity:1;transform:translate(0,0) scale(1)} 100%{opacity:0;transform:translate(-10px,-4px) scale(1.4)} }
+@keyframes splashBeeBounce{ 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px) rotate(6deg)} }
 
 /* ============ ПРОГРЕСС ============ */
 .bar{height:8px;background:var(--p-soft);border-radius:999px;overflow:hidden}
@@ -4154,12 +4171,62 @@ function shellTabs(role, tabs, activeKey, onPick){
    SPLASH «КРАШ-ТЕСТ» — машина едет один раз в день при входе ученика
    ======================================================================= */
 function splashCar(){
-  /* Используем PNG-арт «КРАШ-ТЕСТ 2026» — он уже содержит все нужные
-     элементы (фон, машина, значок, надпись), просто показываем во
-     весь экран с плавным появлением + общий fade-out от .splash-car-overlay. */
-  return el('div', { class: 'splash-car-overlay splash-with-image' },
-    el('img', { src: 'splash-car.png?v=1', alt: 'Краш-тест 2026 — ЗебРус',
-      class: 'splash-image' }));
+  /* Жёлтый занавес с надписью + SVG-машина едет по нему слева направо.
+     В конце машина и занавес синхронно уезжают вправо — иллюзия, что
+     машина «тянет» за собой лист с плакатом, открывая кабинет. */
+  const car = el('div', { class: 'splash-running-car' });
+  car.innerHTML = ''
+    + '<svg viewBox="0 0 340 110" xmlns="http://www.w3.org/2000/svg">'
+    + '<ellipse cx="170" cy="102" rx="155" ry="4" fill="rgba(0,0,0,.32)"/>'
+    + '<g class="splash-smoke">'
+    +   '<circle cx="14" cy="72" r="9"  fill="#fff" opacity=".85"/>'
+    +   '<circle cx="2"  cy="64" r="6"  fill="#fff" opacity=".7"/>'
+    +   '<circle cx="20" cy="58" r="5"  fill="#fff" opacity=".5"/>'
+    + '</g>'
+    /* GT-кузов: длинный нос справа, короткая корма слева */
+    + '<path d="M 25 86 Q 24 72 40 66 Q 60 60 80 58 Q 140 52 200 50 Q 260 50 300 56 Q 326 62 330 78 L 330 90 L 25 90 Z" '
+    +   'fill="#FCD34D" stroke="#111827" stroke-width="2.2" stroke-linejoin="round"/>'
+    + '<path d="M 95 60 Q 110 36 145 32 Q 175 30 200 36 Q 210 38 215 50 Z" '
+    +   'fill="#FCD34D" stroke="#111827" stroke-width="2.2" stroke-linejoin="round"/>'
+    + '<path d="M 195 36 Q 210 40 215 50 L 195 50 Z" fill="#1F2937" opacity=".85"/>'
+    + '<path d="M 96 58 Q 108 38 130 33 L 138 58 Z" fill="#1F2937" opacity=".85"/>'
+    + '<path d="M 142 33 Q 170 31 192 36 L 192 52 L 142 52 Z" fill="#60A5FA" opacity=".55"/>'
+    + '<path d="M 35 76 Q 100 66 200 62 Q 270 62 305 68" stroke="#F59E0B" stroke-width="2.2" fill="none" stroke-linecap="round"/>'
+    + '<rect x="92" y="68" width="44" height="6" fill="#1F2937" opacity=".75" rx="1"/>'
+    + '<rect x="153" y="62" width="24" height="14" fill="#fff" stroke="#111827" stroke-width="1.5" rx="2"/>'
+    + '<text x="165" y="73" font-size="12" font-weight="900" fill="#111827" text-anchor="middle" font-family="system-ui,sans-serif">27</text>'
+    + '<path d="M 50 86 Q 70 70 92 86" stroke="#111827" stroke-width="1.5" fill="none"/>'
+    + '<path d="M 213 86 Q 235 68 258 86" stroke="#111827" stroke-width="1.5" fill="none"/>'
+    + '<path d="M 286 60 Q 305 62 318 68 L 318 71 Q 305 66 286 64 Z" fill="#FEF08A" stroke="#111827" stroke-width="1.2"/>'
+    + '<path d="M 288 67 L 316 73" stroke="#F59E0B" stroke-width="1.5" stroke-linecap="round"/>'
+    + '<rect x="286" y="80" width="32" height="4" fill="#1F2937" opacity=".8" rx="1"/>'
+    + '<rect x="25" y="68" width="12" height="3" fill="#EF4444" stroke="#111827" stroke-width=".8" rx="1"/>'
+    + '<g>'
+    +   '<circle cx="70" cy="90" r="18" fill="#0F172A"/>'
+    +   '<circle cx="70" cy="90" r="13" fill="#E5E7EB"/>'
+    +   '<rect x="68" y="77" width="4" height="26" fill="#0F172A"/>'
+    +   '<rect x="57" y="88" width="26" height="4" fill="#0F172A"/>'
+    +   '<g transform="rotate(45 70 90)"><rect x="68" y="77" width="4" height="26" fill="#0F172A"/></g>'
+    +   '<g transform="rotate(-45 70 90)"><rect x="68" y="77" width="4" height="26" fill="#0F172A"/></g>'
+    +   '<circle cx="70" cy="90" r="3" fill="#9CA3AF"/>'
+    + '</g>'
+    + '<g>'
+    +   '<circle cx="235" cy="90" r="18" fill="#0F172A"/>'
+    +   '<circle cx="235" cy="90" r="13" fill="#E5E7EB"/>'
+    +   '<rect x="233" y="77" width="4" height="26" fill="#0F172A"/>'
+    +   '<rect x="222" y="88" width="26" height="4" fill="#0F172A"/>'
+    +   '<g transform="rotate(45 235 90)"><rect x="233" y="77" width="4" height="26" fill="#0F172A"/></g>'
+    +   '<g transform="rotate(-45 235 90)"><rect x="233" y="77" width="4" height="26" fill="#0F172A"/></g>'
+    +   '<circle cx="235" cy="90" r="3" fill="#9CA3AF"/>'
+    + '</g>'
+    + '</svg>';
+  return el('div', { class: 'splash-car-overlay' },
+    el('div', { class: 'splash-curtain' },
+      el('div', { class: 'splash-banner' },
+        el('span', { class: 'splash-bee' }, '🐝'),
+        el('div', { class: 'splash-name' }, 'ЗебРус'),
+        el('div', { class: 'splash-sub' }, 'Краш-тест 2026 — поехали!'))),
+    car);
 }
 function _unused_splashSvgLegacy(){ /* зарезервировано, не используется */
   return null;
@@ -9817,7 +9884,8 @@ function _renderNow(){
       STATE.studentSplashChecked = true;
       if(shouldShowSplashToday()){
         STATE.studentSplashActive = true;
-        setTimeout(() => { STATE.studentSplashActive = false; render(); }, 1700);
+        /* 1.25с пауза + 0.7с wipe-out + 150мс запас = 2100мс */
+        setTimeout(() => { STATE.studentSplashActive = false; render(); }, 2100);
       }
     }
     const tabs = [
