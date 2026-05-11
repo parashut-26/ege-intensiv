@@ -218,14 +218,12 @@ body.no-anim .fade-in{animation:none}
 .splash-running-car svg{width:100%;height:100%;display:block;animation:splashShake .08s linear infinite}
 .splash-running-car .splash-smoke{animation:splashSmoke .35s ease-out infinite}
 @keyframes splashCurtainShow{
-  0%   { opacity:0; transform:translateX(0) }
-  20%  { opacity:1; transform:translateX(0) }
-  67%  { opacity:1; transform:translateX(0) }
-  100% { opacity:1; transform:translateX(calc(100vw + 200px)) }
+  0%,67% { transform:translateX(0) }
+  100%   { transform:translateX(calc(100vw + 200px)) }
 }
 @keyframes splashCarRun{
   0%   { left:-340px }
-  20%  { left:-340px }
+  10%  { left:-340px }
   67%  { left:calc(50vw - 150px) }
   100% { left:calc(100vw + 200px) }
 }
