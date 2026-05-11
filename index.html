@@ -4090,20 +4090,27 @@ function telegramLinkCard(){
 async function loadReadinessCheck(){
   if(!sb || STATE.readinessLoading) return;
   STATE.readinessLoading = true;
-  try {
-    const tgArr   = await restRequest('GET', '/profiles?role=eq.student&telegram_id=not.is.null&select=id');
-    const webArr  = await restRequest('GET', '/day_activities?kind=eq.webinar&select=id');
-    const walkArr = await restRequest('GET', '/walk_materials?select=id');
-    STATE.readiness = {
-      students: STUDENTS.length,
-      tgCount:  Array.isArray(tgArr)   ? tgArr.length   : 0,
-      webCount: Array.isArray(webArr)  ? webArr.length  : 0,
-      walkCount:Array.isArray(walkArr) ? walkArr.length : 0,
-    };
-  } catch(e){
-    console.warn('readiness check failed:', e.message);
-    STATE.readiness = null;
-  }
+  /* Каждый запрос отдельно — PHP-прокси иногда возвращает 502 на одни
+     запросы, а другие пропускает. Не позволяем одному упавшему
+     обнулить всю карточку. */
+  const safeGet = async (path, def) => {
+    try {
+      const r = await restRequest('GET', path);
+      return Array.isArray(r) ? r : def;
+    } catch(e){
+      console.warn('readiness: ' + path + ' →', e.message);
+      return null;  /* null = «не смогли посчитать» */
+    }
+  };
+  const tgArr   = await safeGet('/profiles?role=eq.student&telegram_id=not.is.null&select=id', []);
+  const webArr  = await safeGet('/day_activities?kind=eq.webinar&select=id', []);
+  const walkArr = await safeGet('/walk_materials?select=id', []);
+  STATE.readiness = {
+    students:  STUDENTS.length,
+    tgCount:   tgArr   === null ? null : tgArr.length,
+    webCount:  webArr  === null ? null : webArr.length,
+    walkCount: walkArr === null ? null : walkArr.length,
+  };
   STATE.readinessLoading = false;
   render();
 }
@@ -4121,6 +4128,7 @@ function readinessCard(){
   /* Чек-лист релевантен только если интенсив ещё не начался или только что начался */
   if(afterEnd != null && afterEnd > 1) return null;
 
+  /* null = запрос упал (прокси 502 или сеть). Показываем «?» вместо числа. */
   const items = [
     {
       label: 'Учеников записано',
@@ -4130,27 +4138,33 @@ function readinessCard(){
     },
     {
       label: 'Привязали Telegram',
-      value: r.tgCount + ' из ' + r.students,
-      ok:   r.students > 0 && r.tgCount === r.students,
-      warn: r.tgCount > 0 && r.tgCount < r.students,
-      tip:  r.tgCount < r.students
-        ? 'Напомни ученикам нажать «🤖 Привязать Telegram» в Профиле — иначе уведомлений о вебинарах не получат'
-        : null
+      value: r.tgCount == null ? '?' : (r.tgCount + ' из ' + r.students),
+      ok:   r.tgCount != null && r.students > 0 && r.tgCount === r.students,
+      warn: r.tgCount != null && r.tgCount > 0 && r.tgCount < r.students,
+      tip:  r.tgCount == null
+        ? 'Не удалось посчитать — попробуй ↻ ещё раз'
+        : (r.tgCount < r.students
+          ? 'Напомни ученикам нажать «🤖 Привязать Telegram» в Профиле — иначе уведомлений о вебинарах не получат'
+          : null)
     },
     {
       label: 'Вебинары настроены',
-      value: r.webCount + ' из 6',
-      ok:   r.webCount >= 6,
-      tip:  r.webCount < 6 ? 'Не все вебинары в day_activities — проверь расписание' : null
+      value: r.webCount == null ? '?' : (r.webCount + ' из 6'),
+      ok:   r.webCount != null && r.webCount >= 6,
+      tip:  r.webCount == null
+        ? 'Не удалось посчитать — попробуй ↻ ещё раз'
+        : (r.webCount < 6 ? 'Не все вебинары в day_activities — проверь расписание' : null)
     },
     {
       label: 'Материалов в прогулочных днях',
-      value: r.walkCount,
-      ok:   r.walkCount > 0,
+      value: r.walkCount == null ? '?' : r.walkCount,
+      ok:   r.walkCount != null && r.walkCount > 0,
       warn: r.walkCount === 0,
-      tip:  r.walkCount === 0
-        ? 'Загрузи подкасты/картинки/тексты в дни прогулок — это контент между интенсивами'
-        : null
+      tip:  r.walkCount == null
+        ? 'Не удалось посчитать — попробуй ↻ ещё раз'
+        : (r.walkCount === 0
+          ? 'Загрузи подкасты/картинки/тексты в дни прогулок — это контент между интенсивами'
+          : null)
     },
   ];
 
