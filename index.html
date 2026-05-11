@@ -1202,33 +1202,35 @@ async function restoreSession(){
     }
   }
 
-  /* Защита от зависания: если Supabase не отвечает за 5 секунд — показываем экран входа */
+  /* Защита от зависания: если REST не отвечает за 3 секунды — показываем
+     экран входа. В РФ /auth/v1 заблокирован, поэтому идём СРАЗУ через
+     REST по сохранённому токену, минуя обречённый auth.getUser. */
   const timeoutId = setTimeout(() => {
     if(STATE.authLoading){
-      console.warn('Загрузка профиля заняла >5с — показываем вход');
+      console.warn('Загрузка профиля заняла >3с — показываем вход');
       STATE.authLoading = false;
       STATE.view = 'login';
       render();
     }
-  }, 5000);
+  }, 3000);
 
-  /* Если auth.getUser завис — пробуем JWT decode + REST из localStorage */
   let profile = null;
-  try {
-    profile = await loadMyProfile();
-  } catch(e) {
-    console.warn('loadMyProfile упал, пробуем JWT-обход…', e.message);
+  /* Шаг 1 (быстрый): JWT из localStorage → REST /profiles */
+  const token = getAccessToken();
+  if(token){
+    try {
+      console.log('→ Быстрый путь: REST по сохранённому токену');
+      profile = await loadProfileDirect(token);
+    } catch(e){
+      console.warn('REST по токену упал:', e.message);
+    }
   }
+  /* Шаг 2 (фоллбэк): auth.getUser — если первого пути нет/упал */
   if(!profile){
-    /* Fallback: вытаскиваем токен из localStorage и идём через REST */
-    const token = getAccessToken();
-    if(token){
-      try {
-        console.log('→ Fallback: загружаем профиль через REST по сохранённому токену');
-        profile = await loadProfileDirect(token);
-      } catch(e){
-        console.warn('Fallback тоже не удался:', e.message);
-      }
+    try {
+      profile = await loadMyProfile();
+    } catch(e) {
+      console.warn('loadMyProfile тоже упал:', e.message);
     }
   }
   clearTimeout(timeoutId);
