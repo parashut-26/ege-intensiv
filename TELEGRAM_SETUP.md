@@ -7,7 +7,12 @@
 - Кнопка «🤖 Привязать Telegram» во фронте — уже в `index.html`
 - Триггер «новое сообщение в ЛС» → TG — уже в `index.html`
 
-Бот: **@ZRMoveBot**. Токен есть.
+Бот: **@ZRMoveBot**. Токен берётся у @BotFather в Telegram — нигде в этом репозитории не хранится.
+
+> ⚠ Никогда не пиши токен в файл, коммит или сообщение чата — GitHub
+> Secret Scanning ловит такие токены и принудительно их инвалидирует.
+> Токен живёт только в **Supabase Edge Function secrets** и в одной
+> локальной curl-команде, которую ты выполняешь руками.
 
 ---
 
@@ -23,7 +28,7 @@ Supabase Dashboard → Project Settings → **Edge Functions** → **Manage secr
 
 | Имя | Значение |
 |---|---|
-| `TELEGRAM_BOT_TOKEN` | `7813524187:AAG96ICwtP2wmMOTKmN05WmWrV_YXKeWd_U` |
+| `TELEGRAM_BOT_TOKEN` | свежий токен от @BotFather (формат `1234567890:AAH…`) |
 | `TELEGRAM_WEBHOOK_SECRET` | `zr_wh_8f4c9b2a1e6d5f3a_v1` |
 | (уже есть) `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | — берутся автоматически |
 
@@ -49,10 +54,17 @@ Supabase Dashboard → **Edge Functions** → **Create a new function**.
 
 ## Шаг 4. Зарегистрировать webhook у Telegram
 
-В Терминале выполни одной строкой:
+В Терминале одной строкой. Сначала положи токен во временную переменную окружения (живёт только в текущей сессии Терминала — не в файлах):
 
 ```bash
-curl -s -X POST "https://api.telegram.org/bot7813524187:AAG96ICwtP2wmMOTKmN05WmWrV_YXKeWd_U/setWebhook" \
+read -s TG_TOKEN && export TG_TOKEN
+# ↑ вставь токен от BotFather, нажми Enter (символы НЕ отображаются — это норма)
+```
+
+Регистрация:
+
+```bash
+curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/setWebhook" \
   -H "Content-Type: application/json" \
   -d '{
     "url": "https://hyczawwuehrqsqqosgub.supabase.co/functions/v1/tg-webhook",
@@ -66,7 +78,7 @@ curl -s -X POST "https://api.telegram.org/bot7813524187:AAG96ICwtP2wmMOTKmN05WmW
 Проверка статуса:
 
 ```bash
-curl -s "https://api.telegram.org/bot7813524187:AAG96ICwtP2wmMOTKmN05WmWrV_YXKeWd_U/getWebhookInfo"
+curl -s "https://api.telegram.org/bot$TG_TOKEN/getWebhookInfo"
 ```
 
 Должно показать `url: https://hyczawwuehrqsqqosgub...` и `pending_update_count: 0`.
@@ -78,14 +90,16 @@ curl -s "https://api.telegram.org/bot7813524187:AAG96ICwtP2wmMOTKmN05WmWrV_YXKeW
 3. В кабинете через 5-10 секунд карточка изменится на «✅ Telegram подключён».
 4. Открой ЛС с учителем (или попроси Ольгу написать) → должно прилететь уведомление в Telegram с кнопкой «Открыть».
 
-## Шаг 6. Сменить токен бота (после теста!)
+## Шаг 6. Безопасность токена
 
-Токен бота засветился в чате с AI. Когда убедишься что всё работает:
+Токен живёт **только в Supabase Edge Function secrets**. Никогда не
+коммить его в репо, не пиши в этом файле, не вставляй в чаты с AI.
+GitHub Secret Scanning ловит формат `\d+:[A-Za-z0-9_-]{30,}` и
+автоматически инвалидирует токен — придётся ротировать.
 
-1. Telegram → @BotFather → `/revoke` → выбрать @ZRMoveBot → подтвердить.
-2. Получить новый токен.
-3. Обновить `TELEGRAM_BOT_TOKEN` в Supabase Secrets.
-4. **Перерегистрировать webhook** командой из шага 4, подставив новый токен в URL.
+Если случилось — Telegram → @BotFather → `/revoke` → новый токен →
+обновить `TELEGRAM_BOT_TOKEN` в Supabase Secrets → перерегистрировать
+webhook командой из шага 4 (с новым токеном в `$TG_TOKEN`).
 
 ---
 
