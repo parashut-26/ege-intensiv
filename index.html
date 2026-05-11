@@ -152,6 +152,8 @@ body.no-anim .fade-in{animation:none}
 .card-teal{background:var(--teal-soft);border:1px solid #5EEAD4}
 
 .kpi{display:flex;flex-direction:column;gap:10px}
+.kpi-clickable{transition:transform .12s,box-shadow .12s}
+.kpi-clickable:hover{transform:translateY(-2px);box-shadow:0 6px 16px rgba(0,0,0,.08)}
 .kpi .ic-box{width:42px;height:42px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;font-size:20px}
 .kpi .label{font-size:11px;text-transform:uppercase;color:var(--ink-3);letter-spacing:.08em;font-weight:700}
 .kpi .value{font-size:32px;font-weight:800;line-height:1;letter-spacing:-.02em}
@@ -5197,11 +5199,22 @@ function viewStudentHome(){
                   useStats.avg >= 60 ? 'неплохо' : 'надо подтянуть';
   const streakHint = useStats.streak === 0 ? 'начни сегодня' :
                      useStats.streak === 1 ? 'день активна' : 'подряд активна';
+  /* Helper: проскроллить к секции по id с плавным анимированием */
+  const scrollToSection = (id) => {
+    setTimeout(() => {
+      const elx = document.getElementById(id);
+      if(elx) elx.scrollIntoView({ behavior:'smooth', block:'start' });
+    }, 50);
+  };
   kpi.append(
-    kpiCard('Пчёлки', realBee, 'из ' + ME_STUDENT.beeMax + ' возможных', '🐝', 'var(--y-soft)'),
-    kpiCard('Заданий пройдено', useStats.done, 'из ' + (useStats.total || 26), '✅', 'var(--green-soft)'),
-    kpiCard('Средний балл', avgLabel, avgHint, '🎯', 'var(--p-soft)'),
-    kpiCard('Серия дней', useStats.streak, streakHint, '🔥', '#FFEDD5'));
+    kpiCard('Пчёлки', realBee, 'из ' + ME_STUDENT.beeMax + ' возможных', '🐝', 'var(--y-soft)',
+      () => scrollToSection('student-activity-section')),
+    kpiCard('Заданий пройдено', useStats.done, 'из ' + (useStats.total || 26), '✅', 'var(--green-soft)',
+      () => { STATE.studentTab = 'theory'; render(); }),
+    kpiCard('Средний балл', avgLabel, avgHint, '🎯', 'var(--p-soft)',
+      () => scrollToSection('student-myreport-section')),
+    kpiCard('Серия дней', useStats.streak, streakHint, '🔥', '#FFEDD5',
+      () => { STATE.studentTab = 'days'; render(); }));
 
   const map = el('div', { class:'card' });
   map.append(
@@ -5223,7 +5236,7 @@ function viewStudentHome(){
     el('div', { class:'ach-grid' },
       ACHIEVEMENTS.slice(0, 5).map(a => achievementCard(a))));
 
-  const activity = el('div', { class:'card' });
+  const activity = el('div', { class:'card', id:'student-activity-section' });
   activity.append(el('h2', { style:{ marginBottom:'10px' }}, '📈 Активность'));
   /* Источник правды — bee_transactions. Если БД ещё не подгрузилась или
      таблица пустая, показываем placeholder вместо мок-данных. */
@@ -5271,8 +5284,13 @@ function viewStudentHome(){
   return wrap;
 }
 
-function kpiCard(label, value, hint, emoji, bg){
-  return el('div', { class:'card kpi' },
+function kpiCard(label, value, hint, emoji, bg, onClick){
+  return el('div', {
+    class: 'card kpi' + (onClick ? ' kpi-clickable' : ''),
+    style: onClick ? { cursor:'pointer' } : null,
+    onclick: onClick || null,
+    title: onClick ? 'Кликни — провалишься в раздел' : null
+  },
     el('div', { class:'ic-box', style:{ background: bg }}, emoji),
     el('div', { class:'label' }, label),
     el('div', { class:'value' }, String(value)),
@@ -5285,6 +5303,17 @@ function achievementCard(a){
     el('div', { class:'nm' }, a.name),
     el('div', { class:'desc' }, a.desc),
     el('div', { class:'pts' }, a.unlocked ? '✓ +' + a.pts + ' 🐝' : 'до +' + a.pts + ' 🐝'));
+}
+
+/* Helper: перейти на «Дни интенсива» и прокрутить к конкретному блоку дня */
+function goToDay(dayId){
+  STATE.studentTab = 'days';
+  render();
+  /* После render() блок появится в DOM, через RAF можно скроллить */
+  setTimeout(() => {
+    const elx = document.querySelector('[data-day-anchor="' + dayId + '"]');
+    if(elx) elx.scrollIntoView({ behavior:'smooth', block:'start' });
+  }, 80);
 }
 
 function mapDayCard(d){
@@ -5301,7 +5330,11 @@ function mapDayCard(d){
         el('div', { class:'small' }, d.subtitle)));
   }
   if(d.kind === 'exam'){
-    return el('div', { class:'day-card exam' },
+    return el('div', {
+      class:'day-card exam',
+      style:{ cursor:'pointer' },
+      onclick: () => goToDay(d.id)
+    },
       el('div', { style:{ fontSize:'30px' }}, '🏁'),
       el('div', null,
         el('div', { class:'meta', style:{ color:'rgba(255,255,255,.85)' }}, d.date),
@@ -5312,7 +5345,8 @@ function mapDayCard(d){
   const isToday = realToday ? d.id === realToday.id : false;
   return el('div', {
     class: 'day-card ' + (isToday ? 'today' : 'work'),
-    onclick: () => { STATE.studentTab='days'; render(); }
+    style:{ cursor:'pointer' },
+    onclick: () => goToDay(d.id)
   },
     isToday ? el('div', { class:'badge-today' }, 'сегодня') : el('div', { class:'meta' }, d.date),
     el('div', { class:'ord' }, d.ord),
@@ -5344,7 +5378,8 @@ function dayBlock(d){
   const dDate = parseRusDate(d.date);
   const t0 = new Date(); t0.setHours(0,0,0,0);
   const locked = dDate ? dDate.getTime() > t0.getTime() : false;
-  const card = el('div', { class:'card', style:{ marginBottom:'16px', opacity: locked ? '.65' : '1' }});
+  const card = el('div', { class:'card', 'data-day-anchor': String(d.id),
+    style:{ marginBottom:'16px', opacity: locked ? '.65' : '1' }});
   card.append(
     el('div', { style:{ marginBottom:'14px' }},
       el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'4px' }},
@@ -5468,7 +5503,8 @@ function taskAction(t, locked){
 
 function walkBlock(d){
   const isTeacher = STATE.view === 'teacher' || STATE.view === 'curator';
-  return el('div', { class:'card', style:{ marginBottom:'16px', background:'#FCE7F3', border:'1px solid #FBCFE8' }},
+  return el('div', { class:'card', 'data-day-anchor': String(d.id),
+    style:{ marginBottom:'16px', background:'#FCE7F3', border:'1px solid #FBCFE8' }},
     el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }},
       el('div', { style:{ fontSize:'40px' }}, d.emoji || '🌸'),
       el('div', { style:{ flex:1, minWidth:'200px' }},
@@ -5482,7 +5518,7 @@ function walkBlock(d){
 }
 
 function examBlock(){
-  return el('div', { class:'card card-orange',
+  return el('div', { class:'card card-orange', 'data-day-anchor':'exam',
     style:{ marginBottom:'16px', textAlign:'center', padding:'30px' }},
     el('div', { style:{ fontSize:'40px' }}, '🏁'),
     el('h2', { style:{ color:'var(--ink)', marginTop:'8px', fontSize:'24px' }}, 'ЭКЗАМЕН — 4 июня'),
@@ -6819,11 +6855,17 @@ function viewTeacherOverview(){
   kpiRow.append(
     kpiCard('Учеников', total,
       STUDENTS.filter(s => s.type === 'свой').length + ' своих · ' + STUDENTS.filter(s => s.type === 'гость').length + ' гостей',
-      '👥', 'var(--p-soft)'),
+      '👥', 'var(--p-soft)',
+      () => { STATE.teacherTab = 'students'; render(); }),
     kpiCard('Активны сегодня', realActiveToday,
-      total ? '↑ ' + Math.round(realActiveToday / total * 100) + '% от группы' : '—', '✅', 'var(--green-soft)'),
-    kpiCard('Средний балл', realAvg, gs ? realAttempts + ' попыток всего' : 'нет данных', '🎯', '#FFEDD5'),
-    el('div', { class:'card kpi card-pink' },
+      total ? '↑ ' + Math.round(realActiveToday / total * 100) + '% от группы' : '—', '✅', 'var(--green-soft)',
+      () => { STATE.teacherTab = 'attendance'; render(); }),
+    kpiCard('Средний балл', realAvg, gs ? realAttempts + ' попыток всего' : 'нет данных', '🎯', '#FFEDD5',
+      () => { STATE.teacherTab = 'analytics'; render(); }),
+    el('div', { class:'card kpi card-pink kpi-clickable', style:{ cursor:'pointer' },
+      onclick: () => { STATE.teacherTab = 'students'; STATE.studentsFilter = 'inactive-week'; render(); },
+      title:'Кликни — откроется вкладка «Ученики» с фильтром «Без активности»'
+    },
       el('div', { class:'ic-box', style:{ background:'rgba(239,68,68,.18)' }}, '⚠️'),
       el('div', { class:'label' }, 'Не приступали'),
       el('div', { class:'value' }, notStartedReal),
@@ -9333,7 +9375,7 @@ function myReportCard(){
   if(STATE.myReport === undefined){
     setTimeout(loadMyReport, 0);
   }
-  const card = el('div', { class:'card' });
+  const card = el('div', { class:'card', id:'student-myreport-section' });
   card.append(
     el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'8px', flexWrap:'wrap', gap:'8px' }},
       el('h2', null, '📊 Мои результаты по заданиям'),
