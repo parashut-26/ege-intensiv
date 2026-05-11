@@ -3884,7 +3884,71 @@ function telegramLinkCard(){
     return card;
   }
 
-  /* Не привязан */
+  /* Не привязан. Чтобы iOS Safari открывал Telegram-приложение нативно,
+     кнопка должна быть НАСТОЯЩЕЙ <a href>, а не button+onclick. Поэтому
+     токен генерим ЗАРАНЕЕ при первом показе карточки (асинхронно сохраняем
+     в БД), и ссылка сразу готова. Кэшируем в MY_PROFILE.telegram_link_token. */
+  const prepareToken = async () => {
+    if(MY_PROFILE.telegram_link_token) return MY_PROFILE.telegram_link_token;
+    const token = _genTgLinkToken();
+    try {
+      await restRequest('PATCH', '/profiles?id=eq.' + MY_PROFILE.id,
+        { telegram_link_token: token }, { prefer:'return=minimal' });
+      MY_PROFILE.telegram_link_token = token;
+      return token;
+    } catch(_){ return null; }
+  };
+
+  /* Заранее запросим токен (без ожидания) — к моменту тапа ссылка готова */
+  const linkAnchor = el('a', {
+    class:'btn btn-teal',
+    href:  MY_PROFILE.telegram_link_token
+      ? ('https://t.me/' + TG_BOT_USERNAME + '?start=' + MY_PROFILE.telegram_link_token)
+      : '#',
+    target: '_blank',
+    rel:    'noopener noreferrer',
+    style:{ textDecoration:'none', display:'inline-flex', alignItems:'center', gap:'6px' },
+    onclick: async (ev) => {
+      /* Если токена ещё нет — генерим прямо сейчас (синхронно для тапа). */
+      if(!MY_PROFILE.telegram_link_token){
+        ev.preventDefault();
+        showToast('⏳ Готовлю ссылку…');
+        const token = await prepareToken();
+        if(!token){ showToast('⚠ Не удалось подготовить ссылку'); return; }
+        /* Программный переход — на iOS Safari открывает Telegram app */
+        window.location.href = 'https://t.me/' + TG_BOT_USERNAME + '?start=' + token;
+        return;
+      }
+      /* Запускаем polling «привязался ли», пока юзер в Telegram */
+      let tries = 0;
+      const poll = async () => {
+        tries++;
+        try {
+          const arr = await restRequest('GET',
+            '/profiles?id=eq.' + MY_PROFILE.id + '&select=telegram_id,telegram_name');
+          if(Array.isArray(arr) && arr[0] && arr[0].telegram_id){
+            MY_PROFILE.telegram_id = arr[0].telegram_id;
+            MY_PROFILE.telegram_name = arr[0].telegram_name;
+            showToast('✅ Telegram привязан');
+            render();
+            return;
+          }
+        } catch(_){}
+        if(tries < 12) setTimeout(poll, 5000);  /* 12 × 5с = 60с */
+      };
+      setTimeout(poll, 4000);
+    }
+  }, '🤖 Привязать Telegram');
+
+  /* Если ссылка пока неготова — асинхронно подготовим и пропатчим href.
+     Юзеру не нужно ждать — даже тап в этот момент сработает (см. onclick выше). */
+  if(!MY_PROFILE.telegram_link_token){
+    prepareToken().then(tok => {
+      if(tok) linkAnchor.setAttribute('href',
+        'https://t.me/' + TG_BOT_USERNAME + '?start=' + tok);
+    });
+  }
+
   card.append(
     el('div', { style:{ display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap' }},
       el('span', { style:{ fontSize:'28px' }}, '🤖'),
@@ -3892,38 +3956,7 @@ function telegramLinkCard(){
         el('h3', { style:{ marginBottom:'2px' }}, 'Уведомления в Telegram'),
         el('div', { style:{ color:'var(--ink-2)', fontSize:'13px' }},
           'Чтобы получать о проверенных сочинениях, новых сообщениях и вебинарах.')),
-      el('button', { class:'btn btn-teal',
-        onclick: async () => {
-          /* 1. Генерим токен и сохраняем в БД на свой профиль */
-          const token = _genTgLinkToken();
-          try {
-            await restRequest('PATCH', '/profiles?id=eq.' + MY_PROFILE.id,
-              { telegram_link_token: token }, { prefer:'return=minimal' });
-          } catch(e){ showToast('⚠ ' + e.message); return; }
-          /* 2. Открываем глубокую ссылку на бота */
-          const url = 'https://t.me/' + TG_BOT_USERNAME + '?start=' + token;
-          window.open(url, '_blank');
-          showToast('Открой Telegram и нажми «Запустить»');
-          /* 3. Через несколько секунд проверим, привязалось ли (polling 3 раза) */
-          let tries = 0;
-          const poll = async () => {
-            tries++;
-            try {
-              const arr = await restRequest('GET',
-                '/profiles?id=eq.' + MY_PROFILE.id + '&select=telegram_id,telegram_name');
-              if(Array.isArray(arr) && arr[0] && arr[0].telegram_id){
-                MY_PROFILE.telegram_id = arr[0].telegram_id;
-                MY_PROFILE.telegram_name = arr[0].telegram_name;
-                showToast('✅ Telegram привязан');
-                render();
-                return;
-              }
-            } catch(_){}
-            if(tries < 6) setTimeout(poll, 5000);  /* 6 × 5с = 30с */
-          };
-          setTimeout(poll, 4000);
-        }
-      }, '🤖 Привязать Telegram')));
+      linkAnchor));
   return card;
 }
 
