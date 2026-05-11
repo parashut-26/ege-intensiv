@@ -9987,8 +9987,18 @@ function _renderNow(){
   if(STATE.importStudentsOpen) root.append(modalImportStudents());
   if(STATE.chatOpen && STATE.view !== 'login') root.append(chatPanel(STATE.view));
   if(STATE.toast) root.append(el('div', { class:'toast' }, STATE.toast));
-  /* Splash «Краш-тест» — поверх всего, на 1.7 секунды раз в день */
-  if(STATE.studentSplashActive && STATE.view === 'student') root.append(splashCar());
+  /* Splash «Краш-тест» — крепится к body, а не root, чтобы НЕ пересоздаваться
+     при каждом render() кабинета (иначе CSS-анимация прыгает обратно на 0%). */
+  if(STATE.studentSplashActive && STATE.view === 'student'){
+    if(!document.getElementById('zebrus-splash')){
+      const splashEl = splashCar();
+      splashEl.id = 'zebrus-splash';
+      document.body.appendChild(splashEl);
+    }
+  } else {
+    const existing = document.getElementById('zebrus-splash');
+    if(existing) existing.remove();
+  }
 
   /* Восстанавливаем позиции прокрутки после ререндера */
   requestAnimationFrame(() => {
