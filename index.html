@@ -65,6 +65,9 @@ h1,h2,h3,h4{margin:0;font-weight:800;color:var(--ink);letter-spacing:-.01em}
 h1{font-size:28px;line-height:1.15} h2{font-size:22px} h3{font-size:17px} h4{font-size:14px}
 .fade-in{animation:fadeIn .25s ease-out}
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+/* Если view/tab не сменился, а это просто ререндер по приходу
+   асинхронных данных — выключаем fade-in, чтобы контент не «прыгал». */
+body.no-anim .fade-in{animation:none}
 .banner{background:#FEF3C7;color:#92400E;font-size:11px;text-align:center;padding:6px;border-bottom:1px solid #FDE68A}
 
 /* ============ ЛОГО ============ */
@@ -9633,8 +9636,26 @@ function render(){
   });
 }
 
+/* Запоминаем последний «вид + вкладка» — если совпадает с прошлым
+   рендером, это переотрисовка по приходу async-данных (а не смена
+   страницы), значит fade-in отключаем — иначе содержимое мигает. */
+let _lastViewKey = '';
 function _renderNow(){
   const root = document.getElementById('root');
+
+  /* Считаем ключ текущей страницы. Меняется только когда юзер реально
+     переключается на другую вкладку/раздел. */
+  const viewKey = STATE.view + ':' + STATE.studentTab + ':' +
+                  STATE.teacherTab + ':' + STATE.curatorTab + ':' +
+                  STATE.contentTab + ':' + (STATE.theoryOpen || '');
+  const sameView = (viewKey === _lastViewKey);
+  _lastViewKey = viewKey;
+  /* Переключаем флаг на body — CSS-правило выключит fade-in
+     при ререндерах в той же view. */
+  if(document && document.body){
+    if(sameView) document.body.classList.add('no-anim');
+    else         document.body.classList.remove('no-anim');
+  }
 
   /* Сохраняем позиции прокрутки, чтобы экран не прыгал наверх при клике */
   const savedModalScroll = (document.querySelector('.modal-body') || {}).scrollTop || 0;
