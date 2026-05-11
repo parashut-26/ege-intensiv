@@ -5903,6 +5903,9 @@ function modalTheory(n){
                    в STATE.attemptsByTask, флаг isMine ставится автоматически. */
                 STATE.attemptDetailOpen = a.id;
                 render();
+                /* Скроллим браузер наверх, чтобы модал в центре экрана был
+                   виден сразу. Иначе на длинных страницах открывается «внизу». */
+                try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch(_){ window.scrollTo(0, 0); }
               },
               title: 'Открыть разбор попытки'
             },
@@ -7341,7 +7344,11 @@ function modalStudentDetail(){
           title: 'Открыть подробности',
           onmouseover: ev => { ev.target.style.borderColor = 'var(--ink-2)'; },
           onmouseout: ev => { ev.target.style.borderColor = 'transparent'; },
-          onclick: () => { STATE.attemptDetailOpen = a.id; render(); }
+          onclick: () => {
+            STATE.attemptDetailOpen = a.id;
+            render();
+            try { window.scrollTo({ top: 0, behavior: 'smooth' }); } catch(_){ window.scrollTo(0, 0); }
+          }
         },
           fmt(a.created_at) + ' · ' + a.score + '/' + a.max_score));
       });
@@ -7774,7 +7781,7 @@ function modalAttemptDetail(){
   }
 
   if(!attempt){
-    return el('div', { class:'modal-bg', onclick: close },
+    return el('div', { class:'modal-bg modal-bg-nested', onclick: close },
       el('div', { class:'modal' },
         el('div', { class:'modal-head' },
           el('h2', null, 'Попытка не найдена'),
@@ -7958,7 +7965,7 @@ function modalAttemptDetail(){
       items.length + ' вопросов · ' + items.filter(i => i.ok).length + ' верно'),
     el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть'));
 
-  return el('div', { class:'modal-bg', onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }},
+  return el('div', { class:'modal-bg modal-bg-nested', onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }},
     el('div', { class:'modal', style:{ maxWidth:'780px' }}, head, body, foot));
 }
 
