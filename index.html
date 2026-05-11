@@ -10010,6 +10010,37 @@ function viewTeacherDays(){
     det.append(inner);
     wrap.append(det);
   });
+
+  /* Прогулочные / мотивационные дни — отдельным блоком, с кнопкой «Материалы» */
+  const walkDays = DAYS.filter(d => d.kind === 'walk');
+  if(walkDays.length){
+    wrap.append(el('h3', { style:{ marginTop:'24px', marginBottom:'10px' }}, '🌿 Прогулочные дни'));
+    wrap.append(el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'14px' }},
+      'Загружайте подкасты, музыку, картинки и ссылки для лёгких дней между интенсивами.'));
+    walkDays.forEach(d => {
+      wrap.append(el('div', { class:'card', style:{ marginBottom:'10px', background:'#FCE7F3', border:'1px solid #FBCFE8' }},
+        el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }},
+          el('div', { style:{ fontSize:'36px' }}, d.emoji || '🌸'),
+          el('div', { style:{ flex:1, minWidth:'200px' }},
+            el('div', { style:{ fontWeight:'700', fontSize:'15px' }}, d.title),
+            el('div', { style:{ color:'var(--ink-2)', fontSize:'13px', marginTop:'2px' }},
+              d.date + ' · ' + (d.subtitle || 'мотивация'))),
+          el('button', { class:'btn btn-p',
+            onclick: () => { STATE.walkMaterialsOpen = d.id; render(); }
+          }, '📎 Управлять материалами'))));
+    });
+  }
+
+  /* Экзамен */
+  const examDay = DAYS.find(d => d.kind === 'exam');
+  if(examDay){
+    wrap.append(el('div', { class:'card card-orange', style:{ marginTop:'20px', textAlign:'center', padding:'20px' }},
+      el('div', { style:{ fontSize:'30px' }}, '🏁'),
+      el('h3', { style:{ marginTop:'6px' }}, examDay.title),
+      el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }},
+        examDay.date + ' · ' + (examDay.subtitle || ''))));
+  }
+
   wrap.append(el('p', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'14px', fontStyle:'italic' }},
     '💡 Изменения сейчас живут только в текущей сессии браузера. Постоянное хранение в БД (intensive_days / day_activities) — отдельная задача.'));
   return wrap;
