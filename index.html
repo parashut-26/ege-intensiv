@@ -9619,7 +9619,21 @@ function legalFooter(){
       el('a', { href:'https://parashut-26.github.io/krash-test-2026/', target:'_blank', rel:'noopener', style: linkStyle }, 'О школе')));
 }
 
+/* render() — публичная обёртка, дебаунсит через RAF: если несколько
+   вызовов придёт в один кадр (cold-start с пачкой async-загрузок, или
+   подряд при кликах) — выполнится только один реальный рендер.
+   Это убирает «мигание» страницы. */
+let _renderScheduled = false;
 function render(){
+  if(_renderScheduled) return;
+  _renderScheduled = true;
+  requestAnimationFrame(() => {
+    _renderScheduled = false;
+    _renderNow();
+  });
+}
+
+function _renderNow(){
   const root = document.getElementById('root');
 
   /* Сохраняем позиции прокрутки, чтобы экран не прыгал наверх при клике */
