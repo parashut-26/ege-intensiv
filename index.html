@@ -371,6 +371,7 @@ body.no-anim .fade-in{animation:none}
 
 /* ============ МОДАЛКА ============ */
 .modal-bg{position:fixed;inset:0;background:rgba(26,27,58,.55);z-index:30;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)}
+.modal-bg.modal-bg-nested{z-index:50;background:rgba(26,27,58,.7)}
 .modal{background:var(--surface);border-radius:20px;max-width:1100px;width:100%;max-height:92vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:var(--shadow-lg)}
 .modal-head{padding:18px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
 .modal-head .x{font-size:24px;color:var(--ink-3);width:36px;height:36px;border-radius:8px}
@@ -570,6 +571,10 @@ const STATE = {
   /* === Splash-анимация «Краш-тест» при входе ученика === */
   studentSplashActive: false,     // прямо сейчас крутится splash
   studentSplashChecked: false,    // уже проверяли localStorage в этой вкладке
+  /* === Материалы прогулочных дней === */
+  walkMaterialsOpen: null,        // 'walk1'/'walk2'/'walk3' — какой walk-модал открыт
+  walkMaterialsCache: {},         // кэш списков по walk_key
+  walkMaterialsBusy: false,       // флаг загрузки нового материала
   _onboardingDismissed: false,    // ученик закрыл onboarding-модалку (не показывать снова в этой сессии)
   helpedMsgs: {},
   /* === Авторизация === */
@@ -4072,6 +4077,214 @@ function telegramLinkCard(){
 }
 
 /* =======================================================================
+   МАТЕРИАЛЫ МОТИВАЦИОННЫХ ДНЕЙ (walk-дней)
+   Загрузка аудио/картинок/ссылок учителем, просмотр учеником.
+   ======================================================================= */
+async function loadWalkMaterials(walkKey){
+  if(!sb) return [];
+  try {
+    const arr = await restRequest('GET',
+      '/walk_materials?walk_key=eq.' + encodeURIComponent(walkKey) +
+      '&select=id,kind,title,storage_path,url,size_bytes,created_at,uploaded_by' +
+      '&order=created_at.desc');
+    return Array.isArray(arr) ? arr : [];
+  } catch(e){ console.warn('loadWalkMaterials:', e.message); return []; }
+}
+
+async function addWalkMaterial(walkKey, opts){
+  if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
+  /* opts: { kind, title, file?, url? } */
+  let storagePath = null, sizeBytes = null;
+  if(opts.file){
+    const ext = (opts.file.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'bin'])[1].toLowerCase();
+    storagePath = walkKey + '/' + Date.now() + '_' +
+                  Math.random().toString(36).slice(2, 8) + '.' + ext;
+    await uploadToStorage('walks', storagePath, opts.file, opts.file.type);
+    sizeBytes = opts.file.size;
+  }
+  const payload = {
+    walk_key: walkKey,
+    kind: opts.kind,
+    title: opts.title || (opts.file ? opts.file.name : null) || opts.url || 'Без названия',
+    storage_path: storagePath,
+    url: opts.url || null,
+    size_bytes: sizeBytes,
+    uploaded_by: MY_PROFILE.id
+  };
+  await restRequest('POST', '/walk_materials', payload, { prefer:'return=minimal' });
+}
+
+async function deleteWalkMaterial(id, storagePath){
+  if(!sb) return;
+  try {
+    await restRequest('DELETE', '/walk_materials?id=eq.' + id, null, { prefer:'return=minimal' });
+    if(storagePath){
+      /* Параллельно — удалим файл из bucket */
+      try { await sb.storage.from('walks').remove([storagePath]); } catch(_){}
+    }
+  } catch(e){ throw e; }
+}
+
+function walkMaterialPublicUrl(storagePath){
+  if(!storagePath) return null;
+  return SUPABASE_DIRECT_URL + '/storage/v1/object/public/walks/' + storagePath;
+}
+
+/* Модал материалов прогулочного дня. */
+function modalWalkMaterials(){
+  const walkKey = STATE.walkMaterialsOpen;
+  if(!walkKey) return null;
+  const dayMock = DAYS.find(d => d.id === walkKey);
+  const isTeacher = STATE.view === 'teacher' || STATE.view === 'curator';
+
+  /* Подгрузка списка (один раз за открытие) */
+  const cache = STATE.walkMaterialsCache || (STATE.walkMaterialsCache = {});
+  let list = cache[walkKey];
+  if(list === undefined){
+    cache[walkKey] = null;
+    loadWalkMaterials(walkKey).then(arr => { cache[walkKey] = arr; render(); });
+    list = null;
+  }
+
+  const close = () => { STATE.walkMaterialsOpen = null; render(); };
+
+  const bg = el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }});
+  const modal = el('div', { class:'modal', style:{ maxWidth:'640px' }});
+  bg.append(modal);
+
+  /* Шапка */
+  modal.append(el('div', { style:{ padding:'18px 22px', borderBottom:'1px solid var(--border)', display:'flex', justifyContent:'space-between', alignItems:'center' }},
+    el('div', null,
+      el('h2', { style:{ margin:0 }}, (dayMock && dayMock.emoji ? dayMock.emoji + ' ' : '🌿 ') + (dayMock ? dayMock.title : 'Материалы прогулки')),
+      el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', marginTop:'4px' }},
+        dayMock ? (dayMock.date + ' · ' + (dayMock.subtitle || 'мотивация')) : '')),
+    el('button', { class:'btn-icon', onclick: close }, '✕')));
+
+  /* Тело */
+  const body = el('div', { class:'modal-body', style:{ padding:'18px 22px', maxHeight:'70vh', overflowY:'auto' }});
+
+  if(list === null){
+    body.append(el('p', { style:{ color:'var(--ink-3)' }}, '⏳ Загружаем…'));
+  } else if(!list.length){
+    body.append(el('p', { style:{ color:'var(--ink-3)', padding:'12px 0' }},
+      isTeacher
+        ? 'Пока ничего не загружено. Добавьте подкаст, музыку, картинку или ссылку — это будет видно всем ученикам.'
+        : 'Учитель ещё не добавил материалы для этого дня. Загляни позже 🐝'));
+  } else {
+    list.forEach(m => body.append(walkMaterialRow(m, walkKey, isTeacher)));
+  }
+
+  /* Форма добавления — только для учителя/куратора */
+  if(isTeacher){
+    body.append(walkMaterialAddForm(walkKey));
+  }
+
+  modal.append(body);
+  return bg;
+}
+
+function walkMaterialRow(m, walkKey, isTeacher){
+  const row = el('div', { style:{ padding:'12px', border:'1px solid var(--border)', borderRadius:'12px', marginBottom:'10px', background:'var(--surface-soft)' }});
+  const title = el('div', { style:{ fontWeight:'700', marginBottom:'6px' }},
+    (m.kind === 'audio' ? '🎧 ' : m.kind === 'image' ? '🖼 ' : '🔗 ') + (m.title || 'Без названия'));
+  const head = el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'8px' }}, title);
+  if(isTeacher){
+    head.append(el('button', { class:'btn-icon', title:'Удалить',
+      onclick: async () => {
+        if(!confirm('Удалить материал?')) return;
+        try {
+          await deleteWalkMaterial(m.id, m.storage_path);
+          delete STATE.walkMaterialsCache[walkKey];
+          showToast('Удалено');
+          render();
+        } catch(e){ showToast('⚠ ' + e.message); }
+      }}, '🗑'));
+  }
+  row.append(head);
+
+  if(m.kind === 'audio' && m.storage_path){
+    const audio = el('audio', { controls: true, style:{ width:'100%', marginTop:'4px' }});
+    audio.src = walkMaterialPublicUrl(m.storage_path);
+    row.append(audio);
+  } else if(m.kind === 'image' && m.storage_path){
+    row.append(el('img', { src: walkMaterialPublicUrl(m.storage_path),
+      style:{ maxWidth:'100%', maxHeight:'320px', borderRadius:'8px', marginTop:'4px', display:'block' }}));
+  } else if(m.kind === 'link' && m.url){
+    row.append(el('a', { href: m.url, target:'_blank', rel:'noopener noreferrer',
+      style:{ color:'var(--p)', wordBreak:'break-all', fontSize:'13px' }}, m.url));
+  }
+  return row;
+}
+
+function walkMaterialAddForm(walkKey){
+  const wrap = el('div', { style:{ marginTop:'18px', padding:'14px', border:'1px dashed var(--border-2)', borderRadius:'12px' }});
+  wrap.append(el('div', { style:{ fontWeight:'700', marginBottom:'10px' }}, '＋ Добавить материал'));
+
+  /* Аудио */
+  const audioRow = el('div', { style:{ marginBottom:'10px' }});
+  audioRow.append(
+    el('label', { style:{ display:'inline-block', cursor:'pointer', padding:'8px 14px', background:'var(--y-soft)', borderRadius:'10px', fontWeight:'700', fontSize:'13px' }},
+      '🎧 Загрузить аудио / подкаст',
+      el('input', { type:'file', accept:'audio/*', style:{ display:'none' },
+        onchange: async e => {
+          const f = e.target.files[0]; if(!f) return;
+          if(STATE.walkMaterialsBusy){ showToast('⏳ Уже загружается'); return; }
+          STATE.walkMaterialsBusy = true; showToast('⏳ Загружаем аудио…');
+          try {
+            await addWalkMaterial(walkKey, { kind:'audio', file: f });
+            delete STATE.walkMaterialsCache[walkKey];
+            showToast('✅ Готово');
+          } catch(err){ showToast('⚠ ' + err.message); }
+          finally { STATE.walkMaterialsBusy = false; render(); }
+        }})));
+  wrap.append(audioRow);
+
+  /* Картинка */
+  const imgRow = el('div', { style:{ marginBottom:'10px' }});
+  imgRow.append(
+    el('label', { style:{ display:'inline-block', cursor:'pointer', padding:'8px 14px', background:'var(--teal-soft)', borderRadius:'10px', fontWeight:'700', fontSize:'13px' }},
+      '🖼 Загрузить картинку',
+      el('input', { type:'file', accept:'image/*', style:{ display:'none' },
+        onchange: async e => {
+          const f = e.target.files[0]; if(!f) return;
+          if(STATE.walkMaterialsBusy){ showToast('⏳ Уже загружается'); return; }
+          STATE.walkMaterialsBusy = true; showToast('⏳ Загружаем картинку…');
+          try {
+            await addWalkMaterial(walkKey, { kind:'image', file: f });
+            delete STATE.walkMaterialsCache[walkKey];
+            showToast('✅ Готово');
+          } catch(err){ showToast('⚠ ' + err.message); }
+          finally { STATE.walkMaterialsBusy = false; render(); }
+        }})));
+  wrap.append(imgRow);
+
+  /* Ссылка */
+  const linkRow = el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' }});
+  const urlInput = el('input', { type:'text', placeholder:'https://… (YouTube, статья, плейлист)',
+    style:{ flex:1, minWidth:'200px', padding:'8px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'13px' }});
+  const titleInput = el('input', { type:'text', placeholder:'Подпись (необязательно)',
+    style:{ flex:1, minWidth:'180px', padding:'8px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'13px' }});
+  linkRow.append(urlInput, titleInput,
+    el('button', { class:'btn btn-p btn-sm',
+      onclick: async () => {
+        const u = (urlInput.value || '').trim();
+        if(!u){ showToast('Введите ссылку'); return; }
+        if(STATE.walkMaterialsBusy){ showToast('⏳ Уже загружается'); return; }
+        STATE.walkMaterialsBusy = true;
+        try {
+          await addWalkMaterial(walkKey, { kind:'link', url: u, title: titleInput.value });
+          delete STATE.walkMaterialsCache[walkKey];
+          showToast('✅ Ссылка добавлена');
+          urlInput.value = ''; titleInput.value = '';
+        } catch(err){ showToast('⚠ ' + err.message); }
+        finally { STATE.walkMaterialsBusy = false; render(); }
+      }}, '🔗 Добавить ссылку'));
+  wrap.append(linkRow);
+  return wrap;
+}
+
+/* =======================================================================
    ПЧЁЛКА ЛЕТИТ К СЧЁТЧИКУ — на каждый правильный ответ в тесте.
    Создаёт элемент 🐝 в position:fixed, летит от вопроса к .bee-counter
    в шапке, в конце счётчик пульсирует. Как «монетка в кошелёк». */
@@ -4677,8 +4890,16 @@ function viewStudentHome(){
   let heroLabel, heroTitle, heroSub;
   if(today){
     heroLabel = '● Сейчас идёт';
-    heroTitle = 'День ' + today.id + ' · ' + (today.title || '').split('+')[0].trim();
-    heroSub   = today.date + ' · ' + (today.summary || '');
+    if(today.kind === 'walk'){
+      heroTitle = (today.emoji || '🌿') + ' ' + (today.title || 'Прогулка');
+      heroSub   = today.date + ' · ' + (today.subtitle || 'мотивация');
+    } else if(today.kind === 'exam'){
+      heroTitle = '🏁 ' + (today.title || 'ЭКЗАМЕН');
+      heroSub   = today.date + ' · ' + (today.subtitle || 'Удачи!');
+    } else {
+      heroTitle = 'День ' + today.id + ' · ' + (today.title || '').split('+')[0].trim();
+      heroSub   = today.date + ' · ' + (today.summary || '');
+    }
   } else if(untilStart != null && untilStart > 0){
     heroLabel = '🚀 До старта';
     heroTitle = 'Старт через ' + untilStart + ' ' + pluralRu(untilStart, ['день','дня','дней']);
@@ -4823,7 +5044,11 @@ function achievementCard(a){
 
 function mapDayCard(d){
   if(d.kind === 'walk'){
-    return el('div', { class:'day-card walk' },
+    return el('div', {
+      class:'day-card walk',
+      style:{ cursor:'pointer' },
+      onclick: () => { STATE.walkMaterialsOpen = d.id; render(); }
+    },
       el('div', { style:{ fontSize:'30px' }}, d.emoji || '🌸'),
       el('div', null,
         el('div', { class:'meta' }, d.date),
@@ -4997,14 +5222,18 @@ function taskAction(t, locked){
 }
 
 function walkBlock(d){
+  const isTeacher = STATE.view === 'teacher' || STATE.view === 'curator';
   return el('div', { class:'card', style:{ marginBottom:'16px', background:'#FCE7F3', border:'1px solid #FBCFE8' }},
-    el('div', { style:{ display:'flex', alignItems:'center', gap:'14px' }},
+    el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }},
       el('div', { style:{ fontSize:'40px' }}, d.emoji || '🌸'),
-      el('div', null,
-        chip('мотивация', 'p'),
+      el('div', { style:{ flex:1, minWidth:'200px' }},
+        chip(d.subtitle || 'мотивация', 'p'),
         el('h2', { style:{ marginTop:'4px' }}, d.title),
         el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }},
-          d.date + ' — лёгкий контент: видео-лайфхаки, мини-викторины, мотивационное сообщение дня'))));
+          d.date + ' — подкасты, музыка, картинки и ссылки от учителя')),
+      el('button', { class:'btn btn-p',
+        onclick: () => { STATE.walkMaterialsOpen = d.id; render(); }
+      }, isTeacher ? '📎 Управлять материалами' : '📎 Открыть материалы')));
 }
 
 function examBlock(){
@@ -10392,6 +10621,7 @@ function _renderNow(){
 
   /* Модалки */
   if(STATE.testOpen != null) root.append(modalTest(STATE.testOpen));
+  if(STATE.walkMaterialsOpen) root.append(modalWalkMaterials());
   if(STATE.essayOpen) root.append(modalEssayReview(STATE.essayOpen));
   if(STATE.newStudentForm) root.append(modalNewStudent());
   if(STATE.curatorPermsFor) root.append(modalCuratorPerms());
