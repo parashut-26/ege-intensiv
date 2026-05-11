@@ -1189,7 +1189,7 @@ async function restoreSession(){
       } else {
         STATE.authLoading = false;
         STATE.view = 'login';
-        STATE.authError = 'Не удалось загрузить профиль (REST-запрос завис). Попробуйте через VPN или обновите страницу.';
+        console.warn('Не удалось загрузить профиль — показываем форму входа');
         render();
         return;
       }
@@ -1197,7 +1197,6 @@ async function restoreSession(){
       console.warn('loadProfileDirect упал:', e.message);
       STATE.authLoading = false;
       STATE.view = 'login';
-      STATE.authError = 'Сервер не отвечает: ' + e.message;
       render();
       return;
     }
@@ -1272,7 +1271,6 @@ if(sb){
         if(STATE.view !== 'teacher' && STATE.view !== 'curator' && STATE.view !== 'student'){
           console.warn('SIGNED_IN: профиль не загрузился за 8с — показываем вход');
           STATE.view = 'login';
-          STATE.authError = 'Не удалось загрузить профиль за разумное время. Попробуйте обновить страницу (Cmd+Shift+R).';
           render();
         }
       }, 8000);
@@ -1285,13 +1283,12 @@ if(sb){
           else STATE.view = 'student';
         } else {
           STATE.view = 'login';
-          STATE.authError = 'Не удалось загрузить профиль. Попробуйте перезагрузить страницу.';
+          console.warn('Профиль не подтянулся — показываем форму входа');
         }
       } catch(e){
         clearTimeout(sigTimeout);
         console.warn('Ошибка загрузки профиля:', e);
         STATE.view = 'login';
-        STATE.authError = 'Ошибка: ' + (e.message || 'неизвестная');
       }
       render();
     } else if(event === 'SIGNED_OUT'){
