@@ -230,6 +230,15 @@ body.no-anim .fade-in{animation:none}
 @keyframes splashShake{ 0%,100%{transform:translateY(0)} 50%{transform:translateY(-1px)} }
 @keyframes splashSmoke{ 0%{opacity:1;transform:translate(0,0) scale(1)} 100%{opacity:0;transform:translate(-10px,-4px) scale(1.4)} }
 @keyframes splashBeeBounce{ 0%,100%{transform:translateY(0)} 50%{transform:translateY(-8px) rotate(6deg)} }
+/* Салют из пчёлок — при 100% правильных ответов */
+.bee-confetti{position:fixed;inset:0;pointer-events:none;z-index:9998;display:flex;align-items:center;justify-content:center}
+.confetti-bee{position:absolute;animation:beeBurst 1.9s cubic-bezier(.18,.7,.4,1) forwards;animation-delay:var(--delay,0s);will-change:transform,opacity}
+@keyframes beeBurst{
+  0%   { transform:translate(0,0) rotate(0); opacity:0 }
+  10%  { opacity:1 }
+  70%  { opacity:1 }
+  100% { transform:translate(var(--dx),var(--dy)) rotate(var(--rot)); opacity:0 }
+}
 
 /* ============ ПРОГРЕСС ============ */
 .bar{height:8px;background:var(--p-soft);border-radius:999px;overflow:hidden}
@@ -3774,6 +3783,35 @@ function showToast(text){
   setTimeout(() => { STATE.toast = null; render(); }, 2400);
 }
 
+/* =======================================================================
+   САЛЮТ ИЗ ПЧЁЛОК — когда ученик ответил правильно на все вопросы.
+   Создаёт ~24 пчёлки, разлетающихся вверх и в стороны, затухают за 2с.
+   ======================================================================= */
+function celebrateBees(){
+  const container = document.createElement('div');
+  container.className = 'bee-confetti';
+  const count = 24;
+  for(let i = 0; i < count; i++){
+    const bee = document.createElement('div');
+    bee.className = 'confetti-bee';
+    bee.textContent = '🐝';
+    /* Случайная траектория: вверх и в стороны, лёгкое вращение */
+    const dx = (Math.random() - 0.5) * 700;       /* −350…+350 px по X */
+    const dy = -(Math.random() * 350 + 220);      /* −570…−220 px (вверх) */
+    const rot = (Math.random() - 0.5) * 720;      /* до ±360° */
+    const delay = Math.random() * 0.15;           /* небольшой разброс старта */
+    const size = 24 + Math.random() * 16;         /* 24…40 px */
+    bee.style.setProperty('--dx', dx + 'px');
+    bee.style.setProperty('--dy', dy + 'px');
+    bee.style.setProperty('--rot', rot + 'deg');
+    bee.style.setProperty('--delay', delay + 's');
+    bee.style.fontSize = size + 'px';
+    container.appendChild(bee);
+  }
+  document.body.appendChild(container);
+  setTimeout(() => container.remove(), 2400);
+}
+
 function logo(size){
   const sz = size || 20;
   const node = el('div', { class:'zebrus', style:{ fontSize: sz+'px' }});
@@ -5708,6 +5746,11 @@ function modalTest(taskN){
                   const allNow = bank.every(isAnswered);
                   if(!allNow){ showToast('Заполните все вопросы'); return; }
                   STATE.testChecked = true; render();
+                  /* Салют из пчёлок при 100% правильных */
+                  const correctNow = bank.filter(isCorrect).length;
+                  if(correctNow === bank.length && bank.length > 0){
+                    setTimeout(celebrateBees, 250);
+                  }
                 }
               }, '✓ Проверить')))));
 }
