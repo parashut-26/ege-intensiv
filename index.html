@@ -2273,7 +2273,26 @@ async function submitEssay(opts){
   const inserted = await restRequest('POST', '/essays', payload, { prefer: 'return=representation' });
   /* Достижение «✍️ Сочинение сдано» (a5) — за сам факт сдачи, до проверки */
   awardAchievement('a5').catch(() => {});
+  /* TG-уведомления учителю и кураторам (fire-and-forget) */
+  notifyTeachersOfNewEssay().catch(() => {});
   return Array.isArray(inserted) ? inserted[0] : inserted;
+}
+
+/* Найти учителя и всех кураторов, разослать TG-уведомление о новом сочинении. */
+async function notifyTeachersOfNewEssay(){
+  if(!MY_PROFILE) return;
+  const myName = MY_PROFILE.full_name || 'Ученик';
+  try {
+    /* Берём всех с ролью teacher или curator */
+    const recipients = await restRequest('GET',
+      '/profiles?role=in.(teacher,curator)&select=id');
+    if(!Array.isArray(recipients)) return;
+    const text = '📝 <b>Новое сочинение на проверку</b>\n\n' +
+                 'От: <b>' + escHtml(myName) + '</b>';
+    recipients.forEach(r => {
+      if(r && r.id) notifyViaTelegram(r.id, text, 'https://zebrus.online');
+    });
+  } catch(_){}
 }
 
 /* === Голосовые комментарии: запись + загрузка === */
@@ -2890,7 +2909,32 @@ async function saveEssayReview(essayId, nextStatus, isPreCheck){
     if(nextStatus === 'done') e.finalScore = total;
     if(isPreCheck) e.preScore = total;
   }
+  /* TG-уведомления — fire-and-forget */
+  if(nextStatus === 'done' && e && e.studentId){
+    /* Сочинение финализировано — пишем ученику */
+    notifyViaTelegram(e.studentId,
+      '🎉 <b>Сочинение проверено!</b>\n\nИтоговый балл: <b>' + total + ' / 22</b>',
+      'https://zebrus.online');
+  } else if(nextStatus === 'pre_checked'){
+    /* Куратор сделал предварительную проверку — уведомляем учителя */
+    notifyTeachersOfPreCheck(e ? (e.studentName || 'Ученик') : 'Ученик', total);
+  }
   return total;
+}
+
+/* Найти ID учителя в БД и отправить ему TG-уведомление */
+async function notifyTeachersOfPreCheck(studentName, score){
+  try {
+    const arr = await restRequest('GET', '/profiles?role=eq.teacher&select=id&limit=1');
+    if(Array.isArray(arr) && arr[0]){
+      notifyViaTelegram(arr[0].id,
+        '👀 <b>Куратор проверил сочинение</b>\n\n' +
+        'Ученик: ' + escHtml(studentName) + '\n' +
+        'Предварительный балл: <b>' + score + ' / 22</b>\n\n' +
+        'Откройте, чтобы подтвердить или поправить.',
+        'https://zebrus.online');
+    }
+  } catch(_){}
 }
 
 /* Загрузить файл в Storage + создать запись в materials.
