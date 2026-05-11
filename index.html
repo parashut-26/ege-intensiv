@@ -2278,21 +2278,30 @@ async function submitEssay(opts){
   return Array.isArray(inserted) ? inserted[0] : inserted;
 }
 
-/* Найти учителя и всех кураторов, разослать TG-уведомление о новом сочинении. */
+/* Найти учителя и всех кураторов, разослать TG-уведомление о новом сочинении.
+   PHP-прокси на reg.ru плохо переваривает PostgREST-фильтр in.(a,b) со скобками
+   и возвращает 502, поэтому делаем два отдельных запроса и объединяем. */
 async function notifyTeachersOfNewEssay(){
   if(!MY_PROFILE) return;
   const myName = MY_PROFILE.full_name || 'Ученик';
+  const recipients = [];
   try {
-    /* Берём всех с ролью teacher или curator */
-    const recipients = await restRequest('GET',
-      '/profiles?role=in.(teacher,curator)&select=id');
-    if(!Array.isArray(recipients)) return;
-    const text = '📝 <b>Новое сочинение на проверку</b>\n\n' +
-                 'От: <b>' + escHtml(myName) + '</b>';
-    recipients.forEach(r => {
-      if(r && r.id) notifyViaTelegram(r.id, text, 'https://zebrus.online');
-    });
+    const t = await restRequest('GET', '/profiles?role=eq.teacher&select=id');
+    if(Array.isArray(t)) recipients.push(...t);
   } catch(_){}
+  try {
+    const c = await restRequest('GET', '/profiles?role=eq.curator&select=id');
+    if(Array.isArray(c)) recipients.push(...c);
+  } catch(_){}
+  if(!recipients.length){
+    console.warn('[TG] notifyTeachersOfNewEssay: получателей нет');
+    return;
+  }
+  const text = '📝 <b>Новое сочинение на проверку</b>\n\n' +
+               'От: <b>' + escHtml(myName) + '</b>';
+  recipients.forEach(r => {
+    if(r && r.id) notifyViaTelegram(r.id, text, 'https://zebrus.online');
+  });
 }
 
 /* === Голосовые комментарии: запись + загрузка === */
@@ -2520,17 +2529,16 @@ function makeVoiceRecorder(initialUrl, onChange){
 }
 
 /* Загрузить фото сочинения в Storage. Возвращает publicUrl.
-   Использует отдельный бакет 'essays' (публичный — иначе ученик не может читать своё). */
+   Использует общий uploadToStorage с обходом бага PHP-прокси (502 после
+   успешной загрузки → HEAD-проверка) — иначе на телефоне у Вероники
+   ничего не загружается. Раньше делали через sb.storage.upload(), он
+   падал на 502 от прокси, хотя файл реально был залит. */
 async function uploadEssayPhoto(file){
   if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
   const ext = (file.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'jpg'])[1].toLowerCase();
   const path = MY_PROFILE.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
-  const { error: upErr } = await sb.storage.from('essays').upload(path, file, {
-    cacheControl: '3600', upsert: false,
-    contentType: file.type || 'image/jpeg'
-  });
-  if(upErr) throw new Error('Storage: ' + upErr.message);
-  return sb.storage.from('essays').getPublicUrl(path).data.publicUrl;
+  await uploadToStorage('essays', path, file, file.type || 'image/jpeg');
+  return SUPABASE_DIRECT_URL + '/storage/v1/object/public/essays/' + path;
 }
 
 /* Цвета аватарок — циклически по индексу */
