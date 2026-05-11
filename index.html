@@ -1836,16 +1836,16 @@ async function getKnownRoomIds(){
 
 /* Один тик: запросить новые сообщения по всем комнатам и пересчитать счётчики */
 async function pollUnreadCounts(){
-  if(!sb || !MY_PROFILE) return;
+  if(!sb || !MY_PROFILE) return false;
   const roomIds = await getKnownRoomIds();
-  if(!roomIds.length) return;
+  if(!roomIds.length) return false;
   try {
     const arr = await restRequest('GET',
       '/chat_messages?room_id=in.(' + roomIds.join(',') + ')' +
       '&author_id=neq.' + MY_PROFILE.id +
       '&select=room_id,created_at' +
       '&order=created_at.desc&limit=500');
-    if(!Array.isArray(arr)) return;
+    if(!Array.isArray(arr)) return false;
     const counts = {};
     arr.forEach(m => {
       const lastSeen = getLastSeenForRoom(m.room_id);
@@ -1853,10 +1853,26 @@ async function pollUnreadCounts(){
         counts[m.room_id] = (counts[m.room_id] || 0) + 1;
       }
     });
+    const newTotal = Object.values(counts).reduce((a, b) => a + b, 0);
+    /* Сравниваем по ключам и значениям — если ничего не изменилось,
+       НЕ рендерим, чтобы страница не мигала каждые 45 сек. */
+    const prev = STATE.unreadByRoom || {};
+    let changed = newTotal !== STATE.totalUnread;
+    if(!changed){
+      const prevKeys = Object.keys(prev);
+      const newKeys = Object.keys(counts);
+      if(prevKeys.length !== newKeys.length){
+        changed = true;
+      } else {
+        for(const k of newKeys){ if(prev[k] !== counts[k]){ changed = true; break; }}
+      }
+    }
     STATE.unreadByRoom = counts;
-    STATE.totalUnread = Object.values(counts).reduce((a, b) => a + b, 0);
+    STATE.totalUnread = newTotal;
+    return changed;
   } catch(e){
     /* Тихо — не пугаем UI на проблемах прокси */
+    return false;
   }
 }
 
@@ -1865,9 +1881,13 @@ let CHAT_BG_POLL_TIMER = null;
    Запускается после логина и работает в течение всей сессии. */
 function startUnreadBgPoll(){
   if(CHAT_BG_POLL_TIMER) return;
+  /* Первый раз после логина — рендерим всегда (чтобы появился бейдж).
+     Дальше — только если число непрочитанных реально изменилось. */
   pollUnreadCounts().then(() => render());
   CHAT_BG_POLL_TIMER = setInterval(() => {
-    pollUnreadCounts().then(() => render());
+    /* Не дёргать если страница скрыта (на телефоне — другая вкладка/локскрин). */
+    if(typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    pollUnreadCounts().then(changed => { if(changed) render(); });
   }, 45000);
 }
 function stopUnreadBgPoll(){
