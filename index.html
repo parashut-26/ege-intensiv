@@ -1360,6 +1360,12 @@ const ME_STUDENT = {
   weakTopics: [4, 5, 8],
 };
 
+/* Флаги «реальные данные из БД уже пришли». Нужны чтобы при cold-start
+   не показывать алерт-плашки (про заявки/сочинения) на основе мок-данных —
+   иначе они на секунду «выскакивают» при перезагрузке и пропадают. */
+let STUDENTS_LOADED = false;
+let ESSAYS_LOADED = false;
+
 /* STUDENTS — мок-данные. Заменяются на реальные из БД при первом успешном loadStudentsFromDb().
    До загрузки оставляем мок, чтобы UI работал в демо-режиме. */
 let STUDENTS = [
@@ -2430,6 +2436,7 @@ async function loadStudentsFromDb(){
       paid: false,      // отдельная таблица payments — подтянем позже
       paidAmount: 0
     }));
+    STUDENTS_LOADED = true;
     console.log('✓ Учеников загружено: ' + STUDENTS.length);
   } catch(e){
     console.warn('Не удалось загрузить учеников:', e.message);
@@ -2469,6 +2476,7 @@ async function loadEssaysFromDb(){
         }
         return obj;
       });
+      ESSAYS_LOADED = true;
       console.log('✓ Сочинения загружены: ' + DB_ESSAYS.length);
     }
   } catch(e){
@@ -5687,7 +5695,10 @@ function viewTeacherOverview(){
         onclick: () => showToast('Откроется экспорт в Excel/CSV')
       }, '⬇ Экспорт')));
 
-  if(pendingCount > 0){
+  /* Алерт-плашки показываем ТОЛЬКО когда реальные данные из БД пришли,
+     иначе при перезагрузке они на секунду «выскакивают» из мок-данных
+     и пропадают — отсюда «дёргание» страницы. */
+  if(STUDENTS_LOADED && pendingCount > 0){
     wrap.append(el('div', { class:'card card-orange', style:{ marginBottom:'18px', padding:'18px' }},
       el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }},
         el('span', { style:{ fontSize:'28px' }}, '⏳'),
@@ -5700,7 +5711,7 @@ function viewTeacherOverview(){
         }, 'Открыть →'))));
   }
 
-  if(preCheckedEssays > 0){
+  if(ESSAYS_LOADED && preCheckedEssays > 0){
     wrap.append(el('div', { class:'card', style:{ marginBottom:'18px', background:'var(--teal-soft)', border:'1px solid #5EEAD4' }},
       el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }},
         el('span', { style:{ fontSize:'28px' }}, '🤝'),
@@ -9699,7 +9710,7 @@ function _renderNow(){
     const tabs = [
       { key:'students', label:'Ученики', ic:'👥' },
       { key:'essays', label:'Сочинения', ic:'📝',
-        badge: ESSAYS.filter(e => e.status === 'new').length || null },
+        badge: ESSAYS_LOADED ? (ESSAYS.filter(e => e.status === 'new').length || null) : null },
       { key:'chat', label:'Чат', ic:'💬' },
     ];
     const map = {
@@ -9718,9 +9729,11 @@ function _renderNow(){
   }
 
   if(STATE.view === 'teacher'){
-    const pendingCount = STUDENTS.filter(s => s.status === 'pending').length;
-    const newEssays = ESSAYS.filter(e => e.status === 'new').length;
-    const preCheckEssays = ESSAYS.filter(e => e.status === 'pre_checked').length;
+    /* Бейджи на табах считаем только когда реальные данные пришли,
+       чтобы при перезагрузке цифры не «прыгали» с мок-значений на 0. */
+    const pendingCount = STUDENTS_LOADED ? STUDENTS.filter(s => s.status === 'pending').length : 0;
+    const newEssays = ESSAYS_LOADED ? ESSAYS.filter(e => e.status === 'new').length : 0;
+    const preCheckEssays = ESSAYS_LOADED ? ESSAYS.filter(e => e.status === 'pre_checked').length : 0;
     const tabs = [
       { key:'overview', label:'Сводка', ic:'📊' },
       { key:'students', label:'Ученики', ic:'👥', badge: pendingCount || null, badgeKind:'warn' },
