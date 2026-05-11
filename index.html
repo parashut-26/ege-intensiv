@@ -4310,17 +4310,11 @@ function _unused_splashSvgLegacy(){ /* зарезервировано, не ис
     car);
 }
 
-/* Проверка: показывали ли splash сегодня. Используем localStorage,
-   чтобы переживало перезагрузки. Хранит дату вида "2026-05-11". */
+/* Splash играется КАЖДУЮ перезагрузку. В пределах одной вкладки
+   (без F5) — только один раз, благодаря STATE.studentSplashChecked,
+   который остаётся true до перезагрузки. */
 function shouldShowSplashToday(){
-  try {
-    if(typeof localStorage === 'undefined') return false;
-    const today = new Date().toISOString().slice(0, 10);  /* YYYY-MM-DD */
-    const last = localStorage.getItem('zebrusSplashDate');
-    if(last === today) return false;
-    localStorage.setItem('zebrusSplashDate', today);
-    return true;
-  } catch(_){ return false; }
+  return true;
 }
 
 function viewStudentHome(){
