@@ -18,6 +18,7 @@ const VAPID_PUBLIC_KEY  = Deno.env.get('VAPID_PUBLIC_KEY')!;
 const VAPID_PRIVATE_KEY = Deno.env.get('VAPID_PRIVATE_KEY')!;
 const VAPID_SUBJECT     = Deno.env.get('VAPID_SUBJECT') || 'mailto:[email protected]';
 
+console.log('[push-send] VAPID_SUBJECT =', VAPID_SUBJECT);
 webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
 
 const sbAdmin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -112,12 +113,22 @@ serve(async (req) => {
       sent++;
     } catch (err: any) {
       failed++;
-      const msg = err && (err.message || err.body || String(err)) || 'unknown';
+      const msg = err && (err.message || String(err)) || 'unknown';
+      const body = err && err.body ? String(err.body) : '';
       const code = err && err.statusCode;
-      console.error('[push-send] ✗ ошибка для подписки id=' + s.id + ' code=' + code + ' msg=' + msg);
-      errors.push('id=' + s.id + ': ' + (code ? code + ' ' : '') + msg);
-      if (code === 404 || code === 410) {
+      const headers = err && err.headers ? JSON.stringify(err.headers) : '';
+      const isApple = (s.endpoint || '').includes('web.push.apple.com');
+      console.error('[push-send] ✗ ошибка для подписки id=' + s.id +
+        ' code=' + code + ' isApple=' + isApple +
+        ' msg=' + msg + ' body=' + body + ' headers=' + headers);
+      errors.push('id=' + s.id + ': ' + (code ? code + ' ' : '') + msg + (body ? ' | ' + body : ''));
+      // 404/410 — подписка протухла, удаляем.
+      // 403 от Apple Push Service (web.push.apple.com) = iOS Safari без PWA на главном экране.
+      //       Подписка мертворождённая, удаляем чтобы не плодить ошибок.
+      const isAppleEndpoint = (s.endpoint || '').includes('web.push.apple.com');
+      if (code === 404 || code === 410 || (code === 403 && isAppleEndpoint)) {
         await sbAdmin.from('push_subscriptions').delete().eq('id', s.id);
+        console.log('[push-send] 🗑️ удалена протухшая подписка id=' + s.id + ' (code=' + code + ')');
       }
     }
   }));

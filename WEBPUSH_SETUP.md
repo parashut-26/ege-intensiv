@@ -50,7 +50,7 @@ const VAPID_PUBLIC_KEY = 'PASTE_YOUR_VAPID_PUBLIC_KEY_HERE';
 1. Supabase → **Project Settings → Edge Functions → Manage secrets** → New secret
 2. **Name:** `VAPID_PRIVATE_KEY`, **Value:** твой приватный ключ → Save
 3. Ещё один: **Name:** `VAPID_PUBLIC_KEY`, **Value:** тот же публичный → Save
-4. Ещё один: **Name:** `VAPID_SUBJECT`, **Value:** `mailto:[email protected]` (или твой реальный email) → Save
+4. Ещё один: **Name:** `VAPID_SUBJECT`, **Value:** `mailto:ТВОЯ_РЕАЛЬНАЯ@почта.com` — **обязательно реальный email оператора сайта**. Apple Push Service проверяет и при подставной/тестовой почте возвращает 403, iPhone-пуши не доставляются. Google FCM (Chrome) к этому равнодушен. → Save
 
 Должно стать **6 секретов** всего:
 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TG_CRON_SECRET`,
