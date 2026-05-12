@@ -8048,6 +8048,27 @@ function essayRow(e, isCurator){
               STATE.studentEssayResultOpen = e.id;
               render();
             }}, '👁')
+        : null,
+      /* Удаление сочинения — только для учителя/куратора, только для DB-работ.
+         RLS на стороне БД дополнительно защитит. */
+      (!isCurator && typeof e.id === 'number')
+        ? el('button', { class:'btn-icon', title:'Удалить работу',
+            style:{ background:'#FEE2E2', color:'#991B1B' },
+            onclick: async (ev) => {
+              ev.stopPropagation();
+              if(!confirm('Удалить работу «' + (e.studentName || 'ученика') +
+                          '»? Это действие нельзя отменить.')) return;
+              try {
+                await restRequest('DELETE',
+                  '/essays?id=eq.' + encodeURIComponent(e.id),
+                  null, { prefer: 'return=minimal' });
+                showToast('🗑️ Работа удалена');
+                await loadEssaysFromDb();
+                render();
+              } catch(err){
+                showToast('⚠ Не удалось удалить: ' + (err.message || 'ошибка'));
+              }
+            }}, '🗑️')
         : null));
 }
 
