@@ -576,6 +576,9 @@ const STATE = {
   /* Модалка загрузки PDF варианта (этап 2 — решалка в платформе) */
   pdfImportOpen: false,
   pdfImportPreview: null,  // { variants: [...], keys: {...} } после парсинга
+  /* Редактирование уже сохранённого варианта */
+  editVariantId: null,     // id варианта для модалки редактирования
+  editVariantData: null,   // { variant, questions, sourceTexts } после загрузки
   contentEditTaskN: null,  // открыта модалка редактирования теории по номеру
   chatOpen: false,
   chatChannel: 'group',
@@ -12177,9 +12180,22 @@ function viewVariantSummary(){
   const qCount = Math.min(26, v.questions_count || 26);
 
   wrap.append(
-    el('h1', null, '📋 ' + v.title),
-    el('p', { style:{ color:'var(--ink-2)', marginBottom:'18px' }},
-      attempts.length + ' учеников · ' + qCount + ' заданий (1-26) + сочинение К1-К10'));
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'18px', flexWrap:'wrap', gap:'10px' }},
+      el('div', null,
+        el('h1', null, '📋 ' + v.title),
+        el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }},
+          attempts.length + ' учеников · ' + qCount + ' заданий (1-26) + сочинение К1-К10' +
+          (v.source === 'pdf_import' ? ' · 🎯 решаемый' : ''))),
+      /* Кнопка редактирования — только для pdf_import вариантов */
+      v.source === 'pdf_import' ? el('button', { class:'btn btn-secondary',
+        onclick: async () => {
+          STATE.editVariantId = v.id;
+          STATE.editVariantData = null;
+          render();
+          try { await loadVariantForEdit(v.id); } catch(e){ showToast('⚠ ' + e.message); }
+          render();
+        }
+      }, '✏️ Редактировать вопросы') : null));
 
   if(!attempts.length){
     wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)' }},
@@ -12648,6 +12664,178 @@ async function savePdfVariantToDb(data){
   }
 
   return variantId;
+}
+
+/* Загрузить вариант для редактирования: сам вариант + вопросы + исходные тексты */
+async function loadVariantForEdit(variantId){
+  const [vArr, qArr, sArr] = await Promise.all([
+    restRequest('GET', '/test_variants?id=eq.' + variantId + '&limit=1'),
+    restRequest('GET', '/test_variant_questions?variant_id=eq.' + variantId + '&order=num.asc'),
+    restRequest('GET', '/test_variant_source_texts?variant_id=eq.' + variantId)
+  ]);
+  if(!Array.isArray(vArr) || !vArr.length) throw new Error('Вариант не найден');
+  STATE.editVariantData = {
+    variant: vArr[0],
+    questions: Array.isArray(qArr) ? qArr : [],
+    sourceTexts: Array.isArray(sArr) ? sArr : []
+  };
+}
+
+/* Модалка редактирования сохранённого варианта.
+   Показывает все 27 вопросов в виде форм, исходные тексты, название.
+   При сохранении — PATCH/UPSERT для каждой изменённой записи. */
+function modalEditVariant(){
+  if(!STATE.editVariantId) return null;
+  const close = () => { STATE.editVariantId = null; STATE.editVariantData = null; render(); };
+
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        '✏️ Редактирование варианта'),
+      el('h2', { style:{ marginTop:'4px' }},
+        STATE.editVariantData ? STATE.editVariantData.variant.title : '⏳ Загружаю…')),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const body = el('div', { class:'modal-body' });
+
+  if(!STATE.editVariantData){
+    body.append(el('div', { style:{ textAlign:'center', color:'var(--ink-3)', padding:'30px' }}, '⏳ Загружаю данные варианта…'));
+    return el('div', { class:'modal-bg',
+      onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+    }, el('div', { class:'modal', style:{ maxWidth:'920px' }}, head, body));
+  }
+
+  const { variant, questions, sourceTexts } = STATE.editVariantData;
+  const qByNum = {};
+  questions.forEach(q => { qByNum[q.num] = q; });
+  const srcByKind = {};
+  sourceTexts.forEach(s => { srcByKind[s.kind] = s; });
+
+  /* Поле названия */
+  const titleInput = el('input', { type:'text', value: variant.title,
+    style:{ width:'100%', padding:'8px 12px', border:'1px solid var(--border-2)', borderRadius:'8px', fontSize:'14px', fontWeight:'700', boxSizing:'border-box', marginBottom:'14px' }
+  });
+  body.append(
+    el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px', fontWeight:'700' }}, 'Название'),
+    titleInput);
+
+  /* Сетка по заданиям 1-26 — каждое = textarea + answer input */
+  const taskInputs = {};
+  const ansInputs = {};
+  for(let n = 1; n <= 26; n++){
+    const q = qByNum[n];
+    const block = el('div', { style:{ marginTop:'10px', padding:'8px 10px', background:'var(--bg)', borderRadius:'8px', border:'1px solid var(--border)' }});
+    const taskTA = el('textarea', { rows:3,
+      style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'12px', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit' }
+    });
+    taskTA.value = q ? q.question_text : '';
+    const ansInp = el('input', { type:'text', value: q ? (q.correct_answer || '') : '',
+      style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'13px', fontWeight:'700', boxSizing:'border-box', marginTop:'4px' }
+    });
+    taskInputs[n] = taskTA;
+    ansInputs[n] = ansInp;
+    block.append(
+      el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--p-deep)', marginBottom:'4px' }}, '№' + n),
+      el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginBottom:'2px' }}, 'Формулировка'),
+      taskTA,
+      el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginTop:'4px', marginBottom:'2px' }},
+        'Правильный ответ (через / альтернативы, регистр и пробелы не важны)'),
+      ansInp);
+    body.append(block);
+  }
+
+  /* Исходные тексты */
+  const src13TA = el('textarea', { rows:5,
+    style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'11px', boxSizing:'border-box', resize:'vertical', marginTop:'4px' }
+  });
+  src13TA.value = (srcByKind['text_1_3'] || {}).body || '';
+  const src22TA = el('textarea', { rows:5,
+    style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'11px', boxSizing:'border-box', resize:'vertical', marginTop:'4px' }
+  });
+  src22TA.value = (srcByKind['text_22_26'] || {}).body || '';
+  const src27TA = el('textarea', { rows:5,
+    style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'11px', boxSizing:'border-box', resize:'vertical', marginTop:'4px' }
+  });
+  src27TA.value = qByNum[27] ? qByNum[27].question_text : '';
+
+  body.append(
+    el('div', { style:{ marginTop:'14px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }}, '📖 Исходный текст для заданий 1-3'),
+    src13TA,
+    el('div', { style:{ marginTop:'10px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }}, '📖 Исходный текст для заданий 22-26'),
+    src22TA,
+    el('div', { style:{ marginTop:'10px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }}, '✍️ Текст для сочинения (№27)'),
+    src27TA);
+
+  /* Сохранить и закрыть */
+  const saveBtn = el('button', { class:'btn btn-teal',
+    style:{ marginTop:'18px', width:'100%' },
+    onclick: async (ev) => {
+      ev.target.disabled = true;
+      ev.target.textContent = '⏳ Сохраняю…';
+      try {
+        /* 1. Title */
+        if(titleInput.value.trim() !== variant.title){
+          await restRequest('PATCH', '/test_variants?id=eq.' + variant.id,
+            { title: titleInput.value.trim() }, { prefer: 'return=minimal' });
+        }
+        /* 2. Вопросы 1-26 — upsert через POST с merge-duplicates по (variant_id, num) */
+        const qBatch = [];
+        for(let n = 1; n <= 26; n++){
+          const newTxt = taskInputs[n].value.trim();
+          const newAns = ansInputs[n].value.trim();
+          if(!newTxt && !newAns) continue;
+          qBatch.push({
+            variant_id: variant.id,
+            num: n,
+            question_text: newTxt,
+            correct_answer: newAns || null,
+            max_points: (qByNum[n] && qByNum[n].max_points) || 1,
+            source_kind: (n >= 1 && n <= 3) ? 'shared_1_3' : (n >= 22 && n <= 26) ? 'shared_22_26' : 'standalone'
+          });
+        }
+        if(qBatch.length){
+          await restRequest('POST', '/test_variant_questions', qBatch,
+            { prefer: 'resolution=merge-duplicates,return=minimal' });
+        }
+        /* №27 */
+        if(src27TA.value.trim()){
+          await restRequest('POST', '/test_variant_questions', [{
+            variant_id: variant.id, num: 27,
+            question_text: src27TA.value.trim(),
+            correct_answer: null,
+            max_points: 22,
+            source_kind: 'standalone'
+          }], { prefer: 'resolution=merge-duplicates,return=minimal' });
+        }
+        /* 3. Исходные тексты */
+        const sBatch = [];
+        if(src13TA.value.trim()) sBatch.push({ variant_id: variant.id, kind: 'text_1_3', body: src13TA.value.trim() });
+        if(src22TA.value.trim()) sBatch.push({ variant_id: variant.id, kind: 'text_22_26', body: src22TA.value.trim() });
+        if(sBatch.length){
+          await restRequest('POST', '/test_variant_source_texts', sBatch,
+            { prefer: 'resolution=merge-duplicates,return=minimal' });
+        }
+        showToast('✅ Изменения сохранены');
+        STATE.editVariantId = null;
+        STATE.editVariantData = null;
+        /* Перезагружаем сводную */
+        if(STATE.selectedVariantId === variant.id){
+          await loadVariantFull(variant.id);
+        }
+        render();
+      } catch(e){
+        console.error(e);
+        showToast('⚠ Ошибка: ' + e.message);
+        ev.target.disabled = false;
+        ev.target.textContent = '💾 Сохранить изменения';
+      }
+    }
+  }, '💾 Сохранить изменения');
+  body.append(saveBtn);
+
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+  }, el('div', { class:'modal', style:{ maxWidth:'920px' }}, head, body));
 }
 
 /* Модалка импорта сочинений из Excel. Учитель выбирает .xlsx,
@@ -14029,6 +14217,7 @@ function _renderNow(){
   if(STATE.essayDraftOpen) root.append(modalEssayDraft());
   if(STATE.essayImportOpen) root.append(modalEssayImport());
   if(STATE.pdfImportOpen) root.append(modalPdfImport());
+  if(STATE.editVariantId) root.append(modalEditVariant());
   if(STATE.linkAttempt) root.append(modalLinkStudent());
   if(STATE.linkEssay) root.append(modalLinkEssay());
   if(STATE.studentEssayResultOpen != null) root.append(modalEssayResult(STATE.studentEssayResultOpen));
