@@ -7499,10 +7499,10 @@ function studentVariantsCard(){
         } else {
           STATE.myVariantAnswers = {};
         }
-        /* Загружаем список вариантов pdf_import которые можно решить (есть вопросы) */
+        /* Загружаем только опубликованные PDF-варианты — ученик видит то что учитель открыл */
         try {
           const pdfVariants = await restRequest('GET',
-            '/test_variants?source=eq.pdf_import&select=id,title,questions_count,created_at&order=created_at.desc');
+            '/test_variants?source=eq.pdf_import&is_published=eq.true&select=id,title,questions_count,created_at&order=created_at.desc');
           STATE.availableVariants = Array.isArray(pdfVariants) ? pdfVariants : [];
         } catch(_){ STATE.availableVariants = []; }
         STATE.myVariantAttemptsLoaded = true;
@@ -11724,6 +11724,24 @@ function richTextEditor(initialHtml, opts){
   return wrap;
 }
 
+/* Пост-обработка текста задания: добавляет переносы строк перед нумерованными
+   вариантами ответов «1)», «2)», «3)», «4)», «5)», если они в одной строке.
+   Также перед буквенными вариантами «А)», «Б)», «В)», «Г)», «Д)» в задании 8.
+   А ещё разделяет заголовки «ГРАММАТИЧЕСКИЕ ОШИБКИ» / «ПРЕДЛОЖЕНИЯ» (задание 8). */
+function postProcessTaskText(text){
+  if(!text) return text;
+  let t = text;
+  /* Цифровые варианты 1)..9) */
+  t = t.replace(/(\S)\s+(\d\))\s+/g, '$1\n$2 ');
+  /* Буквенные варианты А)..Д) (для №8) */
+  t = t.replace(/(\S)\s+([АБВГДЕ]\))\s+/g, '$1\n$2 ');
+  /* Заголовки таблицы (задание 8) */
+  t = t.replace(/(\S)\s+(ГРАММАТИЧЕСКИЕ\s+ОШИБКИ|ПРЕДЛОЖЕНИЯ)\s+/g, '$1\n$2\n');
+  /* Уберём лишние пустые строки */
+  t = t.replace(/\n{3,}/g, '\n\n');
+  return t.trim();
+}
+
 /* Парсер PDF варианта.
    Возвращает [{ num, title, source_1_3, source_22_26, tasks: {1:..., 2:..., ...} }] */
 async function parseVariantPdf(arrayBuffer){
@@ -11753,6 +11771,7 @@ async function parseVariantPdf(arrayBuffer){
                  .split(/\n*Часть\s*2/)[0]
                  .split(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s+22/)[0]
                  .trim();
+      body = postProcessTaskText(body);
       tasks[n] = body;
     }
     variants.push({
@@ -12009,7 +12028,7 @@ function matchOtpToProfile(otpName, students){
 async function loadVariantsList(){
   try {
     const list = await restRequest('GET',
-      '/test_variants?select=id,title,questions_count,total_max_score,created_at,source&order=created_at.desc');
+      '/test_variants?select=id,title,questions_count,total_max_score,created_at,source,is_published&order=created_at.desc');
     STATE.variantsList = Array.isArray(list) ? list : [];
     STATE.variantsListLoaded = true;
   } catch(e){
@@ -12228,6 +12247,44 @@ function viewTeacherVariants(){
   }
 
   STATE.variantsList.forEach(v => {
+    const isPdf = v.source === 'pdf_import';
+    const isPub = !!v.is_published;
+    /* Шеврон публикации — только для решаемых (pdf_import) */
+    const pubBtn = isPdf ? el('button', {
+      class:'btn-icon',
+      title: isPub ? 'Открыт для учеников — клик чтобы скрыть' : 'Скрыт от учеников — клик чтобы открыть',
+      style:{ background: isPub ? '#D1FAE5' : 'transparent', color: isPub ? '#065F46' : 'var(--ink-3)', fontSize:'18px' },
+      onclick: async (ev) => {
+        ev.stopPropagation();
+        try {
+          await restRequest('PATCH', '/test_variants?id=eq.' + v.id,
+            { is_published: !isPub }, { prefer: 'return=minimal' });
+          v.is_published = !isPub;
+          showToast(isPub ? '🙈 Скрыт от учеников' : '👁 Открыт ученикам');
+          render();
+        } catch(e){ showToast('⚠ ' + e.message); }
+      }
+    }, isPub ? '👁' : '🙈') : null;
+    /* Кнопка удаления */
+    const delBtn = el('button', {
+      class:'btn-icon',
+      title:'Удалить вариант',
+      style:{ background:'#FEE2E2', color:'#991B1B' },
+      onclick: async (ev) => {
+        ev.stopPropagation();
+        if(!confirm('Удалить вариант «' + v.title + '»? Это удалит все задания, попытки и ответы по нему. Действие нельзя отменить.')) return;
+        try {
+          await restRequest('DELETE', '/test_variants?id=eq.' + v.id, null, { prefer: 'return=minimal' });
+          showToast('🗑️ Вариант удалён');
+          STATE.variantsList = STATE.variantsList.filter(x => x.id !== v.id);
+          if(STATE.selectedVariantId === v.id){
+            STATE.selectedVariantId = null;
+            STATE.currentVariantData = null;
+          }
+          render();
+        } catch(e){ showToast('⚠ ' + e.message); }
+      }
+    }, '🗑️');
     wrap.append(el('div', { class:'card', style:{ marginBottom:'10px', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px' },
       onclick: async () => {
         STATE.selectedVariantId = v.id;
@@ -12237,13 +12294,17 @@ function viewTeacherVariants(){
         render();
       }
     },
-      el('div', null,
+      el('div', { style:{ minWidth:0, flex:1 }},
         el('h3', null, '📋 ' + v.title),
         el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'2px' }},
           (v.questions_count || 27) + ' заданий · ' +
           (v.total_max_score ? 'макс ' + v.total_max_score + ' б · ' : '') +
-          'загружен ' + new Date(v.created_at).toLocaleDateString('ru-RU'))),
-      el('span', { style:{ color:'var(--p)', fontSize:'14px', fontWeight:'700' }}, 'Открыть →')));
+          'загружен ' + new Date(v.created_at).toLocaleDateString('ru-RU') +
+          (isPdf ? (isPub ? ' · 👁 виден ученикам' : ' · 🙈 скрыт') : ''))),
+      el('div', { style:{ display:'flex', gap:'6px', alignItems:'center' }},
+        pubBtn,
+        delBtn,
+        el('span', { style:{ color:'var(--p)', fontSize:'14px', fontWeight:'700', marginLeft:'4px' }}, 'Открыть →'))));
   });
 
   return wrap;
