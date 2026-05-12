@@ -2242,7 +2242,10 @@ async function loadAchievementsFromDb(){
           '/user_achievements?student_id=eq.' + encodeURIComponent(MY_PROFILE.id) + '&select=achievement_id',
           null, { noRetry: true });
         if(Array.isArray(ua)) unlockedIds = new Set(ua.map(r => r.achievement_id));
-      } catch(_){ /* тихо: достижения не критичны для UX */ }
+      } catch(e){
+        /* Если 403/RLS — скажем в лог чтобы было видно. Не падаем, не критично для UX */
+        console.warn('[achievements] не удалось загрузить разблокированные:', e.message);
+      }
     }
     ACHIEVEMENTS = defs.map(d => ({
       id: d.id,
