@@ -11607,14 +11607,11 @@ async function pdfExtractPages(arrayBuffer){
   for(let i = 1; i <= pdf.numPages; i++){
     const page = await pdf.getPage(i);
     const tc = await page.getTextContent();
-    /* Сгруппируем items по y-координате (одна линия), и в линии — по x.
-       Это даёт нормальный текст без лишних склеек. */
     const items = tc.items.map(it => ({
       str: it.str,
       x: it.transform[4],
       y: Math.round(it.transform[5]),
     }));
-    /* Группируем по y с допуском */
     const byY = {};
     items.forEach(it => {
       const key = Math.round(it.y);
@@ -11629,6 +11626,68 @@ async function pdfExtractPages(arrayBuffer){
     pages.push(lines.join('\n'));
   }
   return pages;
+}
+
+/* Безопасная очистка HTML — оставляем только b, i, u, strong, em, br */
+function sanitizeQuestionHtml(html){
+  if(!html) return '';
+  /* Парсим в DOM и обходим, оставляя только разрешённые теги */
+  const tmpl = document.createElement('template');
+  tmpl.innerHTML = String(html);
+  const allowed = new Set(['B', 'I', 'U', 'STRONG', 'EM', 'BR']);
+  const walk = (node) => {
+    const children = Array.from(node.childNodes);
+    for(const ch of children){
+      if(ch.nodeType === 1){
+        if(!allowed.has(ch.tagName)){
+          /* Раскрываем теневое содержимое наружу */
+          while(ch.firstChild) ch.parentNode.insertBefore(ch.firstChild, ch);
+          ch.remove();
+        } else {
+          /* Удаляем все атрибуты */
+          [...ch.attributes].forEach(a => ch.removeAttribute(a.name));
+          walk(ch);
+        }
+      }
+    }
+  };
+  walk(tmpl.content);
+  return tmpl.innerHTML;
+}
+
+/* Простой rich-text редактор: contenteditable + тулбар Ж/К/П */
+function richTextEditor(initialHtml, opts){
+  opts = opts || {};
+  const wrap = el('div', { style:{ border:'1px solid var(--border-2)', borderRadius:'6px', overflow:'hidden', background:'#fff', marginTop:'4px' }});
+  const toolbar = el('div', { style:{ display:'flex', gap:'2px', padding:'4px 6px', background:'#F9FAFB', borderBottom:'1px solid var(--border)' }});
+  const editor = el('div', { contenteditable: 'true',
+    style:{ padding:'8px 10px', fontSize: (opts.fontSize || '13px'), minHeight: (opts.minHeight || '60px'),
+            outline:'none', fontFamily:'inherit', lineHeight:'1.5' }});
+  editor.innerHTML = sanitizeQuestionHtml(initialHtml || '');
+  const btn = (label, cmd, title) => el('button', {
+    type:'button',
+    style:{ padding:'2px 8px', border:'1px solid var(--border-2)', background:'#fff', borderRadius:'4px', cursor:'pointer', fontSize:'12px', fontWeight: cmd === 'bold' ? '700' : 'normal', fontStyle: cmd === 'italic' ? 'italic' : 'normal', textDecoration: cmd === 'underline' ? 'underline' : 'none' },
+    title: title || '',
+    onclick: (ev) => {
+      ev.preventDefault();
+      editor.focus();
+      try { document.execCommand(cmd, false, null); } catch(_){}
+    }
+  }, label);
+  toolbar.append(
+    btn('Ж', 'bold', 'Жирный (Ctrl+B)'),
+    btn('К', 'italic', 'Курсив (Ctrl+I)'),
+    btn('П', 'underline', 'Подчёркнутый (Ctrl+U)'),
+    el('button', { type:'button',
+      style:{ padding:'2px 8px', border:'1px solid var(--border-2)', background:'#fff', borderRadius:'4px', cursor:'pointer', fontSize:'12px', color:'var(--ink-3)' },
+      title:'Очистить форматирование',
+      onclick: (ev) => { ev.preventDefault(); editor.focus(); try { document.execCommand('removeFormat', false, null); } catch(_){} }
+    }, '⌫')
+  );
+  wrap.append(toolbar, editor);
+  wrap.getHtml = () => sanitizeQuestionHtml(editor.innerHTML);
+  wrap.setHtml = (html) => { editor.innerHTML = sanitizeQuestionHtml(html || ''); };
+  return wrap;
 }
 
 /* Парсер PDF варианта.
@@ -12519,48 +12578,36 @@ function renderPdfPreview(preview, closeFn){
       el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'10px' }}, 'Название варианта (как ученик увидит)'),
       titleField);
 
-    /* Сетка по заданиям 1-26 — текст + ответ */
+    /* Сетка по заданиям 1-26 — rich-text-редактор + ответ */
     const taskInputs = {};
     const ansInputs = {};
     for(let n = 1; n <= 26; n++){
       const taskTxt = v.tasks[n] || '';
       const ans = keysFor.answers[n] || '';
       const block = el('div', { style:{ marginTop:'10px', padding:'8px 10px', background:'var(--surface)', borderRadius:'8px', border:'1px solid var(--border)' }});
-      const taskTA = el('textarea', { rows:3,
-        style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'12px', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit' }
-      });
-      taskTA.value = taskTxt;
+      const taskEd = richTextEditor(taskTxt, { minHeight:'60px', fontSize:'12px' });
       const ansInp = el('input', { type:'text', value: ans,
         style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'13px', fontWeight:'700', boxSizing:'border-box', marginTop:'4px' }
       });
-      taskInputs[n] = taskTA;
+      taskInputs[n] = taskEd;
       ansInputs[n] = ansInp;
       block.append(
         el('div', { style:{ display:'flex', justifyContent:'space-between', marginBottom:'4px', fontSize:'12px', fontWeight:'700', color:'var(--p-deep)' }},
           el('span', null, '№' + n),
           el('span', { style:{ color: ans ? 'var(--green)' : 'var(--red)', fontSize:'10px' }},
             ans ? '🔑 ответ есть' : '⚠ ответ не распознан')),
-        el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginBottom:'2px' }}, 'Формулировка'),
-        taskTA,
+        el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginBottom:'2px' }}, 'Формулировка (выдели слова и жми Ж/К/П)'),
+        taskEd,
         el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginTop:'4px', marginBottom:'2px' }},
-          'Ответ (несколько вариантов через /, регистр и пробелы не важны)'),
+          'Правильный ответ (если есть альтернативы — через /, ученик пишет один)'),
         ansInp);
       det.append(block);
     }
 
-    /* Источники текстов */
-    const src13 = el('textarea', { rows:4,
-      style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'11px', boxSizing:'border-box', resize:'vertical', marginTop:'4px' }
-    });
-    src13.value = v.source_1_3 || '';
-    const src22 = el('textarea', { rows:4,
-      style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'11px', boxSizing:'border-box', resize:'vertical', marginTop:'4px' }
-    });
-    src22.value = v.source_22_26 || '';
-    const src27 = el('textarea', { rows:4,
-      style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'11px', boxSizing:'border-box', resize:'vertical', marginTop:'4px' }
-    });
-    src27.value = v.tasks[27] || '';
+    /* Источники текстов — rich-text */
+    const src13 = richTextEditor(v.source_1_3 || '', { minHeight:'80px', fontSize:'11px' });
+    const src22 = richTextEditor(v.source_22_26 || '', { minHeight:'80px', fontSize:'11px' });
+    const src27 = richTextEditor(v.tasks[27] || '', { minHeight:'80px', fontSize:'11px' });
 
     det.append(
       el('div', { style:{ marginTop:'12px', fontSize:'11px', fontWeight:'700', color:'var(--ink-2)' }}, '📖 Исходный текст для заданий 1-3'),
@@ -12579,11 +12626,11 @@ function renderPdfPreview(preview, closeFn){
         try {
           await savePdfVariantToDb({
             title: titleField.value.trim() || ('Вариант ' + v.num),
-            tasks: Object.fromEntries(Object.entries(taskInputs).map(([n, ta]) => [n, ta.value])),
+            tasks: Object.fromEntries(Object.entries(taskInputs).map(([n, ed]) => [n, ed.getHtml()])),
             answers: Object.fromEntries(Object.entries(ansInputs).map(([n, inp]) => [n, inp.value])),
-            source_1_3: src13.value,
-            source_22_26: src22.value,
-            essay_text: src27.value
+            source_1_3: src13.getHtml(),
+            source_22_26: src22.getHtml(),
+            essay_text: src27.getHtml()
           });
           showToast('✅ Вариант «' + (titleField.value || 'без названия') + '» сохранён в платформу');
           saveBtn.textContent = '✓ Сохранено';
@@ -12719,52 +12766,40 @@ function modalEditVariant(){
     el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px', fontWeight:'700' }}, 'Название'),
     titleInput);
 
-  /* Сетка по заданиям 1-26 — каждое = textarea + answer input */
+  /* Сетка по заданиям 1-26 — каждое = rich-text-редактор + answer input */
   const taskInputs = {};
   const ansInputs = {};
   for(let n = 1; n <= 26; n++){
     const q = qByNum[n];
     const block = el('div', { style:{ marginTop:'10px', padding:'8px 10px', background:'var(--bg)', borderRadius:'8px', border:'1px solid var(--border)' }});
-    const taskTA = el('textarea', { rows:3,
-      style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'12px', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit' }
-    });
-    taskTA.value = q ? q.question_text : '';
+    const taskEd = richTextEditor(q ? (q.question_text || '') : '', { minHeight:'60px', fontSize:'12px' });
     const ansInp = el('input', { type:'text', value: q ? (q.correct_answer || '') : '',
       style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'13px', fontWeight:'700', boxSizing:'border-box', marginTop:'4px' }
     });
-    taskInputs[n] = taskTA;
+    taskInputs[n] = taskEd;
     ansInputs[n] = ansInp;
     block.append(
       el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--p-deep)', marginBottom:'4px' }}, '№' + n),
-      el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginBottom:'2px' }}, 'Формулировка'),
-      taskTA,
+      el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginBottom:'2px' }}, 'Формулировка (выдели слово и жми Ж/К/П для форматирования)'),
+      taskEd,
       el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginTop:'4px', marginBottom:'2px' }},
-        'Правильный ответ (через / альтернативы, регистр и пробелы не важны)'),
+        'Правильный ответ ученика (если есть альтернативы — через /, ученик пишет один любой допустимый)'),
       ansInp);
     body.append(block);
   }
 
-  /* Исходные тексты */
-  const src13TA = el('textarea', { rows:5,
-    style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'11px', boxSizing:'border-box', resize:'vertical', marginTop:'4px' }
-  });
-  src13TA.value = (srcByKind['text_1_3'] || {}).body || '';
-  const src22TA = el('textarea', { rows:5,
-    style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'11px', boxSizing:'border-box', resize:'vertical', marginTop:'4px' }
-  });
-  src22TA.value = (srcByKind['text_22_26'] || {}).body || '';
-  const src27TA = el('textarea', { rows:5,
-    style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'11px', boxSizing:'border-box', resize:'vertical', marginTop:'4px' }
-  });
-  src27TA.value = qByNum[27] ? qByNum[27].question_text : '';
+  /* Исходные тексты — тоже rich-text */
+  const src13Ed = richTextEditor((srcByKind['text_1_3'] || {}).body || '', { minHeight:'100px', fontSize:'11px' });
+  const src22Ed = richTextEditor((srcByKind['text_22_26'] || {}).body || '', { minHeight:'100px', fontSize:'11px' });
+  const src27Ed = richTextEditor(qByNum[27] ? (qByNum[27].question_text || '') : '', { minHeight:'100px', fontSize:'11px' });
 
   body.append(
     el('div', { style:{ marginTop:'14px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }}, '📖 Исходный текст для заданий 1-3'),
-    src13TA,
+    src13Ed,
     el('div', { style:{ marginTop:'10px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }}, '📖 Исходный текст для заданий 22-26'),
-    src22TA,
+    src22Ed,
     el('div', { style:{ marginTop:'10px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }}, '✍️ Текст для сочинения (№27)'),
-    src27TA);
+    src27Ed);
 
   /* Сохранить и закрыть */
   const saveBtn = el('button', { class:'btn btn-teal',
@@ -12781,7 +12816,7 @@ function modalEditVariant(){
         /* 2. Вопросы 1-26 — upsert через POST с merge-duplicates по (variant_id, num) */
         const qBatch = [];
         for(let n = 1; n <= 26; n++){
-          const newTxt = taskInputs[n].value.trim();
+          const newTxt = taskInputs[n].getHtml().trim();
           const newAns = ansInputs[n].value.trim();
           if(!newTxt && !newAns) continue;
           qBatch.push({
@@ -12798,10 +12833,10 @@ function modalEditVariant(){
             { prefer: 'resolution=merge-duplicates,return=minimal' });
         }
         /* №27 */
-        if(src27TA.value.trim()){
+        if(src27Ed.getHtml().trim()){
           await restRequest('POST', '/test_variant_questions', [{
             variant_id: variant.id, num: 27,
-            question_text: src27TA.value.trim(),
+            question_text: src27Ed.getHtml().trim(),
             correct_answer: null,
             max_points: 22,
             source_kind: 'standalone'
@@ -12809,8 +12844,8 @@ function modalEditVariant(){
         }
         /* 3. Исходные тексты */
         const sBatch = [];
-        if(src13TA.value.trim()) sBatch.push({ variant_id: variant.id, kind: 'text_1_3', body: src13TA.value.trim() });
-        if(src22TA.value.trim()) sBatch.push({ variant_id: variant.id, kind: 'text_22_26', body: src22TA.value.trim() });
+        if(src13Ed.getHtml().trim()) sBatch.push({ variant_id: variant.id, kind: 'text_1_3', body: src13Ed.getHtml().trim() });
+        if(src22Ed.getHtml().trim()) sBatch.push({ variant_id: variant.id, kind: 'text_22_26', body: src22Ed.getHtml().trim() });
         if(sBatch.length){
           await restRequest('POST', '/test_variant_source_texts', sBatch,
             { prefer: 'resolution=merge-duplicates,return=minimal' });
