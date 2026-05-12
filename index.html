@@ -579,6 +579,16 @@ const STATE = {
   /* Редактирование уже сохранённого варианта */
   editVariantId: null,     // id варианта для модалки редактирования
   editVariantData: null,   // { variant, questions, sourceTexts } после загрузки
+  /* Режим решения варианта учеником (полноэкранный) */
+  solverVariantId: null,         // если != null — показываем страницу решения
+  solverData: null,              // { variant, questions, sourceTexts }
+  solverAnswers: {},             // { num: 'user input', ... }
+  solverStartedAt: null,         // timestamp начала
+  solverFinishedAt: null,        // timestamp завершения (после Завершить)
+  solverResult: null,            // массив [{ num, user, isCorrect, points, max }]
+  solverResultAttemptId: null,   // id сохранённой попытки после завершения
+  solverParentAttemptId: null,   // если это работа над ошибками — id первой попытки
+  solverFilteredNums: null,      // если работа над ошибками — массив номеров
   contentEditTaskN: null,  // открыта модалка редактирования теории по номеру
   chatOpen: false,
   chatChannel: 'group',
@@ -7459,22 +7469,22 @@ function studentVariantsCard(){
     el('h3', { style:{ marginBottom:'4px' }}, '📋 Мои пробники'),
     el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'12px' }},
       'Твои результаты по пробным вариантам. Клик по строке — увидишь все свои ответы и ошибки. Чужие результаты не показываются.'));
+  const availableBlock = el('div', null);
+  card.append(availableBlock);
   const list = el('div', null);
   card.append(list);
 
-  /* Ленивая загрузка попыток + ответов */
+  /* Ленивая загрузка попыток + ответов + доступных вариантов */
   if(!STATE.myVariantAttemptsLoaded){
     list.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'10px 0' }}, '⏳ Загружаю результаты…'));
     (async () => {
       try {
-        /* Догрузим сочинения если ещё не было — нужно для расчёта К1-К10 */
         if(!ESSAYS_LOADED){ try { await loadEssaysFromDb(); } catch(_){} }
         const atts = await restRequest('GET',
           '/test_variant_attempts?profile_id=eq.' + MY_PROFILE.id +
           '&select=*,variant:test_variants(id,title,questions_count,total_max_score,created_at)' +
           '&order=finished_at.desc.nullslast,imported_at.desc');
         STATE.myVariantAttempts = Array.isArray(atts) ? atts : [];
-        /* Загружаем все ответы сразу одним запросом для расчётов */
         const attIds = STATE.myVariantAttempts.map(a => a.id);
         if(attIds.length){
           const answers = await restRequest('GET',
@@ -7489,17 +7499,41 @@ function studentVariantsCard(){
         } else {
           STATE.myVariantAnswers = {};
         }
+        /* Загружаем список вариантов pdf_import которые можно решить (есть вопросы) */
+        try {
+          const pdfVariants = await restRequest('GET',
+            '/test_variants?source=eq.pdf_import&select=id,title,questions_count,created_at&order=created_at.desc');
+          STATE.availableVariants = Array.isArray(pdfVariants) ? pdfVariants : [];
+        } catch(_){ STATE.availableVariants = []; }
         STATE.myVariantAttemptsLoaded = true;
         render();
       } catch(e){
         console.warn('[student variants] load error:', e.message);
         STATE.myVariantAttempts = [];
         STATE.myVariantAnswers = {};
+        STATE.availableVariants = [];
         STATE.myVariantAttemptsLoaded = true;
         render();
       }
     })();
     return card;
+  }
+
+  /* Доступные для решения варианты — те где есть вопросы (pdf_import) и нет моей попытки */
+  const triedIds = new Set((STATE.myVariantAttempts || []).map(a => a.variant_id));
+  const available = (STATE.availableVariants || []).filter(v => !triedIds.has(v.id));
+  if(available.length){
+    availableBlock.append(el('div', { style:{ marginBottom:'14px', padding:'12px 14px', background:'#F5F3FF', border:'1px solid #A78BFA', borderRadius:'10px' }},
+      el('h4', { style:{ marginBottom:'8px' }}, '🎯 Доступные пробники'),
+      el('div', { style:{ display:'flex', flexDirection:'column', gap:'6px' }},
+        available.map(v => el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px', padding:'8px 10px', background:'#fff', borderRadius:'8px', flexWrap:'wrap' }},
+          el('div', { style:{ minWidth:0, flex:1 }},
+            el('div', { style:{ fontWeight:'700', fontSize:'13px' }}, v.title),
+            el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }},
+              (v.questions_count || 27) + ' заданий')),
+          el('button', { class:'btn btn-p btn-sm',
+            onclick: () => { startSolvingVariant(v.id); }
+          }, '▶ Начать'))))));
   }
 
   const atts = STATE.myVariantAttempts || [];
@@ -12713,6 +12747,412 @@ async function savePdfVariantToDb(data){
   return variantId;
 }
 
+/* ============================================================
+   РЕШАЛКА ВАРИАНТА У УЧЕНИКА
+   ============================================================ */
+
+/* Нормализация ответа: lowercase, без пробелов и запятых, ё→е */
+function normalizeAnswer(s){
+  return String(s == null ? '' : s).toLowerCase()
+    .replace(/ё/g, 'е')
+    .replace(/[\s,\. ]/g, '')
+    .trim();
+}
+/* Проверка: разделяем правильный ответ по / и сравниваем с любым из вариантов */
+function checkUserAnswer(userInput, correctAnswer){
+  const norm = normalizeAnswer(userInput);
+  if(!norm) return false;
+  const alts = String(correctAnswer || '').split('/').map(normalizeAnswer).filter(Boolean);
+  return alts.length > 0 && alts.includes(norm);
+}
+
+/* Загрузка варианта для решения */
+async function loadVariantForSolving(variantId){
+  const [vArr, qArr, sArr] = await Promise.all([
+    restRequest('GET', '/test_variants?id=eq.' + variantId + '&limit=1'),
+    restRequest('GET', '/test_variant_questions?variant_id=eq.' + variantId + '&order=num.asc'),
+    restRequest('GET', '/test_variant_source_texts?variant_id=eq.' + variantId)
+  ]);
+  if(!Array.isArray(vArr) || !vArr.length) throw new Error('Вариант не найден');
+  return { variant: vArr[0], questions: qArr || [], sourceTexts: sArr || [] };
+}
+
+/* Открыть решалку. Если isRetry=true — это работа над ошибками, фильтруем
+   только неверные номера из родительской попытки. */
+async function startSolvingVariant(variantId, opts){
+  opts = opts || {};
+  STATE.solverVariantId = variantId;
+  STATE.solverData = null;
+  STATE.solverAnswers = {};
+  STATE.solverResult = null;
+  STATE.solverResultAttemptId = null;
+  STATE.solverFinishedAt = null;
+  STATE.solverStartedAt = Date.now();
+  STATE.solverParentAttemptId = opts.parentAttemptId || null;
+  STATE.solverFilteredNums = opts.filterNums || null;
+  render();
+  try {
+    STATE.solverData = await loadVariantForSolving(variantId);
+    /* Подтянем черновик из localStorage если был */
+    const draftKey = 'zebrus_solver_' + variantId + (opts.parentAttemptId ? '_retry' + opts.parentAttemptId : '');
+    try {
+      const raw = localStorage.getItem(draftKey);
+      if(raw){
+        const d = JSON.parse(raw);
+        if(d.answers) STATE.solverAnswers = d.answers;
+        if(d.startedAt && !opts.parentAttemptId) STATE.solverStartedAt = d.startedAt;
+      }
+    } catch(_){}
+  } catch(e){
+    showToast('⚠ ' + e.message);
+    STATE.solverVariantId = null;
+  }
+  render();
+}
+
+/* Автосохранение черновика */
+function saveSolverDraft(){
+  if(!STATE.solverVariantId) return;
+  const draftKey = 'zebrus_solver_' + STATE.solverVariantId +
+    (STATE.solverParentAttemptId ? '_retry' + STATE.solverParentAttemptId : '');
+  try {
+    localStorage.setItem(draftKey, JSON.stringify({
+      answers: STATE.solverAnswers,
+      startedAt: STATE.solverStartedAt
+    }));
+  } catch(_){}
+}
+
+/* Очистка черновика после завершения */
+function clearSolverDraft(){
+  if(!STATE.solverVariantId) return;
+  const draftKey = 'zebrus_solver_' + STATE.solverVariantId +
+    (STATE.solverParentAttemptId ? '_retry' + STATE.solverParentAttemptId : '');
+  try { localStorage.removeItem(draftKey); } catch(_){}
+}
+
+/* Завершение попытки: автопроверка + сохранение в БД */
+async function finishSolvingAndSave(){
+  if(!STATE.solverData || !STATE.solverVariantId) return;
+  if(!MY_PROFILE){ showToast('Нет профиля — авторизуйся'); return; }
+  STATE.solverFinishedAt = Date.now();
+  const data = STATE.solverData;
+  const filterNums = STATE.solverFilteredNums;
+  /* Считаем результаты */
+  const result = [];
+  let total = 0, max = 0;
+  let correctCount = 0;
+  data.questions.forEach(q => {
+    if(q.num >= 27) return;        // сочинение отдельно
+    if(filterNums && !filterNums.includes(q.num)) return;
+    const user = STATE.solverAnswers[q.num] || '';
+    const isCorrect = checkUserAnswer(user, q.correct_answer || '');
+    const points = isCorrect ? Number(q.max_points || 1) : 0;
+    total += points;
+    max += Number(q.max_points || 1);
+    if(isCorrect) correctCount++;
+    result.push({ num: q.num, user, isCorrect, points, max: Number(q.max_points || 1),
+      correct: q.correct_answer || '' });
+  });
+
+  const timeSeconds = Math.round((STATE.solverFinishedAt - STATE.solverStartedAt) / 1000);
+  const percent = max > 0 ? Math.round(total / max * 1000) / 10 : 0;
+
+  /* 1. Создать попытку */
+  let attemptId = null;
+  try {
+    const att = await restRequest('POST', '/test_variant_attempts', {
+      variant_id: STATE.solverVariantId,
+      profile_id: MY_PROFILE.id,
+      otp_full_name: MY_PROFILE.full_name || null,
+      otp_user: MY_PROFILE.full_name || null,
+      finished_at: new Date(STATE.solverFinishedAt).toISOString(),
+      started_at: new Date(STATE.solverStartedAt).toISOString(),
+      time_spent_seconds: timeSeconds,
+      correct_count: correctCount,
+      percent_correct: percent,
+      total_score: Math.floor(total),
+      parent_attempt_id: STATE.solverParentAttemptId,
+      attempt_no: STATE.solverParentAttemptId ? 2 : 1,
+    }, { prefer: 'return=representation' });
+    attemptId = Array.isArray(att) ? att[0].id : att.id;
+  } catch(e){
+    showToast('⚠ Не удалось сохранить попытку: ' + e.message);
+    return;
+  }
+  /* 2. Записать ответы */
+  const answersPayload = result.map(r => ({
+    attempt_id: attemptId,
+    question_num: r.num,
+    user_answer: r.user,
+    points: r.points,
+    max_points: r.max,
+  }));
+  if(answersPayload.length){
+    try {
+      await restRequest('POST', '/test_variant_answers', answersPayload, { prefer: 'return=minimal' });
+    } catch(e){ console.warn('answers save error', e.message); }
+  }
+  clearSolverDraft();
+  STATE.solverResult = result;
+  STATE.solverResultAttemptId = attemptId;
+  /* Инвалидируем кэш «Мои пробники» — чтоб обновился список */
+  STATE.myVariantAttemptsLoaded = false;
+  render();
+}
+
+/* Найти исходный текст по виду */
+function findSourceText(sourceTexts, kind){
+  const t = (sourceTexts || []).find(s => s.kind === kind);
+  return t ? t.body : '';
+}
+
+/* Какой текст показывать рядом с заданием N */
+function sourceTextForNum(sourceTexts, num){
+  if(num >= 1 && num <= 3) return { title: 'Текст к заданиям 1-3', body: findSourceText(sourceTexts, 'text_1_3') };
+  if(num >= 22 && num <= 26) return { title: 'Текст к заданиям 22-26', body: findSourceText(sourceTexts, 'text_22_26') };
+  return null;
+}
+
+/* ====== Главный экран решения ======
+   Рисуется поверх обычного UI когда STATE.solverVariantId != null. */
+function viewSolverVariant(){
+  if(!STATE.solverData){
+    return el('div', { class:'fade-in', style:{ textAlign:'center', padding:'40px', color:'var(--ink-3)' }},
+      '⏳ Загружаю вариант…');
+  }
+  /* Если завершено — рисуем страницу результата */
+  if(STATE.solverResult){
+    return viewSolverResult();
+  }
+  const data = STATE.solverData;
+  const v = data.variant;
+  const filterNums = STATE.solverFilteredNums;
+  const questions = data.questions
+    .filter(q => q.num >= 1 && q.num <= 26)
+    .filter(q => !filterNums || filterNums.includes(q.num));
+
+  const wrap = el('div', { class:'fade-in', style:{ paddingBottom:'80px' }});
+
+  /* Шапка с таймером */
+  const tickerEl = el('span', { style:{ fontWeight:'700', fontSize:'15px' }}, '00:00');
+  const updateTimer = () => {
+    if(!STATE.solverStartedAt || STATE.solverFinishedAt) return;
+    const s = Math.floor((Date.now() - STATE.solverStartedAt) / 1000);
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    tickerEl.textContent = String(m).padStart(2,'0') + ':' + String(sec).padStart(2,'0');
+  };
+  updateTimer();
+  if(!STATE._solverTimerId){
+    STATE._solverTimerId = setInterval(() => {
+      if(STATE.solverVariantId && !STATE.solverFinishedAt) updateTimer();
+      else { clearInterval(STATE._solverTimerId); STATE._solverTimerId = null; }
+    }, 1000);
+  }
+
+  const header = el('div', { style:{ position:'sticky', top:0, zIndex:10, background:'var(--surface)', borderBottom:'2px solid var(--p)', padding:'12px 16px', marginBottom:'14px', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        '🎯 Решаю пробник' + (STATE.solverParentAttemptId ? ' · работа над ошибками' : '')),
+      el('h2', { style:{ marginTop:'2px' }}, v.title)),
+    el('div', { style:{ display:'flex', gap:'10px', alignItems:'center' }},
+      el('span', { style:{ fontSize:'10px', color:'var(--ink-3)' }}, '⏱'),
+      tickerEl,
+      el('button', { class:'btn btn-secondary btn-sm',
+        onclick: () => {
+          if(!confirm('Выйти и не сохранять? Черновик ответов останется — сможешь продолжить позже.')) return;
+          STATE.solverVariantId = null;
+          STATE.solverData = null;
+          render();
+        }
+      }, '✕ Выйти'),
+      el('button', { class:'btn btn-teal',
+        onclick: async () => {
+          const unanswered = questions.filter(q => !(STATE.solverAnswers[q.num] || '').trim());
+          if(unanswered.length){
+            if(!confirm('Не отвечено заданий: ' + unanswered.length + '. Всё равно завершить?')) return;
+          } else if(!confirm('Завершить пробник? Ответы будут проверены автоматически.')) return;
+          await finishSolvingAndSave();
+        }
+      }, '✅ Завершить')));
+  wrap.append(header);
+
+  /* Инструкция */
+  wrap.append(el('div', { class:'card', style:{ background:'#FFFDF7', borderColor:'#FACC15', marginBottom:'14px' }},
+    el('div', { style:{ fontSize:'13px', lineHeight:'1.5' }},
+      el('b', null, 'Правила ответа: '),
+      'пиши ', el('b', null, 'один ответ'), ' для каждого задания. ',
+      'Регистр (большие/маленькие буквы) не учитывается. Пробелы и запятые игнорируются. ',
+      'Если у задания есть несколько правильных вариантов — подойдёт любой из них.')));
+
+  /* Главная сетка: левая — задания, правая (sticky) — текст */
+  const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 360px)', gap:'14px', alignItems:'flex-start' }});
+
+  const left = el('div', { style:{ minWidth:0 }});
+  const right = el('aside', { style:{ position:'sticky', top:'110px', maxHeight:'calc(100vh - 130px)', overflowY:'auto' }});
+
+  /* Какие тексты-источники могут понадобиться */
+  const has13 = !!findSourceText(data.sourceTexts, 'text_1_3');
+  const has2226 = !!findSourceText(data.sourceTexts, 'text_22_26');
+
+  /* Sticky-панель справа: переключатель между двумя текстами */
+  let activeSrcKind = (filterNums && filterNums.some(n => n >= 22)) ? 'text_22_26'
+                    : (filterNums && filterNums.every(n => n <= 21)) ? 'text_1_3'
+                    : 'text_1_3';
+  const drawRight = () => {
+    right.innerHTML = '';
+    if(!has13 && !has2226){
+      right.append(el('div', { class:'card', style:{ color:'var(--ink-3)', fontSize:'12px' }}, 'Исходного текста нет.'));
+      return;
+    }
+    const tabs = el('div', { style:{ display:'flex', gap:'4px', marginBottom:'8px' }});
+    const mk = (kind, label) => el('button', {
+      style:{ flex:1, padding:'8px 10px', borderRadius:'8px', fontSize:'12px', fontWeight:'700',
+              border: activeSrcKind === kind ? '2px solid var(--p)' : '1px solid var(--border-2)',
+              background: activeSrcKind === kind ? 'var(--p-soft)' : 'var(--surface)',
+              color: activeSrcKind === kind ? 'var(--p-deep)' : 'var(--ink-2)', cursor:'pointer' },
+      onclick: () => { activeSrcKind = kind; drawRight(); }
+    }, label);
+    if(has13) tabs.append(mk('text_1_3', 'Текст · задания 1-3'));
+    if(has2226) tabs.append(mk('text_22_26', 'Текст · задания 22-26'));
+    right.append(tabs);
+    const body = findSourceText(data.sourceTexts, activeSrcKind);
+    const txt = el('div', { class:'card', style:{ fontSize:'13px', lineHeight:'1.5', maxHeight:'calc(100vh - 200px)', overflowY:'auto', whiteSpace:'pre-wrap' }});
+    txt.innerHTML = sanitizeQuestionHtml(body);
+    right.append(txt);
+  };
+  drawRight();
+
+  /* Задания слева */
+  questions.forEach(q => {
+    const card = el('div', { class:'card', style:{ marginBottom:'12px' }});
+    /* Заголовок */
+    card.append(el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }},
+      el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        'Задание №' + q.num),
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }},
+        Number(q.max_points) > 1 ? 'до ' + q.max_points + ' б' : '')));
+    /* Текст задания (HTML) */
+    const qText = el('div', { style:{ fontSize:'14px', lineHeight:'1.55', whiteSpace:'pre-wrap' }});
+    qText.innerHTML = sanitizeQuestionHtml(q.question_text || '');
+    card.append(qText);
+    /* Поле ответа */
+    const input = el('input', { type:'text', value: STATE.solverAnswers[q.num] || '',
+      placeholder:'Ваш ответ',
+      style:{ width:'100%', marginTop:'10px', padding:'10px 12px', border:'2px solid var(--border-2)', borderRadius:'10px', fontSize:'15px', fontWeight:'600', boxSizing:'border-box', fontFamily:'inherit' }
+    });
+    input.oninput = () => {
+      STATE.solverAnswers[q.num] = input.value;
+      /* throttle сохранения — не чаще раз в секунду */
+      if(STATE._solverSaveTimer) clearTimeout(STATE._solverSaveTimer);
+      STATE._solverSaveTimer = setTimeout(saveSolverDraft, 800);
+    };
+    card.append(input);
+    /* Если у задания есть подсказка про текст — показать кнопку фокуса справа */
+    const src = sourceTextForNum(data.sourceTexts, q.num);
+    if(src && (has13 || has2226)){
+      card.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'4px' }},
+        '📖 ' + src.title + ' — справа'));
+    }
+    left.append(card);
+  });
+
+  grid.append(left, right);
+  wrap.append(grid);
+
+  /* Мобильная адаптация: если узкий экран, текст-источник кладём как первый блок наверх */
+  /* Реализую через простой CSS-хак — на мобилке вторая колонка переходит первой */
+  wrap.append(el('style', null,
+    '@media (max-width: 880px){' +
+      '#solver-grid{grid-template-columns:1fr!important}' +
+      '#solver-grid > aside{position:static!important;max-height:none!important;margin-bottom:14px;order:-1}' +
+    '}'));
+  grid.id = 'solver-grid';
+
+  return wrap;
+}
+
+/* ====== Страница результата ====== */
+function viewSolverResult(){
+  const data = STATE.solverData;
+  const v = data.variant;
+  const result = STATE.solverResult;
+  const total = result.reduce((s, r) => s + r.points, 0);
+  const max = result.reduce((s, r) => s + r.max, 0);
+  const percent = max > 0 ? Math.round(total / max * 100) : 0;
+  const timeSec = Math.round((STATE.solverFinishedAt - STATE.solverStartedAt) / 1000);
+
+  const wrap = el('div', { class:'fade-in' });
+  /* Hero */
+  const pctColor = percent >= 70 ? 'var(--green)' : percent >= 50 ? '#D97706' : 'var(--red)';
+  wrap.append(el('div', { class:'card', style:{ background:'linear-gradient(135deg, var(--p-soft), #DBEAFE)', textAlign:'center', padding:'30px', marginBottom:'16px' }},
+    el('div', { style:{ fontSize:'14px', color:'var(--ink-2)', marginBottom:'8px' }}, '✅ Пробник завершён'),
+    el('h1', { style:{ fontSize:'24px', marginBottom:'8px' }}, v.title),
+    el('div', { style:{ fontSize:'56px', fontWeight:'700', color: pctColor, lineHeight:'1' }}, percent + '%'),
+    el('div', { style:{ marginTop:'8px', fontSize:'14px', color:'var(--ink-2)' }},
+      total + ' из ' + max + ' первичных баллов · ⏱ ' + otpFormatTime(timeSec))));
+
+  /* Сетка ячеек */
+  wrap.append(el('h3', { style:{ marginBottom:'8px' }}, 'Твои ответы'));
+  const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(64px, 1fr))', gap:'6px', marginBottom:'16px' }});
+  result.forEach(r => {
+    const bg = r.isCorrect ? '#D1FAE5' : '#FEE2E2';
+    const fg = r.isCorrect ? '#065F46' : '#991B1B';
+    grid.append(el('div', {
+      style:{ padding:'10px 6px', borderRadius:'8px', background:bg, color:fg, textAlign:'center', fontWeight:'700', fontSize:'13px', cursor:'help' },
+      title:'Задание №' + r.num + '\nТвой ответ: ' + (r.user || '(пусто)') +
+            '\nПравильный: ' + r.correct +
+            '\nБалл: ' + r.points + ' / ' + r.max
+    },
+      el('div', { style:{ fontSize:'10px', opacity:.7 }}, '№' + r.num),
+      el('div', null, r.isCorrect ? '✓' : '✗')));
+  });
+  wrap.append(grid);
+
+  /* Подробный список ошибок */
+  const wrong = result.filter(r => !r.isCorrect);
+  if(wrong.length){
+    wrap.append(el('h3', { style:{ marginTop:'18px', marginBottom:'8px' }},
+      '⚠ Ошибки (' + wrong.length + ')'));
+    wrong.forEach(r => {
+      wrap.append(el('div', { class:'card', style:{ marginBottom:'8px', background:'#FEF2F2', borderColor:'#FCA5A5' }},
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--red)', marginBottom:'4px' }}, 'Задание №' + r.num),
+        el('div', { style:{ fontSize:'13px', marginBottom:'2px' }},
+          'Твой ответ: ', el('b', null, r.user || '(пусто)')),
+        el('div', { style:{ fontSize:'13px', color:'var(--green)' }},
+          'Правильный: ', el('b', null, r.correct))));
+    });
+  }
+
+  /* Кнопки */
+  wrap.append(el('div', { style:{ display:'flex', gap:'10px', marginTop:'18px', flexWrap:'wrap' }},
+    wrong.length ? el('button', { class:'btn btn-p',
+      onclick: () => {
+        const variantId = STATE.solverVariantId;
+        const parentAttemptId = STATE.solverResultAttemptId;
+        const wrongNums = wrong.map(r => r.num);
+        startSolvingVariant(variantId, { parentAttemptId, filterNums: wrongNums });
+      }
+    }, '🔁 Работа над ошибками (' + wrong.length + ')') : null,
+    el('button', { class:'btn btn-secondary',
+      onclick: () => {
+        STATE.solverVariantId = null;
+        STATE.solverData = null;
+        STATE.solverResult = null;
+        STATE.solverResultAttemptId = null;
+        STATE.solverParentAttemptId = null;
+        STATE.solverFilteredNums = null;
+        STATE.solverStartedAt = null;
+        STATE.solverFinishedAt = null;
+        STATE.studentTab = 'profile';
+        render();
+      }
+    }, '← Вернуться в Профиль')));
+
+  return wrap;
+}
+
 /* Загрузить вариант для редактирования: сам вариант + вопросы + исходные тексты */
 async function loadVariantForEdit(variantId){
   const [vArr, qArr, sArr] = await Promise.all([
@@ -14132,6 +14572,15 @@ function _renderNow(){
   }
 
   if(STATE.view === 'student'){
+    /* Если открыт режим решения варианта — рисуем его на весь экран без табов */
+    if(STATE.solverVariantId){
+      root.append(
+        shellHeader('student'),
+        el('main', { class:'main' }, viewSolverVariant()),
+        legalFooter()
+      );
+      return;
+    }
     /* Splash-анимация: проверяем localStorage один раз за вкладку.
        Если сегодня ещё не показывали — заводим таймер на исчезновение. */
     if(!STATE.studentSplashChecked){
