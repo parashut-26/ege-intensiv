@@ -12790,7 +12790,9 @@ async function savePdfVariantToDb(data){
     });
   }
   if(questionsBatch.length){
-    await restRequest('POST', '/test_variant_questions', questionsBatch, { prefer: 'return=minimal' });
+    /* upsert по уникальной паре (variant_id, num) на случай повторного сохранения */
+    await restRequest('POST', '/test_variant_questions?on_conflict=variant_id,num',
+      questionsBatch, { prefer: 'resolution=merge-duplicates,return=minimal' });
   }
 
   /* 3. Исходные тексты */
@@ -12802,7 +12804,8 @@ async function savePdfVariantToDb(data){
     sources.push({ variant_id: variantId, kind: 'text_22_26', body: data.source_22_26.trim() });
   }
   if(sources.length){
-    await restRequest('POST', '/test_variant_source_texts', sources, { prefer: 'return=minimal' });
+    await restRequest('POST', '/test_variant_source_texts?on_conflict=variant_id,kind',
+      sources, { prefer: 'resolution=merge-duplicates,return=minimal' });
   }
 
   return variantId;
@@ -13330,12 +13333,12 @@ function modalEditVariant(){
           });
         }
         if(qBatch.length){
-          await restRequest('POST', '/test_variant_questions', qBatch,
+          await restRequest('POST', '/test_variant_questions?on_conflict=variant_id,num', qBatch,
             { prefer: 'resolution=merge-duplicates,return=minimal' });
         }
         /* №27 */
         if(src27Ed.getHtml().trim()){
-          await restRequest('POST', '/test_variant_questions', [{
+          await restRequest('POST', '/test_variant_questions?on_conflict=variant_id,num', [{
             variant_id: variant.id, num: 27,
             question_text: src27Ed.getHtml().trim(),
             correct_answer: null,
@@ -13348,7 +13351,7 @@ function modalEditVariant(){
         if(src13Ed.getHtml().trim()) sBatch.push({ variant_id: variant.id, kind: 'text_1_3', body: src13Ed.getHtml().trim() });
         if(src22Ed.getHtml().trim()) sBatch.push({ variant_id: variant.id, kind: 'text_22_26', body: src22Ed.getHtml().trim() });
         if(sBatch.length){
-          await restRequest('POST', '/test_variant_source_texts', sBatch,
+          await restRequest('POST', '/test_variant_source_texts?on_conflict=variant_id,kind', sBatch,
             { prefer: 'resolution=merge-duplicates,return=minimal' });
         }
         showToast('✅ Изменения сохранены');
