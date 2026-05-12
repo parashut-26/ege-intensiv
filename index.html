@@ -550,7 +550,9 @@ const STATE = {
   variantsListLoaded: false,
   currentVariantData: null,       // { variant, attempts, answersByAttempt }
   myVariantAttempts: [],          // у ученика: его попытки по всем вариантам
+  myVariantAnswers: {},           // у ученика: ответы по всем своим попыткам {attemptId: {qNum: ans}}
   myVariantAttemptsLoaded: false,
+  myExpandedAttemptId: null,      // какую строку «Мои пробники» раскрыл ученик
   /* Сводная по ученику в кабинете учителя: 'by_variant' | 'by_student' */
   variantsView: 'by_variant',
   selectedStudentForVariants: null,   // профайл-id выбранного ученика
@@ -7432,34 +7434,53 @@ function modalVariantBuilder(){
 }
 
 /* =======================================================================
-   УЧЕНИК · МОИ ПРОБНИКИ (импорт OTP — только свой ряд)
+   УЧЕНИК · МОИ ПРОБНИКИ
+   Полная сводная: строки = варианты, колонки = тест, соч, Прв, Тст, ★.
+   Клик на строку — раскрытие с детальной сеткой ячеек 1-26 + К1-К10.
    ======================================================================= */
 function studentVariantsCard(){
   if(!MY_PROFILE || !MY_PROFILE.id) return null;
   const card = el('div', { class:'card', style:{ marginBottom:'16px' }});
-  const header = el('div', null,
+  card.append(
     el('h3', { style:{ marginBottom:'4px' }}, '📋 Мои пробники'),
     el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'12px' }},
-      'Твои результаты по пробным вариантам ЕГЭ. Чужие баллы не показываются.'));
-  card.append(header);
+      'Твои результаты по пробным вариантам. Клик по строке — увидишь все свои ответы и ошибки. Чужие результаты не показываются.'));
   const list = el('div', null);
   card.append(list);
 
-  /* Ленивая загрузка: один раз за рендер ищем свои попытки */
+  /* Ленивая загрузка попыток + ответов */
   if(!STATE.myVariantAttemptsLoaded){
     list.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'10px 0' }}, '⏳ Загружаю результаты…'));
     (async () => {
       try {
+        /* Догрузим сочинения если ещё не было — нужно для расчёта К1-К10 */
+        if(!ESSAYS_LOADED){ try { await loadEssaysFromDb(); } catch(_){} }
         const atts = await restRequest('GET',
           '/test_variant_attempts?profile_id=eq.' + MY_PROFILE.id +
-          '&select=*,variant:test_variants(id,title,questions_count,total_max_score)' +
+          '&select=*,variant:test_variants(id,title,questions_count,total_max_score,created_at)' +
           '&order=finished_at.desc.nullslast,imported_at.desc');
         STATE.myVariantAttempts = Array.isArray(atts) ? atts : [];
+        /* Загружаем все ответы сразу одним запросом для расчётов */
+        const attIds = STATE.myVariantAttempts.map(a => a.id);
+        if(attIds.length){
+          const answers = await restRequest('GET',
+            '/test_variant_answers?attempt_id=in.(' + attIds.join(',') + ')' +
+            '&select=attempt_id,question_num,user_answer,points,max_points,is_correct');
+          const byA = {};
+          (answers || []).forEach(an => {
+            if(!byA[an.attempt_id]) byA[an.attempt_id] = {};
+            byA[an.attempt_id][an.question_num] = an;
+          });
+          STATE.myVariantAnswers = byA;
+        } else {
+          STATE.myVariantAnswers = {};
+        }
         STATE.myVariantAttemptsLoaded = true;
         render();
       } catch(e){
         console.warn('[student variants] load error:', e.message);
         STATE.myVariantAttempts = [];
+        STATE.myVariantAnswers = {};
         STATE.myVariantAttemptsLoaded = true;
         render();
       }
@@ -7468,74 +7489,132 @@ function studentVariantsCard(){
   }
 
   const atts = STATE.myVariantAttempts || [];
+  const byA = STATE.myVariantAnswers || {};
   if(!atts.length){
     list.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'10px 0', textAlign:'center' }},
       'Пока нет результатов. Когда учитель загрузит сводную по пробнику и привяжет тебя — увидишь здесь.'));
     return card;
   }
 
+  /* Компактная таблица: вариант, дата, тест, соч, Прв, Тст, отметка */
+  const tableWrap = el('div', { style:{ overflowX:'auto', borderRadius:'10px', border:'1px solid var(--border)' }});
+  const table = el('table', { style:{ width:'100%', borderCollapse:'collapse', fontSize:'12px', background:'var(--surface)' }});
+  const thead = el('thead', null,
+    el('tr', null,
+      el('th', { style:{ padding:'8px 10px', textAlign:'left', background:'#F9FAFB', borderBottom:'2px solid var(--border)', minWidth:'140px' }}, 'Вариант'),
+      el('th', { style:{ padding:'8px 6px', textAlign:'center', background:'#F9FAFB', borderBottom:'2px solid var(--border)' }}, 'Дата'),
+      el('th', { style:{ padding:'8px 6px', textAlign:'center', background:'#EFF6FF', borderBottom:'2px solid var(--border)' }, title:'Сумма баллов по заданиям 1-26' }, 'тест'),
+      el('th', { style:{ padding:'8px 6px', textAlign:'center', background:'#FEF3C7', borderBottom:'2px solid var(--border)' }, title:'Сумма К1-К10 сочинения' }, 'соч'),
+      el('th', { style:{ padding:'8px 6px', textAlign:'center', background:'#DBEAFE', borderBottom:'2px solid var(--border)' }, title:'Первичный = тест + сочинение' }, 'Прв'),
+      el('th', { style:{ padding:'8px 6px', textAlign:'center', background:'#D1FAE5', borderBottom:'2px solid var(--border)' }, title:'Тестовый по шкале ФИПИ 2026' }, 'Тст'),
+      el('th', { style:{ padding:'8px 6px', textAlign:'center', background:'#FFEDD5', borderBottom:'2px solid var(--border)' }, title:'Школьная отметка' }, '★'),
+      el('th', { style:{ padding:'8px 6px', textAlign:'center', background:'#F9FAFB', borderBottom:'2px solid var(--border)' }}, '')));
+  table.append(thead);
+
+  const tbody = el('tbody', null);
+  const expanded = STATE.myExpandedAttemptId || null;
   atts.forEach(a => {
     const v = a.variant || {};
-    const det = el('details', { style:{ marginBottom:'8px', background:'var(--bg)', borderRadius:'10px', padding:'10px 12px' }});
-    const pct = a.percent_correct != null ? Number(a.percent_correct).toFixed(0) + '%' : '—';
-    const pctColor = a.percent_correct == null ? 'var(--ink-3)'
-      : a.percent_correct >= 70 ? 'var(--green)'
-      : a.percent_correct >= 50 ? '#D97706'
-      : 'var(--red)';
-    det.append(
-      el('summary', { style:{ cursor:'pointer', listStyle:'none', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px' }},
-        el('div', null,
-          el('div', { style:{ fontWeight:'700', fontSize:'13px' }}, v.title || '(вариант)'),
-          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }},
-            (v.questions_count || 27) + ' заданий · время: ' + otpFormatTime(a.time_spent_seconds) +
-            (a.total_score != null ? ' · ' + a.total_score + ' первичных баллов' : ''))),
-        el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
-          el('span', { style:{ fontWeight:'700', fontSize:'18px', color: pctColor }}, pct),
-          el('span', { style:{ color:'var(--ink-3)', fontSize:'13px' }}, '▾'))));
-    /* Лениво грузим ответы для каждой попытки при раскрытии */
-    const inner = el('div', { style:{ marginTop:'10px' }});
-    det.append(inner);
-    det.addEventListener('toggle', async () => {
-      if(!det.open) return;
-      if(inner.dataset.loaded) return;
-      inner.dataset.loaded = '1';
-      inner.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px' }}, '⏳ Загружаю ответы…'));
-      try {
-        const answers = await restRequest('GET',
-          '/test_variant_answers?attempt_id=eq.' + a.id +
-          '&select=question_num,user_answer,points,max_points,is_correct&order=question_num.asc');
-        inner.innerHTML = '';
-        if(!Array.isArray(answers) || !answers.length){
-          inner.append(el('div', { style:{ color:'var(--ink-3)' }}, 'Ответов нет'));
-          return;
-        }
-        const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(48px, 1fr))', gap:'4px', marginTop:'4px' }});
-        /* Показываем только задания 1-26. №27 = сочинение,
-           оно идёт отдельно через сданные сочинения. */
-        answers.filter(a => a.question_num >= 1 && a.question_num <= 26).forEach(ans => {
-          const max = Number(ans.max_points || 0);
-          const pts = Number(ans.points || 0);
-          let bg, color;
-          if(max === 0){ bg='#F3F4F6'; color='#9CA3AF'; }
-          else if(pts >= max){ bg='#D1FAE5'; color='#065F46'; }
-          else if(pts <= 0){ bg='#FEE2E2'; color='#991B1B'; }
-          else { bg='#FEF3C7'; color='#92400E'; }
-          const cell = el('div', {
-            style:{ padding:'8px 4px', borderRadius:'6px', background:bg, color, textAlign:'center', fontSize:'11px', fontWeight:'700', cursor:'help' },
-            title:'Задание №' + ans.question_num + '\nТвой ответ: ' + (ans.user_answer == null ? '(пусто)' : ans.user_answer) + '\nБалл: ' + pts + ' / ' + max
-          },
-            el('div', { style:{ fontSize:'10px', opacity:.7 }}, '№' + ans.question_num),
-            el('div', null, max === 0 ? '—' : pts + '/' + max));
-          grid.append(cell);
-        });
-        inner.append(grid);
-      } catch(e){
-        inner.innerHTML = '';
-        inner.append(el('div', { style:{ color:'var(--red)' }}, '⚠ ' + e.message));
+    const answersForA = byA[a.id] ? Object.values(byA[a.id]) : [];
+    const row = computeAttemptRow(a, answersForA);
+    const dateStr = a.finished_at
+      ? new Date(a.finished_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' })
+      : '—';
+    const isOpen = expanded === a.id;
+    const toggle = () => {
+      STATE.myExpandedAttemptId = isOpen ? null : a.id;
+      render();
+    };
+    const trMain = el('tr', { style:{ cursor:'pointer', background: isOpen ? '#F9FAFB' : 'transparent' },
+      onclick: toggle },
+      el('td', { style:{ padding:'8px 10px', fontWeight:'700', borderBottom:'1px solid var(--border)' }},
+        v.title || '—'),
+      el('td', { style:{ padding:'8px 6px', textAlign:'center', color:'var(--ink-3)', fontSize:'11px', borderBottom:'1px solid var(--border)' }},
+        dateStr),
+      el('td', { style:{ padding:'8px 6px', textAlign:'center', background:'#EFF6FF', fontWeight:'700', borderBottom:'1px solid var(--border)' }},
+        row.testSum == null ? '—' : String(row.testSum)),
+      el('td', { style:{ padding:'8px 6px', textAlign:'center', background:'#FEF3C7', fontWeight:'700', borderBottom:'1px solid var(--border)' }},
+        row.essaySum == null ? '—' : String(row.essaySum)),
+      el('td', { style:{ padding:'8px 6px', textAlign:'center', background:'#DBEAFE', fontWeight:'700', borderBottom:'1px solid var(--border)' }},
+        row.primary == null ? '—' : String(row.primary)),
+      el('td', { style:{ padding:'8px 6px', textAlign:'center', background:'#D1FAE5', fontWeight:'700', borderBottom:'1px solid var(--border)' }},
+        row.testScore == null ? '—' : String(row.testScore)),
+      el('td', { style:{ padding:'8px 6px', textAlign:'center', background:'#FFEDD5', fontWeight:'700', fontSize:'14px', borderBottom:'1px solid var(--border)',
+        color: row.grade === 5 ? '#065F46' : row.grade === 4 ? '#92400E' : row.grade === 3 ? '#9A3412' : '#991B1B' }},
+        row.grade == null ? '—' : String(row.grade)),
+      el('td', { style:{ padding:'8px 6px', textAlign:'center', color:'var(--ink-3)', borderBottom:'1px solid var(--border)' }},
+        isOpen ? '▴' : '▾'));
+    tbody.append(trMain);
+
+    /* Раскрытие — детальная сетка по 26 заданиям + К1-К10 + блок сочинения */
+    if(isOpen){
+      const detail = el('tr', null);
+      const cell = el('td', { colspan:8, style:{ padding:'12px 14px', background:'#F9FAFB', borderBottom:'2px solid var(--border-2)' }});
+
+      /* Время */
+      cell.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
+        '⏱ Время прохождения: ' + otpFormatTime(a.time_spent_seconds) +
+        (a.percent_correct != null ? ' · ' + Number(a.percent_correct).toFixed(0) + '% правильных' : '')));
+
+      /* Задания 1-26 */
+      cell.append(el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px', marginTop:'6px' }}, 'Задания 1-26'));
+      const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(48px, 1fr))', gap:'4px' }});
+      for(let q = 1; q <= 26; q++){
+        const ans = byA[a.id] && byA[a.id][q];
+        const max = ans ? Number(ans.max_points || 0) : 0;
+        const pts = ans ? Number(ans.points || 0) : 0;
+        let bg, color;
+        if(!ans || max === 0){ bg='#F3F4F6'; color='#9CA3AF'; }
+        else if(pts >= max){ bg='#D1FAE5'; color='#065F46'; }
+        else if(pts <= 0){ bg='#FEE2E2'; color='#991B1B'; }
+        else { bg='#FEF3C7'; color='#92400E'; }
+        grid.append(el('div', {
+          style:{ padding:'6px 4px', borderRadius:'6px', background:bg, color, textAlign:'center', fontSize:'11px', fontWeight:'700' },
+          title: ans ? ('Твой ответ: ' + (ans.user_answer == null ? '(пусто)' : ans.user_answer) + '\nБалл: ' + pts + ' / ' + max) : 'нет данных'
+        },
+          el('div', { style:{ fontSize:'10px', opacity:.7 }}, '№' + q),
+          el('div', null, ans && max > 0 ? (pts + '/' + max) : '—')));
       }
-    });
-    list.append(det);
+      cell.append(grid);
+
+      /* Сочинение К1-К10 */
+      const review = row.essay && row.essay.review;
+      if(row.essay){
+        cell.append(el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginTop:'14px', marginBottom:'6px' }},
+          '✍️ Сочинение' +
+          (row.essay.submittedAt ? ' от ' + new Date(row.essay.submittedAt).toLocaleDateString('ru-RU') : '')));
+        const kGrid = el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(56px, 1fr))', gap:'4px' }});
+        Object.keys(K_LIMITS).forEach(k => {
+          const val = review && review[k];
+          const max = K_LIMITS[k];
+          const c = essayCellColor(val, max);
+          kGrid.append(el('div', {
+            style:{ padding:'6px 4px', borderRadius:'6px', background:c.bg, color:c.fg, textAlign:'center', fontSize:'11px', fontWeight:'700' },
+            title: K_TITLES[k] + ': ' + (val == null ? '—' : (val + '/' + max))
+          },
+            el('div', { style:{ fontSize:'10px', opacity:.7 }}, k.toUpperCase()),
+            el('div', null, val == null ? '—' : (val + '/' + max))));
+        });
+        cell.append(kGrid);
+        if(review && review.general_comment){
+          cell.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px', fontSize:'12px', color:'var(--ink-2)' }},
+            '💬 ' + review.general_comment));
+        }
+      } else {
+        cell.append(el('div', { style:{ marginTop:'12px', padding:'8px 10px', background:'#F3F4F6', borderRadius:'8px', fontSize:'12px', color:'var(--ink-3)' }},
+          '✍️ Сочинение к этому варианту ещё не привязано. Когда учитель проверит — данные появятся.'));
+      }
+      detail.append(cell);
+      tbody.append(detail);
+    }
   });
+
+  table.append(tbody);
+  tableWrap.append(table);
+  list.append(tableWrap);
+
+  list.append(el('div', { style:{ marginTop:'10px', color:'var(--ink-3)', fontSize:'11px' }},
+    '💡 «тест» — задания 1-26 (пол-баллы округляются вниз). «соч» — сумма К1-К10. «Прв» — первичный. «Тст» — тестовый по шкале ФИПИ. «★» — школьная отметка.'));
 
   return card;
 }
