@@ -11809,21 +11809,33 @@ function richTextEditor(initialHtml, opts){
   return wrap;
 }
 
-/* Пост-обработка текста задания: сначала склеиваем все переносы строк PDF
-   в пробелы (формулировка задания — это обычно один абзац), затем добавляем
+/* Пост-обработка текста задания из PDF: сначала склеиваем все переносы
+   строк PDF в пробелы (PDF wrapping разрывает предложения), затем добавляем
    нужные переносы перед нумерованными вариантами и заголовками таблиц. */
 function postProcessTaskText(text){
   if(!text) return text;
   /* 1. Все переносы PDF (визуальные wrap'ы) → пробел */
   let t = text.replace(/\s*\n\s*/g, ' ').replace(/\s+/g, ' ').trim();
   /* 2. Добавим переносы только в нужных местах */
-  /* Цифровые варианты 1)..9) */
   t = t.replace(/(\S)\s+(\d\))\s+/g, '$1\n$2 ');
-  /* Буквенные варианты А)..Д) (для №8) */
   t = t.replace(/(\S)\s+([АБВГДЕ]\))\s+/g, '$1\n$2 ');
-  /* Заголовки таблицы (задание 8) */
   t = t.replace(/(\S)\s+(ГРАММАТИЧЕСКИЕ\s+ОШИБКИ|ПРЕДЛОЖЕНИЯ)\s+/g, '$1\n$2\n');
-  /* Перед "Запишите" — для №2, №3 — отделим инструкцию от примеров */
+  return t.trim();
+}
+
+/* Для DOCX — Word уже даёт чистые абзацы. НЕ склеиваем все переносы,
+   только нормализуем пробелы внутри строки и добавляем переносы перед «1)»/«А)»
+   если они оказались в одной строке (например пять слов с ударениями в строку). */
+function postProcessTaskTextDocx(text){
+  if(!text) return text;
+  /* Каждую строку нормализуем (множественные пробелы → один), переносы сохраняем */
+  let t = text.split('\n').map(line => line.replace(/\s+/g, ' ').trim()).join('\n');
+  /* Если «1)» оказалось в той же строке с текстом — переносим */
+  t = t.replace(/(\S)\s+(\d\))\s+/g, '$1\n$2 ');
+  t = t.replace(/(\S)\s+([АБВГДЕ]\))\s+/g, '$1\n$2 ');
+  t = t.replace(/(\S)\s+(ГРАММАТИЧЕСКИЕ\s+ОШИБКИ|ПРЕДЛОЖЕНИЯ)\s+/g, '$1\n$2\n');
+  /* Сжимаем пустые строки */
+  t = t.replace(/\n{3,}/g, '\n\n');
   return t.trim();
 }
 
@@ -11870,19 +11882,56 @@ async function parseVariantPdf(arrayBuffer){
 }
 
 /* Универсальная функция разбора уже извлечённого текста.
-   Структура: «Вариант N. Название» → «Задание 1.» ... «Задание 27.» */
+   Поддерживаются варианты заголовков: «Вариант 1.», «Вариант 1:», «Вариант 1»,
+   «ВАРИАНТ 1», «Вариант №1». Заголовки заданий аналогично.
+   Структура: «Вариант N <название>» → «Задание 1» ... «Задание 27». */
 function parseVariantTextCommon(full, fromDocx){
-  const sections = full.split(/\n(?=Вариант\s+\d+\.\s)/);
+  /* Гибкое разделение по заголовкам вариантов */
+  const variantHeaderRe = /(?:^|\n)\s*Вариант\s*№?\s*(\d+)\s*[\.\:]?\s*/gi;
+  /* Сначала находим все позиции заголовков вариантов */
+  const variantPositions = [];
+  let vm;
+  while((vm = variantHeaderRe.exec(full)) !== null){
+    variantPositions.push({ start: vm.index + vm[0].length, num: parseInt(vm[1], 10), headerEnd: vm.index + vm[0].length });
+  }
+  /* Если ни одного «Вариант N» — обрабатываем весь текст как один безымянный вариант */
+  if(!variantPositions.length){
+    variantPositions.push({ start: 0, num: 1, headerEnd: 0 });
+  }
+  /* Формируем секции */
+  const sections = [];
+  for(let i = 0; i < variantPositions.length; i++){
+    const start = variantPositions[i].start;
+    const end = i + 1 < variantPositions.length ? variantPositions[i + 1].headerEnd - variantPositions[i + 1].num.toString().length - 10 : full.length;
+    sections.push({
+      num: variantPositions[i].num,
+      body: full.slice(start, end),
+      /* title — первая непустая строка после заголовка */
+      title: ''
+    });
+  }
+  /* Извлекаем title для каждой секции */
+  sections.forEach(s => {
+    const firstLine = (s.body.split('\n').find(l => l.trim().length > 0) || '').trim();
+    if(firstLine && firstLine.length < 100){
+      s.title = firstLine;
+      /* Уберём title из тела (он не часть текста) */
+      s.body = s.body.replace(firstLine, '').trim();
+    } else {
+      s.title = 'Вариант ' + s.num;
+    }
+  });
+
   const variants = [];
   for(const sec of sections){
-    const mh = sec.match(/^Вариант\s+(\d+)\.\s*(.+?)(?:\n|$)/);
-    if(!mh) continue;
-    const num = parseInt(mh[1], 10);
-    const title = mh[2].trim();
-    const src13Match = sec.match(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s*1\s*[−–-]\s*3\.\s*\n([\s\S]+?)(?=\n\s*Задание\s+1\.)/);
-    const src22Match = sec.match(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s*22\s*[−–-]\s*26\.\s*\n([\s\S]+?)(?=\n\s*Задание\s+22\.)/);
+    const num = sec.num;
+    const title = sec.title;
+    const body = sec.body;
+    const src13Match = body.match(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s*1\s*[−–-]\s*3\s*[\.\:]?\s*\n([\s\S]+?)(?=\n\s*Задание\s*№?\s*1\b)/i);
+    const src22Match = body.match(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s*22\s*[−–-]\s*26\s*[\.\:]?\s*\n([\s\S]+?)(?=\n\s*Задание\s*№?\s*22\b)/i);
     const tasks = {};
-    const taskRe = /\nЗадание\s+(\d+)\.\s*([\s\S]+?)(?=\nЗадание\s+\d+\.|$)/g;
+    /* Гибкий заголовок задания: «Задание 1.», «Задание 1:», «Задание №1.», «Задание 1» */
+    const taskRe = /\n\s*Задание\s*№?\s*(\d+)\s*[\.\:]?\s*([\s\S]+?)(?=\n\s*Задание\s*№?\s*\d+\s*[\.\:]?\s|$)/gi;
     let m;
     while((m = taskRe.exec(sec)) !== null){
       const n = parseInt(m[1], 10);
@@ -11892,7 +11941,7 @@ function parseVariantTextCommon(full, fromDocx){
                  .split(/\n*Часть\s*2/)[0]
                  .split(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s+22/)[0]
                  .trim();
-      body = postProcessTaskText(body);
+      body = fromDocx ? postProcessTaskTextDocx(body) : postProcessTaskText(body);
       tasks[n] = body;
     }
     variants.push({
