@@ -551,8 +551,14 @@ const STATE = {
   currentVariantData: null,       // { variant, attempts, answersByAttempt }
   myVariantAttempts: [],          // у ученика: его попытки по всем вариантам
   myVariantAttemptsLoaded: false,
+  /* Сводная по ученику в кабинете учителя: 'by_variant' | 'by_student' */
+  variantsView: 'by_variant',
+  selectedStudentForVariants: null,   // профайл-id выбранного ученика
+  studentVariantsData: null,          // { student, attempts, answersByAttempt }
   /* Модалка ручной привязки попытки к ученику */
   linkAttempt: null,              // { attemptId, currentName, profileId }
+  /* Модалка привязки сочинения к попытке */
+  linkEssay: null,                // { attemptId, currentEssayId, studentId, studentName }
   /* Сводная по сочинениям: 'criteria' (К1-К10) | 'list' (все работы) */
   essayReportView: 'criteria',
   contentEditTaskN: null,  // открыта модалка редактирования теории по номеру
@@ -11543,12 +11549,18 @@ async function loadVariantsList(){
   }
 }
 
-/* --- Загрузка одного варианта со всеми попытками и ответами -- */
+/* --- Загрузка одного варианта со всеми попытками и ответами --
+   Заодно подтягивает свежий DB_ESSAYS — нужен для автоматической
+   привязки К1-К10 к сводной. */
 async function loadVariantFull(variantId){
   const variantArr = await restRequest('GET',
     '/test_variants?id=eq.' + variantId + '&limit=1');
   if(!Array.isArray(variantArr) || !variantArr.length) throw new Error('Вариант не найден');
   const variant = variantArr[0];
+  /* Если сочинения ещё не загружены — догружаем (нужны для К1-К10 в сводной) */
+  if(!ESSAYS_LOADED){
+    try { await loadEssaysFromDb(); } catch(_){}
+  }
   const attempts = await restRequest('GET',
     '/test_variant_attempts?variant_id=eq.' + variantId +
     '&select=*,profile:profiles!test_variant_attempts_profile_id_fkey(full_name)' +
@@ -11647,6 +11659,10 @@ async function importOtpFile(file, title){
 function viewTeacherVariants(){
   const wrap = el('div', { class:'fade-in' });
 
+  /* Если открыта сводная по ученику — показываем её */
+  if(STATE.variantsView === 'by_student' && STATE.selectedStudentForVariants){
+    return viewVariantsByStudent();
+  }
   /* Если выбран конкретный вариант — показываем его сводную */
   if(STATE.selectedVariantId){
     return viewVariantSummary();
@@ -11655,7 +11671,31 @@ function viewTeacherVariants(){
   wrap.append(
     el('h1', null, '📋 Варианты-пробники'),
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'18px' }},
-      'Загружай экспорт результатов из Online Test Pad — увидишь сводную по варианту: какой ученик на каком задании что написал и сколько баллов. Этап 1: импорт; решалка внутри платформы будет позже.'));
+      'Загружай экспорт результатов из Online Test Pad — увидишь сводную по варианту или по ученику. Этап 1: импорт; решалка внутри платформы будет позже.'));
+
+  /* Переключатель: По вариантам / По ученикам */
+  const view = STATE.variantsView || 'by_variant';
+  wrap.append(el('div', { style:{ display:'flex', gap:'4px', background:'var(--bg)', borderRadius:'10px', padding:'4px', marginBottom:'14px', maxWidth:'400px' }},
+    el('button', {
+      style:{ flex:1, padding:'8px 14px', borderRadius:'8px', fontWeight:'700', fontSize:'13px',
+              background: view === 'by_variant' ? 'var(--surface)' : 'transparent',
+              color: view === 'by_variant' ? 'var(--ink)' : 'var(--ink-3)',
+              boxShadow: view === 'by_variant' ? '0 1px 2px rgba(0,0,0,.06)' : 'none' },
+      onclick: () => { STATE.variantsView = 'by_variant'; render(); }
+    }, '📋 По вариантам'),
+    el('button', {
+      style:{ flex:1, padding:'8px 14px', borderRadius:'8px', fontWeight:'700', fontSize:'13px',
+              background: view === 'by_student' ? 'var(--surface)' : 'transparent',
+              color: view === 'by_student' ? 'var(--ink)' : 'var(--ink-3)',
+              boxShadow: view === 'by_student' ? '0 1px 2px rgba(0,0,0,.06)' : 'none' },
+      onclick: () => { STATE.variantsView = 'by_student'; render(); }
+    }, '👤 По ученикам')));
+
+  /* В режиме «По ученикам» — рисуем выбор ученика и заканчиваем */
+  if(view === 'by_student'){
+    wrap.append(studentPickerForVariants());
+    return wrap;
+  }
 
   /* Карточка импорта */
   const importCard = el('div', { class:'card', style:{ marginBottom:'18px', background:'#FFFDF7', borderColor:'#FACC15' }});
@@ -11762,19 +11802,28 @@ function viewVariantSummary(){
     return wrap;
   }
 
-  /* Таблица: строки = ученики, колонки = №1..N + время + % + итог + привязка */
+  /* Таблица: строки = ученики, колонки = №1..N + К1..К10 + тест + сочинение + первичный + тестовый + отметка */
   const tableWrap = el('div', { style:{ overflowX:'auto', background:'var(--surface)', borderRadius:'12px', border:'1px solid var(--border)' }});
   const table = el('table', { class:'variants-summary', style:{ borderCollapse:'collapse', minWidth:'100%' }});
   const thead = el('thead', null);
   const trHead = el('tr', null,
     el('th', { class:'vh-sticky' }, '#'),
     el('th', { class:'vh-sticky vh-name' }, 'Ученик'),
-    el('th', null, 'Время'),
-    el('th', null, '%'),
-    el('th', null, 'Итог'));
+    el('th', null, 'Время'));
   for(let q = 1; q <= qCount; q++){
     trHead.append(el('th', { class:'vh-q', title:'Задание №' + q }, q));
   }
+  /* К1..К10 — баллы из привязанного сочинения */
+  Object.keys(K_LIMITS).forEach(k => {
+    trHead.append(el('th', { class:'vh-q', style:{ background:'#FFFBEB' },
+      title: K_TITLES[k] + ' (макс ' + K_LIMITS[k] + ')' }, k.toUpperCase()));
+  });
+  trHead.append(
+    el('th', { style:{ background:'#EFF6FF' }, title:'Сумма по заданиям 1-26' }, 'тест'),
+    el('th', { style:{ background:'#FEF3C7' }, title:'Сумма К1-К10' }, 'соч'),
+    el('th', { style:{ background:'#DBEAFE' }, title:'Первичный = тест + сочинение' }, 'Прв'),
+    el('th', { style:{ background:'#D1FAE5' }, title:'Тестовый по шкале ФИПИ 2026' }, 'Тст'),
+    el('th', { style:{ background:'#FFEDD5' }, title:'Школьная отметка по тестовому баллу' }, '★'));
   thead.append(trHead);
   table.append(thead);
 
@@ -11784,6 +11833,7 @@ function viewVariantSummary(){
     const profileName = (a.profile && a.profile.full_name) || a.otp_full_name || a.otp_user || '?';
     const isLinked = !!a.profile_id;
     const otpRaw = a.otp_full_name || a.otp_user || 'без имени';
+    const row = computeAttemptRow(a, byAttempt[a.id] ? Object.values(byAttempt[a.id]) : []);
     tr.append(
       el('td', { class:'vh-sticky', style:{ color:'var(--ink-3)' }}, String(idx + 1)),
       el('td', { class:'vh-sticky vh-name', style:{ fontWeight:'600', cursor:'pointer' },
@@ -11799,18 +11849,61 @@ function viewVariantSummary(){
           isLinked
             ? '✓ привязан · OTP: ' + otpRaw
             : '⚠ ' + otpRaw + ' — нет в базе, нажми чтобы выбрать')),
-      el('td', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, otpFormatTime(a.time_spent_seconds)),
-      el('td', { style:{ fontWeight:'700' }}, a.percent_correct != null ? Number(a.percent_correct).toFixed(0) + '%' : '—'),
-      el('td', { style:{ fontWeight:'700' }}, a.total_score != null ? a.total_score : '—'));
+      el('td', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, otpFormatTime(a.time_spent_seconds)));
     for(let q = 1; q <= qCount; q++){
       const ans = byAttempt[a.id] && byAttempt[a.id][q];
       tr.append(variantCell(ans));
     }
+    /* К1..К10 ячейки — клик по любой открывает выбор сочинения */
+    const review = row.essay && row.essay.review;
+    const essayTooltip = row.essay
+      ? ('Сочинение «' + (row.essay.studentName || '—') + '» от ' +
+         (row.essay.submittedAt ? new Date(row.essay.submittedAt).toLocaleDateString('ru-RU') : '—') +
+         (a.essay_id ? '\n🔗 привязано вручную' : '\n🤖 авто-привязка по дате') +
+         '\n\nКликни — изменить привязку или отвязать.')
+      : 'Не привязано сочинение. Кликни — выбрать вручную из проверенных работ ученика.';
+    const onClickEssay = (ev) => {
+      ev.stopPropagation();
+      if(!a.profile_id){ showToast('Сначала привяжи ученика к этой попытке'); return; }
+      STATE.linkEssay = {
+        attemptId: a.id,
+        currentEssayId: a.essay_id || null,
+        autoEssayId: (row.essay && !a.essay_id) ? row.essay.id : null,
+        studentId: a.profile_id,
+        studentName: profileName
+      };
+      render();
+    };
+    Object.keys(K_LIMITS).forEach(k => {
+      const val = review && review[k];
+      const max = K_LIMITS[k];
+      const c = essayCellColor(val, max);
+      tr.append(el('td', {
+        style:{ background:c.bg, color:c.fg, textAlign:'center', padding:'4px', fontWeight:'700', fontSize:'11px', cursor:'pointer' },
+        title: K_TITLES[k] + ': ' + (val == null ? 'нет данных' : (val + '/' + max)) + '\n\n' + essayTooltip,
+        onclick: onClickEssay
+      }, val == null ? '—' : String(val)));
+    });
+    /* Итоговые расчётные колонки */
+    const cellNum = (v, bg) => el('td', { style:{ background:bg, fontWeight:'700', textAlign:'center', fontSize:'12px' }},
+      v == null ? '—' : String(v));
+    tr.append(
+      cellNum(row.testSum, '#EFF6FF'),
+      cellNum(row.essaySum, '#FEF3C7'),
+      cellNum(row.primary, '#DBEAFE'),
+      cellNum(row.testScore, '#D1FAE5'),
+      el('td', { style:{ background:'#FFEDD5', fontWeight:'700', textAlign:'center', fontSize:'14px',
+        color: row.grade === 5 ? '#065F46' : row.grade === 4 ? '#92400E' : row.grade === 3 ? '#9A3412' : '#991B1B' }},
+        row.grade == null ? '—' : String(row.grade)));
     tbody.append(tr);
   });
   table.append(tbody);
   tableWrap.append(table);
   wrap.append(tableWrap);
+
+  /* Подсказка */
+  wrap.append(el('div', { style:{ marginTop:'12px', color:'var(--ink-3)', fontSize:'12px', padding:'8px 12px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px' }},
+    '💡 К1-К10 автоматически берутся из ближайшего по дате проверенного сочинения ученика. Если попадает не то — кликни по любой К-ячейке: откроется выбор сочинения этого ученика.'));
   return wrap;
 }
 
@@ -11828,11 +11921,402 @@ function variantCell(ans){
   return el('td', { class:'vc', style:{ background:bg, color, textAlign:'center', fontWeight:'700', fontSize:'12px' }, title }, String(label));
 }
 
+/* Модалка привязки сочинения к попытке варианта.
+   Показывает все проверенные работы этого ученика. Можно выбрать одну
+   или сбросить (вернёт авто-привязку по дате). */
+function modalLinkEssay(){
+  if(!STATE.linkEssay) return null;
+  const { attemptId, currentEssayId, studentId, studentName } = STATE.linkEssay;
+  const close = () => { STATE.linkEssay = null; render(); };
+
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        '✍️ Привязка сочинения'),
+      el('h2', { style:{ marginTop:'4px' }}, studentName)),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const myEssays = (DB_ESSAYS || []).filter(e =>
+    e.studentId === studentId && e.review && !e.review.is_pre_check && e.finalScore != null
+  ).slice().sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
+
+  const body = el('div', { class:'modal-body' });
+
+  if(!myEssays.length){
+    body.append(el('div', { style:{ padding:'20px', textAlign:'center', color:'var(--ink-3)' }},
+      'У этого ученика пока нет финализированных работ. Проверь хотя бы одно сочинение во вкладке «Сочинения».'));
+  } else {
+    body.append(el('div', { style:{ marginBottom:'12px', color:'var(--ink-2)', fontSize:'13px' }},
+      currentEssayId
+        ? 'Сейчас вручную закреплено конкретное сочинение. Можешь выбрать другое или сбросить — тогда платформа сама подберёт ближайшее по дате.'
+        : 'Привязка автоматическая (ближайшее по дате). Зафиксируй конкретное сочинение, если автоматический выбор неточный.'));
+    body.append(el('button', { class:'btn btn-secondary',
+      style:{ marginBottom:'12px', width:'100%' },
+      onclick: async () => {
+        try {
+          await restRequest('PATCH', '/test_variant_attempts?id=eq.' + attemptId,
+            { essay_id: null }, { prefer: 'return=minimal' });
+          showToast('🔁 Сброшено к авто-привязке');
+          STATE.linkEssay = null;
+          if(STATE.selectedVariantId) await loadVariantFull(STATE.selectedVariantId);
+          render();
+        } catch(e){ showToast('⚠ ' + e.message); }
+      }
+    }, '🔁 Сбросить — пусть платформа выберет сама'));
+
+    const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'6px' }});
+    myEssays.forEach(e => {
+      const isCurrent = e.id === currentEssayId;
+      const date = e.submittedAt ? new Date(e.submittedAt).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' }) : '—';
+      const preview = e.text ? e.text.slice(0, 60).replace(/\s+/g, ' ') + (e.text.length > 60 ? '…' : '')
+                   : (e.format === 'photo' ? '📸 фото' : '—');
+      list.append(el('div', {
+        style:{ padding:'10px 12px', borderRadius:'8px', cursor:'pointer',
+                background: isCurrent ? 'var(--p-soft)' : 'var(--bg)',
+                border: isCurrent ? '2px solid var(--p)' : '1px solid transparent' },
+        onclick: async () => {
+          if(isCurrent){ close(); return; }
+          try {
+            await restRequest('PATCH', '/test_variant_attempts?id=eq.' + attemptId,
+              { essay_id: e.id }, { prefer: 'return=minimal' });
+            showToast('✓ Привязано к работе от ' + date);
+            STATE.linkEssay = null;
+            if(STATE.selectedVariantId) await loadVariantFull(STATE.selectedVariantId);
+            render();
+          } catch(err){ showToast('⚠ ' + err.message); }
+        }
+      },
+        el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'4px' }},
+          el('div', { style:{ fontWeight:'700', fontSize:'13px' }},
+            date + ' · ' + (e.format === 'photo' ? '📷' : '⌨️') + ' ' + (e.wordCount || '—') + ' слов'),
+          el('div', { style:{ fontWeight:'700', fontSize:'13px', color:'var(--p)' }},
+            e.finalScore + '/22')),
+        el('div', { style:{ fontSize:'12px', color:'var(--ink-2)' }}, preview),
+        isCurrent ? el('div', { style:{ fontSize:'11px', color:'var(--p)', marginTop:'4px' }}, '✓ привязано') : null
+      ));
+    });
+    body.append(list);
+  }
+
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+  }, el('div', { class:'modal' }, head, body));
+}
+
 function otpFormatTime(s){
   if(s == null) return '—';
   const m = Math.floor(s / 60);
   const sec = s % 60;
   return m + ':' + String(sec).padStart(2,'0');
+}
+
+/* --- Выбор ученика для сводной по ученику --- */
+function studentPickerForVariants(){
+  const wrap = el('div', null);
+  wrap.append(
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'14px' }},
+      'Выбери ученика — увидишь все его попытки по всем загруженным вариантам. Можно скопировать как в Excel-сводной.'));
+
+  if(!STUDENTS_LOADED){
+    wrap.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px' }}, '⏳ Загружаю учеников…'));
+    return wrap;
+  }
+  const studs = (STUDENTS || []).slice().sort((a, b) =>
+    (a.name || '').localeCompare(b.name || '', 'ru'));
+  if(!studs.length){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)' }}, 'Пока нет учеников.'));
+    return wrap;
+  }
+  /* Простая сетка карточек учеников */
+  const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))', gap:'8px' }});
+  studs.forEach(s => {
+    grid.append(el('div', { class:'card', style:{ padding:'10px 12px', cursor:'pointer', display:'flex', alignItems:'center', gap:'10px' },
+      onclick: async () => {
+        STATE.selectedStudentForVariants = s.id;
+        STATE.studentVariantsData = null;
+        render();
+        try { await loadVariantsByStudent(s.id); }
+        catch(e){ showToast('⚠ ' + e.message); }
+        render();
+      }
+    },
+      avatarChip(s.name, s.color || s.avatarColor),
+      el('div', { style:{ flex:1, minWidth:0 }},
+        el('div', { style:{ fontWeight:'700', fontSize:'13px', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}, s.name),
+        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, s.email || ''))));
+  });
+  wrap.append(grid);
+  return wrap;
+}
+
+/* --- Загрузка всех попыток конкретного ученика по всем вариантам --- */
+async function loadVariantsByStudent(studentId){
+  if(!ESSAYS_LOADED){
+    try { await loadEssaysFromDb(); } catch(_){}
+  }
+  const attempts = await restRequest('GET',
+    '/test_variant_attempts?profile_id=eq.' + studentId +
+    '&select=*,variant:test_variants(id,title,questions_count,total_max_score,created_at)' +
+    '&order=finished_at.desc.nullslast,imported_at.desc');
+  const attIds = (attempts || []).map(a => a.id);
+  let answers = [];
+  if(attIds.length){
+    answers = await restRequest('GET',
+      '/test_variant_answers?attempt_id=in.(' + attIds.join(',') + ')' +
+      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct');
+  }
+  const byAttempt = {};
+  (answers || []).forEach(a => {
+    if(!byAttempt[a.attempt_id]) byAttempt[a.attempt_id] = {};
+    byAttempt[a.attempt_id][a.question_num] = a;
+  });
+  const student = STUDENTS.find(s => s.id === studentId)
+    || { id: studentId, name: 'Ученик' };
+  STATE.studentVariantsData = { student, attempts: attempts || [], answersByAttempt: byAttempt };
+}
+
+/* --- Сводная по ученику: строки = варианты, колонки = задания + К1-К10 + итоги --- */
+function viewVariantsByStudent(){
+  const wrap = el('div', { class:'fade-in' });
+  /* Кнопка назад */
+  wrap.append(el('div', { style:{ marginBottom:'10px' }},
+    el('button', { class:'btn btn-secondary btn-sm',
+      onclick: () => {
+        STATE.selectedStudentForVariants = null;
+        STATE.studentVariantsData = null;
+        render();
+      }
+    }, '← Выбрать другого ученика')));
+
+  const data = STATE.studentVariantsData;
+  if(!data){
+    wrap.append(el('div', { style:{ textAlign:'center', color:'var(--ink-3)', padding:'30px' }}, '⏳ Загружаю результаты…'));
+    return wrap;
+  }
+  const { student, attempts, answersByAttempt } = data;
+
+  wrap.append(
+    el('h1', null, '👤 ' + (student.name || '—')),
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'18px' }},
+      attempts.length
+        ? attempts.length + ' попыток по разным вариантам.'
+        : 'У ученика пока нет попыток по вариантам. Импортируй xlsx из OTP и привяжи имя.'));
+
+  if(!attempts.length) return wrap;
+
+  /* Определяем максимум question_num по всем попыткам — чтобы знать сколько колонок 1..N */
+  let maxQ = 0;
+  Object.values(answersByAttempt).forEach(d => Object.keys(d).forEach(q => { if(+q > maxQ) maxQ = +q; }));
+  if(maxQ < 26) maxQ = 26;  // обычно ровно 26+27, но на всякий случай
+
+  const tableWrap = el('div', { style:{ overflowX:'auto', background:'var(--surface)', borderRadius:'12px', border:'1px solid var(--border)' }});
+  const table = el('table', { class:'variants-summary', style:{ borderCollapse:'collapse', minWidth:'100%' }});
+  const thead = el('thead', null);
+  const trHead = el('tr', null,
+    el('th', { class:'vh-sticky vh-name' }, 'Вариант'),
+    el('th', null, 'Дата'),
+    el('th', null, 'Время'));
+  for(let q = 1; q <= maxQ; q++){
+    trHead.append(el('th', { class:'vh-q', title:'Задание №' + q }, q));
+  }
+  Object.keys(K_LIMITS).forEach(k => {
+    trHead.append(el('th', { class:'vh-q', style:{ background:'#FFFBEB' },
+      title: K_TITLES[k] + ' (макс ' + K_LIMITS[k] + ')' }, k.toUpperCase()));
+  });
+  trHead.append(
+    el('th', { style:{ background:'#EFF6FF' }}, 'тест'),
+    el('th', { style:{ background:'#FEF3C7' }}, 'соч'),
+    el('th', { style:{ background:'#DBEAFE' }}, 'Прв'),
+    el('th', { style:{ background:'#D1FAE5' }}, 'Тст'),
+    el('th', { style:{ background:'#FFEDD5' }}, '★'));
+  thead.append(trHead);
+  table.append(thead);
+
+  const tbody = el('tbody', null);
+  attempts.forEach(a => {
+    const v = a.variant || {};
+    const ansForAttempt = answersByAttempt[a.id] || {};
+    const row = computeAttemptRow(a, Object.values(ansForAttempt));
+    const dateStr = a.finished_at
+      ? new Date(a.finished_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' })
+      : (a.imported_at ? new Date(a.imported_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' }) : '—');
+    const tr = el('tr', null,
+      el('td', { class:'vh-sticky vh-name', style:{ fontWeight:'600', cursor:'pointer' },
+          onclick: () => {
+            STATE.variantsView = 'by_variant';
+            STATE.selectedVariantId = v.id || null;
+            STATE.selectedStudentForVariants = null;
+            STATE.studentVariantsData = null;
+            STATE.currentVariantData = null;
+            render();
+            if(v.id) loadVariantFull(v.id).then(() => render()).catch(e => showToast('⚠ ' + e.message));
+          },
+          title: 'Открыть полную сводную по варианту'
+        }, v.title || '—'),
+      el('td', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, dateStr),
+      el('td', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, otpFormatTime(a.time_spent_seconds)));
+    for(let q = 1; q <= maxQ; q++){
+      const ans = ansForAttempt[q];
+      tr.append(variantCell(ans));
+    }
+    const review = row.essay && row.essay.review;
+    Object.keys(K_LIMITS).forEach(k => {
+      const val = review && review[k];
+      const max = K_LIMITS[k];
+      const c = essayCellColor(val, max);
+      tr.append(el('td', {
+        style:{ background:c.bg, color:c.fg, textAlign:'center', padding:'4px', fontWeight:'700', fontSize:'11px' },
+        title: K_TITLES[k] + ': ' + (val == null ? 'нет данных' : (val + '/' + max))
+      }, val == null ? '—' : String(val)));
+    });
+    const cellNum = (vv, bg) => el('td', { style:{ background:bg, fontWeight:'700', textAlign:'center', fontSize:'12px' }},
+      vv == null ? '—' : String(vv));
+    tr.append(
+      cellNum(row.testSum, '#EFF6FF'),
+      cellNum(row.essaySum, '#FEF3C7'),
+      cellNum(row.primary, '#DBEAFE'),
+      cellNum(row.testScore, '#D1FAE5'),
+      el('td', { style:{ background:'#FFEDD5', fontWeight:'700', textAlign:'center', fontSize:'14px',
+        color: row.grade === 5 ? '#065F46' : row.grade === 4 ? '#92400E' : row.grade === 3 ? '#9A3412' : '#991B1B' }},
+        row.grade == null ? '—' : String(row.grade)));
+    tbody.append(tr);
+  });
+
+  /* Строка «Средний» — последняя, серый фон */
+  if(attempts.length > 1){
+    const avgTest = avgOf(attempts.map(a => computeAttemptRow(a, Object.values(answersByAttempt[a.id] || {})).testScore));
+    const avgPrim = avgOf(attempts.map(a => computeAttemptRow(a, Object.values(answersByAttempt[a.id] || {})).primary));
+    const avgRow = el('tr', { style:{ background:'#FAFAFA', fontStyle:'italic' }});
+    avgRow.append(
+      el('td', { class:'vh-sticky vh-name', style:{ background:'#FAFAFA', fontWeight:'700', color:'var(--ink-2)' }},
+        '⌀ Среднее (' + attempts.length + ')'),
+      el('td', null, ''),
+      el('td', null, ''));
+    for(let q = 1; q <= maxQ; q++) avgRow.append(el('td', null, ''));
+    Object.keys(K_LIMITS).forEach(_ => avgRow.append(el('td', null, '')));
+    avgRow.append(
+      el('td', { style:{ background:'#EFF6FF', textAlign:'center', color:'var(--ink-2)', fontWeight:'600' }}, ''),
+      el('td', { style:{ background:'#FEF3C7', textAlign:'center', color:'var(--ink-2)', fontWeight:'600' }}, ''),
+      el('td', { style:{ background:'#DBEAFE', textAlign:'center', color:'var(--ink-2)', fontWeight:'700' }}, avgPrim == null ? '—' : avgPrim.toFixed(1)),
+      el('td', { style:{ background:'#D1FAE5', textAlign:'center', color:'var(--ink-2)', fontWeight:'700' }}, avgTest == null ? '—' : avgTest.toFixed(1)),
+      el('td', { style:{ background:'#FFEDD5', textAlign:'center' }}, ''));
+    tbody.append(avgRow);
+  }
+
+  table.append(tbody);
+  tableWrap.append(table);
+  wrap.append(tableWrap);
+
+  wrap.append(el('div', { style:{ marginTop:'12px', color:'var(--ink-3)', fontSize:'12px' }},
+    '💡 Клик по названию варианта — открыть полную сводную с другими учениками.'));
+  return wrap;
+}
+
+function avgOf(arr){
+  const nums = (arr || []).filter(v => v != null && !isNaN(v));
+  if(!nums.length) return null;
+  return nums.reduce((s, v) => s + v, 0) / nums.length;
+}
+
+/* ===== Расчёты для расширенной сводной варианта ============
+   На основе твоих Excel-данных «Пробный февраль 2026». Если ФИПИ
+   опубликует уточнённую таблицу — поправь массив FIPI_2026_SCALE. */
+
+/* Шкала перевода: первичный балл → тестовый.
+   Известные пары из твоих данных Пробного февраля 2026: */
+const FIPI_2026_SCALE = [
+  [0, 0], [9, 22], [13, 32], [15, 36], [17, 39], [20, 43],
+  [23, 48], [24, 49], [25, 51], [26, 52], [27, 54], [28, 55],
+  [29, 57], [30, 58], [32, 61], [33, 63], [34, 64], [35, 66],
+  [36, 67], [37, 69], [39, 72], [40, 73], [41, 75], [42, 78],
+  [50, 100]
+];
+
+function primaryToTestScore(primary){
+  if(primary == null || isNaN(primary)) return null;
+  if(primary <= 0) return 0;
+  const tbl = FIPI_2026_SCALE;
+  if(primary >= tbl[tbl.length - 1][0]) return tbl[tbl.length - 1][1];
+  for(let i = 0; i < tbl.length - 1; i++){
+    const [p1, t1] = tbl[i], [p2, t2] = tbl[i + 1];
+    if(primary >= p1 && primary <= p2){
+      const r = (primary - p1) / (p2 - p1);
+      return Math.round(t1 + r * (t2 - t1));
+    }
+  }
+  return 0;
+}
+
+/* Школьная отметка по тестовому баллу (правила Ольги по её Excel) */
+function testScoreToGrade(testScore){
+  if(testScore == null) return null;
+  if(testScore <= 35) return 2;
+  if(testScore <= 60) return 3;
+  if(testScore <= 72) return 4;
+  return 5;
+}
+
+/* Сумма баллов по «тестовой части» — задания 1-26 (исключая 27 сочинение).
+   answers — массив объектов { question_num, points, max_points }. */
+function calcVariantTestSum(answers){
+  if(!Array.isArray(answers)) return null;
+  let sum = 0, hasAny = false;
+  answers.forEach(a => {
+    if(!a) return;
+    if(a.question_num >= 1 && a.question_num <= 26){
+      sum += Number(a.points || 0);
+      if(a.max_points > 0) hasAny = true;
+    }
+  });
+  return hasAny ? sum : null;
+}
+
+/* Сумма К1..К10 из review-объекта (как finalScore в DB_ESSAYS) */
+function calcEssayCriteriaSum(review){
+  if(!review) return null;
+  let sum = 0;
+  ['k1','k2','k3','k4','k5','k6','k7','k8','k9','k10'].forEach(k => {
+    if(review[k] != null) sum += Number(review[k]);
+  });
+  return sum;
+}
+
+/* Ищет финализированное сочинение этого ученика, ближайшее по дате к
+   указанной попытке. Возвращает объект из DB_ESSAYS или null. */
+function findEssayForAttempt(attempt){
+  if(!attempt || !attempt.profile_id) return null;
+  const candidates = (DB_ESSAYS || []).filter(e =>
+    e.studentId === attempt.profile_id && e.review && !e.review.is_pre_check && e.finalScore != null);
+  if(!candidates.length) return null;
+  const t = attempt.finished_at ? new Date(attempt.finished_at).getTime() : null;
+  if(t == null){
+    /* Без даты — берём самое свежее проверенное сочинение */
+    return candidates.sort((a, b) =>
+      new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0))[0];
+  }
+  /* Минимальная абсолютная разница в датах */
+  return candidates.slice().sort((a, b) => {
+    const da = Math.abs(new Date(a.submittedAt || 0) - t);
+    const db = Math.abs(new Date(b.submittedAt || 0) - t);
+    return da - db;
+  })[0];
+}
+
+/* Полный расчёт строки попытки: тест, сочинение, первичный, тестовый, отметка.
+   Возвращает { testSum, essay, essaySum, primary, testScore, grade } */
+function computeAttemptRow(attempt, answers){
+  const testSum = calcVariantTestSum(answers);
+  let essay = null;
+  if(attempt.essay_id && DB_ESSAYS){
+    essay = DB_ESSAYS.find(e => e.id === attempt.essay_id) || null;
+  }
+  if(!essay) essay = findEssayForAttempt(attempt);
+  const essaySum = essay && essay.review ? calcEssayCriteriaSum(essay.review) : null;
+  const primary = (testSum != null || essaySum != null)
+    ? (testSum || 0) + (essaySum || 0) : null;
+  const testScore = primaryToTestScore(primary);
+  const grade = testScoreToGrade(testScore);
+  return { testSum, essay, essaySum, primary, testScore, grade };
 }
 
 /* Модалка ручной привязки попытки к ученику в твоей базе.
@@ -12802,6 +13286,7 @@ function _renderNow(){
   if(STATE.showOnboarding) root.append(modalOnboarding());
   if(STATE.essayDraftOpen) root.append(modalEssayDraft());
   if(STATE.linkAttempt) root.append(modalLinkStudent());
+  if(STATE.linkEssay) root.append(modalLinkEssay());
   if(STATE.studentEssayResultOpen != null) root.append(modalEssayResult(STATE.studentEssayResultOpen));
   if(STATE.sampleOpen != null) root.append(modalEssaySample(STATE.sampleOpen));
   if(STATE.sampleEditOpen != null) root.append(modalEssaySampleEdit());
