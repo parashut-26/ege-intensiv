@@ -367,9 +367,17 @@ body.no-anim .fade-in{animation:none}
 .bubble .time{font-size:10px;opacity:.6;margin-top:4px}
 .bubble .helped-btn{margin-top:6px;background:rgba(16,185,129,.15);color:var(--green);font-size:10px;padding:3px 8px;border-radius:999px;cursor:pointer;font-weight:700}
 .bubble .helped-btn.active{background:var(--green);color:#fff}
-.chat-input{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border);background:var(--surface)}
+.chat-input{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border);background:var(--surface);align-items:center}
 .chat-input input{flex:1;padding:8px 12px;border:1px solid var(--border-2);border-radius:10px;font-size:13px}
 .chat-input button{padding:8px 14px;border-radius:10px;background:var(--p);color:#fff;font-weight:700;font-size:12px}
+/* Эмодзи-пикер */
+.emoji-wrap{position:relative;flex:0 0 auto}
+.emoji-btn{padding:6px 8px!important;border:0!important;background:transparent!important;cursor:pointer;font-size:20px;border-radius:8px;color:inherit!important;font-weight:normal!important}
+.emoji-btn:hover{background:var(--bg)!important}
+.emoji-popup{position:absolute;bottom:calc(100% + 8px);right:0;background:#fff;border:1px solid var(--border-2);border-radius:12px;padding:8px;display:grid;grid-template-columns:repeat(8,1fr);gap:2px;box-shadow:0 6px 24px rgba(0,0,0,.15);z-index:50;min-width:280px}
+.emoji-popup.hidden{display:none}
+.emoji-popup button{padding:4px!important;border:0!important;background:transparent!important;font-size:20px!important;cursor:pointer;border-radius:6px;color:inherit!important;font-weight:normal!important;min-width:32px}
+.emoji-popup button:hover{background:var(--bg)!important}
 
 /* ============ МОДАЛКА ============ */
 .modal-bg{position:fixed;inset:0;background:rgba(26,27,58,.55);z-index:30;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)}
@@ -570,6 +578,8 @@ const STATE = {
   /* === Личная сводная ученика «26 заданий × мои попытки» === */
   myReport: undefined,            // undefined=не пробовали, null=загружается, [...] = массив попыток
   myReportTried: false,
+  /* === Архив интенсива === */
+  archiveOpen: false,
   /* === Splash-анимация «Краш-тест» при входе ученика === */
   studentSplashActive: false,     // прямо сейчас крутится splash
   studentSplashChecked: false,    // уже проверяли localStorage в этой вкладке
@@ -2600,16 +2610,108 @@ function makeVoiceRecorder(initialUrl, onChange){
   return { node: wrap, getUrl: () => currentUrl, abort: forceAbort };
 }
 
+/* Эмодзи-пикер. Возвращает <div> с кнопкой 😀 и выпадающей палитрой.
+   targetInputId — id <input> в который вставляем эмодзи. */
+function emojiButton(targetInputId){
+  const POPULAR = [
+    '🐝','🎉','👍','👏','❤️','🔥','✨','🥳',
+    '😊','😂','🤔','😅','🙏','🤝','✅','❌',
+    '📝','📚','💡','🎯','🏆','🌟','🚀','⚡',
+    '🌙','☀️','🌸','💪','🙂','😎','🤩','💯'
+  ];
+  const popup = el('div', { class:'emoji-popup hidden' });
+  POPULAR.forEach(e => {
+    popup.append(el('button', {
+      type:'button',
+      onclick: ev => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        const input = document.getElementById(targetInputId);
+        if(input){
+          const start = input.selectionStart != null ? input.selectionStart : input.value.length;
+          const end = input.selectionEnd != null ? input.selectionEnd : start;
+          input.value = input.value.slice(0, start) + e + input.value.slice(end);
+          input.focus();
+          const newPos = start + e.length;
+          try { input.setSelectionRange(newPos, newPos); } catch(_){}
+        }
+        popup.classList.add('hidden');
+      }
+    }, e));
+  });
+  const btn = el('button', { type:'button', class:'emoji-btn', title:'Эмодзи',
+    onclick: ev => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      popup.classList.toggle('hidden');
+    }
+  }, '😀');
+  /* Клик вне попапа — закрыть */
+  setTimeout(() => {
+    document.addEventListener('click', function onDocClick(ev){
+      if(!popup.contains(ev.target) && ev.target !== btn){
+        popup.classList.add('hidden');
+        document.removeEventListener('click', onDocClick);
+      }
+    });
+  }, 0);
+  return el('div', { class:'emoji-wrap' }, btn, popup);
+}
+
+/* Сжать картинку на клиенте: max 1500px по большей стороне, JPEG 85%.
+   Снижает 3-5 МБ iPhone-фото до 300-500 КБ — Вероника на 4G успевает. */
+async function compressImage(file){
+  if(!file.type || !file.type.startsWith('image/')) return file;
+  /* SVG не трогаем (они уже маленькие и не растрируются) */
+  if(file.type === 'image/svg+xml') return file;
+  const MAX_SIDE = 1500;
+  const QUALITY = 0.85;
+  try {
+    const dataUrl = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result);
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+    const img = await new Promise((res, rej) => {
+      const i = new Image();
+      i.onload = () => res(i);
+      i.onerror = rej;
+      i.src = dataUrl;
+    });
+    if(img.width <= MAX_SIDE && img.height <= MAX_SIDE && file.size < 800 * 1024){
+      /* Маленькие фото не трогаем */
+      return file;
+    }
+    const ratio = Math.min(MAX_SIDE / img.width, MAX_SIDE / img.height, 1);
+    const w = Math.round(img.width * ratio);
+    const h = Math.round(img.height * ratio);
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', QUALITY));
+    if(!blob || blob.size >= file.size) return file;
+    console.log('[compressImage] ' + file.name + ': ' +
+      (file.size / 1024 | 0) + ' КБ → ' + (blob.size / 1024 | 0) + ' КБ (' + w + '×' + h + ')');
+    /* Создаём File с новым именем, чтобы расширение совпало с JPEG */
+    const baseName = (file.name.replace(/\.[^.]+$/, '') || 'photo') + '.jpg';
+    return new File([blob], baseName, { type: 'image/jpeg', lastModified: Date.now() });
+  } catch(e){
+    console.warn('compressImage упал, грузим как есть:', e.message);
+    return file;
+  }
+}
+
 /* Загрузить фото сочинения в Storage. Возвращает publicUrl.
    Использует общий uploadToStorage с обходом бага PHP-прокси (502 после
    успешной загрузки → HEAD-проверка) — иначе на телефоне у Вероники
-   ничего не загружается. Раньше делали через sb.storage.upload(), он
-   падал на 502 от прокси, хотя файл реально был залит. */
+   ничего не загружается. Перед загрузкой жмём картинку до ≤1500px. */
 async function uploadEssayPhoto(file){
   if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
-  const ext = (file.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'jpg'])[1].toLowerCase();
+  const compressed = await compressImage(file);
+  const ext = (compressed.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'jpg'])[1].toLowerCase();
   const path = MY_PROFILE.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
-  await uploadToStorage('essays', path, file, file.type || 'image/jpeg');
+  await uploadToStorage('essays', path, compressed, compressed.type || 'image/jpeg');
   return SUPABASE_DIRECT_URL + '/storage/v1/object/public/essays/' + path;
 }
 
@@ -4597,6 +4699,132 @@ function avatarUploader(avatarUrl, name, color){
   return wrap;
 }
 
+/* Модал «Архив интенсива» — открывается после экзамена.
+   Показывает итоги: пчёлки, заданий, средний балл, место в группе,
+   сводная по 26 заданиям и краткое расписание. */
+function modalArchive(){
+  if(!STATE.archiveOpen) return null;
+  const close = () => { STATE.archiveOpen = false; render(); };
+
+  /* Подсчёты */
+  const myBee = MY_PROFILE ? (MY_PROFILE.bee || 0) : 0;
+  const myStats = MY_STATS || {};
+  const ranked = STUDENTS
+    .filter(s => s.status !== 'pending')
+    .map(s => ({ id: s.id, beeN: s.bee != null ? +s.bee : 0 }))
+    .sort((a, b) => b.beeN - a.beeN);
+  const myRank = MY_PROFILE ? (ranked.findIndex(s => s.id === MY_PROFILE.id) + 1) : 0;
+
+  const bg = el('div', { class:'modal-bg', onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }});
+  const modal = el('div', { class:'modal', style:{ maxWidth:'720px' }});
+  bg.append(modal);
+
+  /* Шапка */
+  modal.append(el('div', { class:'modal-head', style:{ background:'var(--y-soft)' }},
+    el('div', null,
+      el('h2', { style:{ margin:0 }}, '🏆 Краш-тест 2026 — твои итоги'),
+      el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', marginTop:'4px' }},
+        COURSE.product + ' · ' + COURSE.rangeLabel)),
+    el('button', { class:'x', onclick: close }, '×')));
+
+  const body = el('div', { class:'modal-body', style:{ padding:'20px' }});
+
+  /* KPI-сводка */
+  body.append(el('div', { class:'grid grid-4', style:{ marginBottom:'18px' }},
+    kpiCard('🐝 Пчёлок собрано', myBee, 'итог', '🐝', 'var(--y-soft)'),
+    kpiCard('Заданий пройдено', myStats.done != null ? myStats.done : '—',
+      'из ' + (myStats.total || 26), '✅', 'var(--green-soft)'),
+    kpiCard('Средний балл', myStats.avg != null ? myStats.avg + '%' : '—', '', '🎯', 'var(--p-soft)'),
+    kpiCard('Место в группе', myRank > 0 ? myRank + ' из ' + ranked.length : '—',
+      myRank === 1 ? '🥇 первое!' : myRank <= 3 ? '🏆 в призах' : 'молодец!', '🏆', '#FFEDD5')));
+
+  /* Сводная по заданиям */
+  const myReport = myReportCard();
+  if(myReport) body.append(myReport);
+
+  body.append(el('div', { style:{ marginTop:'16px', padding:'14px', background:'var(--p-soft)', borderRadius:'12px' }},
+    el('div', { style:{ fontSize:'15px', fontWeight:'700', color:'var(--p-deep)', marginBottom:'6px' }},
+      '🎓 Поздравляем — ты прошёл(ла) Краш-тест!'),
+    el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', lineHeight:'1.5' }},
+      'Все материалы, твои попытки и сочинения остаются доступными в кабинете. ' +
+      'Удачи на ЕГЭ — мы верим в тебя 🐝')));
+
+  modal.append(body);
+
+  modal.append(el('div', { class:'modal-foot' },
+    el('span', null, ''),
+    el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть')));
+
+  return bg;
+}
+
+/* Лидерборд топ-5 по пчёлкам — мотивация для учеников.
+   Свою строку подсвечиваем, остальные показываем как есть. */
+function leaderboardCard(){
+  /* Берём только активных учеников с пчёлками */
+  const ranked = STUDENTS
+    .filter(s => s.status !== 'pending')
+    .map(s => ({ ...s, beeN: s.bee != null ? +s.bee : 0 }))
+    .sort((a, b) => b.beeN - a.beeN);
+  if(!ranked.length) return null;
+  const top = ranked.slice(0, 5);
+  const myId = MY_PROFILE && MY_PROFILE.id;
+  const myRank = myId ? (ranked.findIndex(s => s.id === myId) + 1) : 0;
+  const meInTop = myId && top.find(s => s.id === myId);
+
+  const card = el('div', { class:'card' });
+  card.append(
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'12px', flexWrap:'wrap', gap:'8px' }},
+      el('h2', null, '🏆 Топ-5 по пчёлкам'),
+      myRank > 0 ? el('span', { style:{ fontSize:'13px', color:'var(--ink-2)' }},
+        'Твоё место: ' + (myRank === 1 ? '🥇 1' : myRank === 2 ? '🥈 2' : myRank === 3 ? '🥉 3' : myRank + ' из ' + ranked.length)) : null));
+
+  const medals = ['🥇','🥈','🥉','4','5'];
+  top.forEach((s, i) => {
+    const isMe = myId && s.id === myId;
+    card.append(el('div', {
+      style:{
+        display:'flex', alignItems:'center', gap:'10px',
+        padding:'8px 10px', marginBottom:'4px',
+        background: isMe ? 'var(--y-soft)' : 'transparent',
+        border: isMe ? '1.5px solid var(--y)' : '1px solid transparent',
+        borderRadius:'10px'
+      }
+    },
+      el('div', { style:{ width:'30px', textAlign:'center', fontSize: i < 3 ? '22px' : '14px', fontWeight:'700', color:'var(--ink-3)' }}, medals[i]),
+      avatarChip(s.name, s.color, 34, s.avatarUrl),
+      el('div', { style:{ flex:1 }},
+        el('div', { style:{ fontWeight: isMe ? '800' : '700', fontSize:'14px' }},
+          s.name + (isMe ? ' · это ты!' : '')),
+        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }},
+          s.type === 'свой' ? 'свой' : 'гость')),
+      el('div', { style:{ fontWeight:'800', fontSize:'15px' }}, '🐝 ' + s.beeN)));
+  });
+
+  /* Если я не в топ-5, покажу свою строку отдельно внизу */
+  if(myId && !meInTop && myRank > 0){
+    const me = ranked[myRank - 1];
+    card.append(el('div', { style:{ marginTop:'8px', paddingTop:'8px', borderTop:'1px dashed var(--border)' }},
+      el('div', {
+        style:{
+          display:'flex', alignItems:'center', gap:'10px',
+          padding:'8px 10px',
+          background: 'var(--y-soft)',
+          border: '1.5px solid var(--y)',
+          borderRadius:'10px'
+        }
+      },
+        el('div', { style:{ width:'30px', textAlign:'center', fontSize:'14px', fontWeight:'700', color:'var(--ink-3)' }}, myRank),
+        avatarChip(me.name, me.color, 34, me.avatarUrl),
+        el('div', { style:{ flex:1 }},
+          el('div', { style:{ fontWeight:'800', fontSize:'14px' }}, me.name + ' · это ты!'),
+          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, 'до топ-5 не хватает ' + (top[4].beeN - me.beeN) + ' 🐝')),
+        el('div', { style:{ fontWeight:'800', fontSize:'15px' }}, '🐝 ' + me.beeN))));
+  }
+
+  return card;
+}
+
 /* Карточка «Мой профиль» с большим аватаром и кнопкой загрузки.
    Используется в Сводке учителя и в списке учеников у куратора. */
 function myProfileAvatarCard(){
@@ -4615,13 +4843,14 @@ function myProfileAvatarCard(){
   return card;
 }
 
-/* Загрузить новый аватар: Storage → PATCH profiles.avatar_url → обновить MY_PROFILE. */
+/* Загрузить новый аватар: сжать → Storage → PATCH profiles.avatar_url → MY_PROFILE. */
 async function uploadMyAvatar(file){
   if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
-  const ext = (file.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'jpg'])[1].toLowerCase();
+  const compressed = await compressImage(file);
+  const ext = (compressed.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'jpg'])[1].toLowerCase();
   /* Имя файла включает timestamp — чтобы кэш браузера обновился сразу */
   const path = MY_PROFILE.id + '/avatar_' + Date.now() + '.' + ext;
-  await uploadToStorage('avatars', path, file, file.type || 'image/jpeg');
+  await uploadToStorage('avatars', path, compressed, compressed.type || 'image/jpeg');
   const publicUrl = SUPABASE_DIRECT_URL + '/storage/v1/object/public/avatars/' + path;
   await restRequest('PATCH', '/profiles?id=eq.' + MY_PROFILE.id,
     { avatar_url: publicUrl }, { prefer:'return=minimal' });
@@ -5242,7 +5471,7 @@ function viewStudentHome(){
   } else if(afterEnd != null && afterEnd > 0){
     heroLabel = '🏁 Интенсив завершён';
     heroTitle = 'Молодец, ты дошёл до экзамена!';
-    heroSub   = 'Удачи на настоящем ЕГЭ 🐝';
+    heroSub   = 'Открой свой архив — там сводка по всему интенсиву';
   } else {
     /* fallback на старую логику */
     const fallback = DAYS.find(d => d.id === COURSE.todayDayId) || DAYS[0];
@@ -5256,26 +5485,32 @@ function viewStudentHome(){
     el('span', { class:'chip', style:{ background:'rgba(0,0,0,.15)', color:'#1f1f1f' }}, heroLabel),
     el('h2', { style:{ marginTop:'10px', fontSize:'28px' }}, heroTitle),
     el('div', { style:{ marginTop:'4px', fontSize:'14px', color:'#1f1f1f' }}, heroSub),
-    el('div', { style:{ marginTop:'16px', display:'flex', gap:'10px', flexWrap:'wrap' }},
-      el('button', { class:'btn btn-primary',
-        onclick: () => { STATE.studentTab='days'; render(); }
-      }, '⚡ Начать разминку'),
-      el('button', { class:'btn',
-        style:{ background:'rgba(255,255,255,.85)', color:'var(--ink)' },
-        onclick: async () => {
-          if(!sb || !MY_PROFILE){ showToast('Войдите через почту, чтобы отметка засчиталась'); return; }
-          if(!CURRENT_ATTENDANCE_ID){ showToast('Вебинар ещё не настроен в БД'); return; }
-          try {
-            const r = await markStudentAttendance(MY_PROFILE.id, CURRENT_ATTENDANCE_ID, 'self');
-            if(r.alreadyMarked){ showToast('Ты уже отмечалась 🐝'); return; }
-            const w = WEBINARS.find(x => x.id === CURRENT_ATTENDANCE_ID);
-            const bee = w ? w.maxBee : 3;
-            if(MY_PROFILE) MY_PROFILE.bee = (MY_PROFILE.bee || 0) + bee;
-            showToast('🎙️ Засчитано · +' + bee + ' 🐝');
-            render();
-          } catch(e){ showToast('⚠ ' + e.message); }
-        }
-      }, '🎯 Я на уроке')));
+    /* После экзамена показываем кнопку «Открыть архив» вместо разминки */
+    (afterEnd != null && afterEnd > 0)
+      ? el('div', { style:{ marginTop:'16px', display:'flex', gap:'10px', flexWrap:'wrap' }},
+          el('button', { class:'btn btn-primary',
+            onclick: () => { STATE.archiveOpen = true; render(); }
+          }, '📊 Открыть мой архив'))
+      : el('div', { style:{ marginTop:'16px', display:'flex', gap:'10px', flexWrap:'wrap' }},
+          el('button', { class:'btn btn-primary',
+            onclick: () => { STATE.studentTab='days'; render(); }
+          }, '⚡ Начать разминку'),
+          el('button', { class:'btn',
+            style:{ background:'rgba(255,255,255,.85)', color:'var(--ink)' },
+            onclick: async () => {
+              if(!sb || !MY_PROFILE){ showToast('Войдите через почту, чтобы отметка засчиталась'); return; }
+              if(!CURRENT_ATTENDANCE_ID){ showToast('Вебинар ещё не настроен в БД'); return; }
+              try {
+                const r = await markStudentAttendance(MY_PROFILE.id, CURRENT_ATTENDANCE_ID, 'self');
+                if(r.alreadyMarked){ showToast('Ты уже отмечалась 🐝'); return; }
+                const w = WEBINARS.find(x => x.id === CURRENT_ATTENDANCE_ID);
+                const bee = w ? w.maxBee : 3;
+                if(MY_PROFILE) MY_PROFILE.bee = (MY_PROFILE.bee || 0) + bee;
+                showToast('🎙️ Засчитано · +' + bee + ' 🐝');
+                render();
+              } catch(e){ showToast('⚠ ' + e.message); }
+            }
+          }, '🎯 Я на уроке')));
 
   const kpi = el('div', { class:'grid grid-4' });
   const realBee = MY_PROFILE ? (MY_PROFILE.bee || 0) : ME_STUDENT.bee;
@@ -5324,6 +5559,9 @@ function viewStudentHome(){
     el('div', { class:'ach-grid' },
       ACHIEVEMENTS.slice(0, 5).map(a => achievementCard(a))));
 
+  /* Лидерборд топ-5 по пчёлкам — мотивация и игрофикация */
+  const leaderboard = leaderboardCard();
+
   const activity = el('div', { class:'card', id:'student-activity-section' });
   activity.append(el('h2', { style:{ marginBottom:'10px' }}, '📈 Активность'));
   /* Источник правды — bee_transactions. Если БД ещё не подгрузилась или
@@ -5367,7 +5605,9 @@ function viewStudentHome(){
   const myReport = myReportCard();
   if(myReport){ wrap.append(myReport); wrap.append(el('div', { style:{ height:'16px' }})); }
   wrap.append(
-    ach, el('div', { style:{ height:'16px' }}),
+    ach, el('div', { style:{ height:'16px' }}));
+  if(leaderboard){ wrap.append(leaderboard); wrap.append(el('div', { style:{ height:'16px' }})); }
+  wrap.append(
     activity);
   return wrap;
 }
@@ -8695,14 +8935,18 @@ function viewTeacherEssays(){
         el('h1', null, '📝 Сочинения'),
         el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }},
           'Очередь работ на проверку. Кликните на сочинение, чтобы открыть форму проверки К1–К10.')),
-      el('button', { class:'btn btn-secondary btn-sm',
-        onclick: async () => {
-          showToast('⏳ Обновляю список…');
-          await loadEssaysFromDb();
-          showToast('✓ Загружено: ' + DB_ESSAYS.length);
-          render();
-        }
-      }, '🔄 Обновить')));
+      el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' }},
+        el('button', { class:'btn btn-teal btn-sm',
+          onclick: () => exportEssaysCSV(essays)
+        }, '📥 Экспорт CSV'),
+        el('button', { class:'btn btn-secondary btn-sm',
+          onclick: async () => {
+            showToast('⏳ Обновляю список…');
+            await loadEssaysFromDb();
+            showToast('✓ Загружено: ' + DB_ESSAYS.length);
+            render();
+          }
+        }, '🔄 Обновить'))));
 
   /* Поиск по имени ученика */
   const searchInput = el('input', {
@@ -9308,6 +9552,75 @@ function reportCellColor(pct){
 }
 
 /* CSV-экспорт. UTF-8 BOM + ; разделитель + кавычки — Excel «съест» как родной. */
+/* Экспорт всех сочинений в CSV: ученик, статус, баллы К1-К10, общий балл, комментарий. */
+function exportEssaysCSV(essays){
+  const sep = ';';
+  const esc = v => {
+    const s = (v == null) ? '' : String(v);
+    if(s.indexOf(sep) >= 0 || s.indexOf('"') >= 0 || s.indexOf('\n') >= 0){
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  };
+  const STATUS_RU = {
+    'new':'Новое', 'submitted':'Новое',
+    'pre_checked':'Куратор проверил',
+    'in_progress':'В работе',
+    'done':'Готово'
+  };
+  const headers = ['Ученик', 'Email', 'Сдано', 'Статус',
+    'К1','К2','К3','К4','К5','К6','К7','К8','К9','К10',
+    'Итого', 'Комментарий учителя'];
+  const lines = [headers.map(esc).join(sep)];
+
+  /* Сортируем: сначала готовые, потом в работе, потом новые */
+  const order = { 'done':1, 'in_progress':2, 'pre_checked':3, 'new':4, 'submitted':4 };
+  const sorted = essays.slice().sort((a, b) => {
+    const oa = order[a.status] || 99, ob = order[b.status] || 99;
+    if(oa !== ob) return oa - ob;
+    return (a.studentName || '').localeCompare(b.studentName || '', 'ru');
+  });
+
+  sorted.forEach(e => {
+    const r = e.review && (Array.isArray(e.review) ? e.review[0] : e.review) || {};
+    const submittedDate = e.submittedAt
+      ? new Date(e.submittedAt).toLocaleString('ru-RU', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' })
+      : (e.when || '—');
+    const row = [
+      e.studentName || '—',
+      (DB_ESSAYS.find(x => x.id === e.id) || {}).studentEmail || '',
+      submittedDate,
+      STATUS_RU[e.status] || e.status || '—',
+      r.k1 != null ? r.k1 : '',
+      r.k2 != null ? r.k2 : '',
+      r.k3 != null ? r.k3 : '',
+      r.k4 != null ? r.k4 : '',
+      r.k5 != null ? r.k5 : '',
+      r.k6 != null ? r.k6 : '',
+      r.k7 != null ? r.k7 : '',
+      r.k8 != null ? r.k8 : '',
+      r.k9 != null ? r.k9 : '',
+      r.k10 != null ? r.k10 : '',
+      r.total != null ? r.total : (e.finalScore != null ? e.finalScore : ''),
+      r.general_comment || ''
+    ];
+    lines.push(row.map(esc).join(sep));
+  });
+
+  const BOM = '﻿';
+  const blob = new Blob([BOM + lines.join('\r\n')], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const stamp = new Date().toISOString().slice(0, 10);
+  a.download = 'zebrus-essays-' + stamp + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  showToast('✓ Файл скачан — открой в Excel');
+}
+
 function exportReportCSV(matrix, tasksList){
   const sep = ';';
   const esc = v => {
@@ -10686,6 +10999,7 @@ function chatPanel(role){
 
     panel.append(
       el('div', { class:'chat-input' },
+        emojiButton('chat-i'),
         el('input', { id:'chat-i', placeholder: MY_PROFILE ? 'Сообщение…' : 'Войдите, чтобы писать',
           disabled: !MY_PROFILE,
           onkeydown: e => { if(e.key === 'Enter'){ e.preventDefault(); sendChat(); }}}),
@@ -10783,6 +11097,7 @@ function chatPanel(role){
 
       panel.append(
         el('div', { class:'chat-input' },
+          emojiButton('chat-i'),
           el('input', { id:'chat-i', placeholder:'Сообщение…',
             onkeydown: e => { if(e.key === 'Enter'){ e.preventDefault(); sendChat(); }}}),
           el('button', { onclick: () => sendChat() }, 'Отправить')));
@@ -11092,6 +11407,7 @@ function _renderNow(){
   /* Модалки */
   if(STATE.testOpen != null) root.append(modalTest(STATE.testOpen));
   if(STATE.walkMaterialsOpen) root.append(modalWalkMaterials());
+  if(STATE.archiveOpen) root.append(modalArchive());
   if(STATE.essayOpen) root.append(modalEssayReview(STATE.essayOpen));
   if(STATE.newStudentForm) root.append(modalNewStudent());
   if(STATE.curatorPermsFor) root.append(modalCuratorPerms());
