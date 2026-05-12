@@ -553,6 +553,8 @@ const STATE = {
   myVariantAttemptsLoaded: false,
   /* Модалка ручной привязки попытки к ученику */
   linkAttempt: null,              // { attemptId, currentName, profileId }
+  /* Сводная по сочинениям: 'criteria' (К1-К10) | 'list' (все работы) */
+  essayReportView: 'criteria',
   contentEditTaskN: null,  // открыта модалка редактирования теории по номеру
   chatOpen: false,
   chatChannel: 'group',
@@ -10451,7 +10453,218 @@ function viewTeacherAnalytics(){
   const report = reportSummaryCard();
   if(report) wrap.append(report);
 
+  /* Сводная по сочинениям — К1-К10 + список работ */
+  const essayReport = essayReportCard();
+  if(essayReport) wrap.append(essayReport);
+
   return wrap;
+}
+
+/* =======================================================================
+   СВОДНАЯ ПО СОЧИНЕНИЯМ
+   Использует уже загруженный DB_ESSAYS. Два вида с переключателем:
+   1) «По К1–К10» — строки = ученики, колонки = К1..К10 + итог.
+      Если у ученика несколько финальных работ — берём ПОСЛЕДНЮЮ.
+   2) «По работам» — каждое сочинение отдельной строкой с датой и итогом.
+   ======================================================================= */
+function essayReportCard(){
+  if(!sb) return null;
+  /* Считаем работы, у которых есть финальная проверка (review с is_pre_check=false) */
+  const reviewed = (DB_ESSAYS || []).filter(e => e.review && !e.review.is_pre_check && e.finalScore != null);
+  /* Если ещё совсем ничего не проверено — не показываем карточку */
+  if(!reviewed.length && (!ESSAYS_LOADED || !DB_ESSAYS.length)){
+    return null;
+  }
+  const card = el('div', { class:'card', style:{ marginTop:'18px' }});
+  const view = STATE.essayReportView || 'criteria';
+
+  /* Шапка с переключателем вида */
+  card.append(
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px', marginBottom:'12px' }},
+      el('div', null,
+        el('h3', null, '✍️ Сводная по сочинениям'),
+        el('p', { style:{ color:'var(--ink-2)', fontSize:'12px', marginTop:'4px' }},
+          view === 'criteria'
+            ? 'Последняя проверенная работа каждого ученика, разбалловка по К1–К10. Видно где у группы проседает (например, К3 — авторская позиция).'
+            : 'Все сданные работы по датам, кликни на работу чтобы открыть её в Сочинениях.')),
+      el('div', { style:{ display:'flex', gap:'4px', background:'var(--bg)', borderRadius:'8px', padding:'3px' }},
+        el('button', {
+          style:{ padding:'6px 12px', borderRadius:'6px', fontSize:'12px', fontWeight:'700',
+                  background: view === 'criteria' ? 'var(--surface)' : 'transparent',
+                  color: view === 'criteria' ? 'var(--ink)' : 'var(--ink-3)',
+                  boxShadow: view === 'criteria' ? '0 1px 2px rgba(0,0,0,.06)' : 'none' },
+          onclick: () => { STATE.essayReportView = 'criteria'; render(); }
+        }, 'По К1–К10'),
+        el('button', {
+          style:{ padding:'6px 12px', borderRadius:'6px', fontSize:'12px', fontWeight:'700',
+                  background: view === 'list' ? 'var(--surface)' : 'transparent',
+                  color: view === 'list' ? 'var(--ink)' : 'var(--ink-3)',
+                  boxShadow: view === 'list' ? '0 1px 2px rgba(0,0,0,.06)' : 'none' },
+          onclick: () => { STATE.essayReportView = 'list'; render(); }
+        }, 'По работам'))));
+
+  if(!reviewed.length){
+    card.append(el('p', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'12px 0' }},
+      'Пока нет проверенных работ. Когда финализируешь хоть одну — появится таблица.'));
+    return card;
+  }
+
+  if(view === 'criteria'){
+    card.append(essayCriteriaTable(reviewed));
+  } else {
+    card.append(essayWorksList(reviewed));
+  }
+  return card;
+}
+
+const K_LIMITS = { k1:1, k2:3, k3:2, k4:1, k5:2, k6:1, k7:3, k8:3, k9:3, k10:3 };
+const K_TITLES = {
+  k1:'Формулировка проблемы',
+  k2:'Комментарий',
+  k3:'Авторская позиция',
+  k4:'Отношение к позиции',
+  k5:'Смысловая цельность',
+  k6:'Точность речи',
+  k7:'Орфография',
+  k8:'Пунктуация',
+  k9:'Грамматика',
+  k10:'Речь'
+};
+
+/* Цвет ячейки по % от максимума */
+function essayCellColor(pts, max){
+  if(pts == null || max === 0) return { bg:'#F3F4F6', fg:'#9CA3AF' };
+  const pct = pts / max;
+  if(pct >= 0.8) return { bg:'#D1FAE5', fg:'#065F46' };
+  if(pct >= 0.5) return { bg:'#FEF3C7', fg:'#92400E' };
+  return { bg:'#FEE2E2', fg:'#991B1B' };
+}
+
+/* Таблица К1–К10 — последняя финальная работа каждого ученика */
+function essayCriteriaTable(reviewedEssays){
+  /* Группируем по студенту — берём САМУЮ ПОЗДНЮЮ работу */
+  const byStudent = {};
+  reviewedEssays.forEach(e => {
+    const sid = e.studentId;
+    if(!sid) return;
+    if(!byStudent[sid] || new Date(e.submittedAt || 0) > new Date(byStudent[sid].submittedAt || 0)){
+      byStudent[sid] = e;
+    }
+  });
+  const rows = Object.values(byStudent).sort((a, b) =>
+    (b.finalScore || 0) - (a.finalScore || 0));
+
+  /* Подсчёт средних по группе по каждому критерию — для строки «Средн. по группе» */
+  const avg = {};
+  Object.keys(K_LIMITS).forEach(k => {
+    const vals = rows.map(r => r.review && r.review[k]).filter(v => v != null);
+    avg[k] = vals.length ? vals.reduce((s,v) => s + v, 0) / vals.length : null;
+  });
+  const avgTotal = rows.length
+    ? rows.reduce((s,r) => s + (r.finalScore || 0), 0) / rows.length
+    : null;
+
+  const scroll = el('div', { style:{ overflowX:'auto', borderTop:'1px solid var(--border)' }});
+  const tbl = el('table', { class:'table report-table', style:{ minWidth:'780px', fontSize:'12px' }});
+  const head = el('tr', null,
+    el('th', { style:{ position:'sticky', left:0, background:'var(--surface)', zIndex:2, minWidth:'160px', textAlign:'left' }}, 'Ученик'));
+  Object.keys(K_LIMITS).forEach(k => {
+    head.append(el('th', { style:{ textAlign:'center', padding:'8px 4px', minWidth:'42px' },
+      title: K_TITLES[k] + ' (макс ' + K_LIMITS[k] + ')'
+    }, k.toUpperCase()));
+  });
+  head.append(el('th', { style:{ textAlign:'center', padding:'8px 8px', minWidth:'60px', background:'var(--p-soft)' }}, 'Итог'));
+  tbl.append(el('thead', null, head));
+
+  const tbody = el('tbody', null);
+
+  /* Строка «Средн. по группе» — серая фоновая, наверху */
+  const avgRow = el('tr', { style:{ background:'#FAFAFA', fontStyle:'italic' }},
+    el('td', { style:{ position:'sticky', left:0, background:'#FAFAFA', zIndex:1, fontWeight:'700', color:'var(--ink-2)' }},
+      'Средн. по группе (' + rows.length + ')'));
+  Object.keys(K_LIMITS).forEach(k => {
+    const v = avg[k];
+    avgRow.append(el('td', { style:{ textAlign:'center', color:'var(--ink-2)', fontWeight:'600' }},
+      v == null ? '—' : v.toFixed(1)));
+  });
+  avgRow.append(el('td', {
+    style:{ textAlign:'center', background:'var(--p-soft)', fontWeight:'700', color:'var(--p-deep)' }
+  }, avgTotal == null ? '—' : avgTotal.toFixed(1)));
+  tbody.append(avgRow);
+
+  rows.forEach(e => {
+    const r = e.review || {};
+    const tr = el('tr', null);
+    tr.append(el('td', {
+      style:{ position:'sticky', left:0, background:'var(--surface)', zIndex:1, fontWeight:'700', minWidth:'160px', cursor:'pointer' },
+      onclick: () => { STATE.essayOpen = e.id; render(); },
+      title: 'Открыть работу для проверки'
+    }, e.studentName || '—'));
+    Object.keys(K_LIMITS).forEach(k => {
+      const val = r[k];
+      const max = K_LIMITS[k];
+      const c = essayCellColor(val, max);
+      tr.append(el('td', {
+        style:{ background:c.bg, color:c.fg, textAlign:'center', padding:'6px', fontWeight:'700' },
+        title: K_TITLES[k] + ': ' + (val == null ? '—' : (val + ' / ' + max))
+      }, val == null ? '—' : String(val)));
+    });
+    /* Итог — стиль зависит от общей суммы */
+    const total = e.finalScore;
+    let bg, fg;
+    if(total >= 18){ bg = '#D1FAE5'; fg = '#065F46'; }
+    else if(total >= 14){ bg = '#FEF3C7'; fg = '#92400E'; }
+    else if(total != null){ bg = '#FEE2E2'; fg = '#991B1B'; }
+    else { bg = '#F3F4F6'; fg = '#9CA3AF'; }
+    tr.append(el('td', {
+      style:{ background:bg, color:fg, textAlign:'center', padding:'6px', fontWeight:'700', fontSize:'13px' },
+      title: 'Итог: ' + (total == null ? '—' : (total + ' / 22'))
+    }, total == null ? '—' : (total + '/22')));
+    tbody.append(tr);
+  });
+  tbl.append(tbody);
+  scroll.append(tbl);
+  return scroll;
+}
+
+/* Список всех работ по датам — каждое сочинение строкой */
+function essayWorksList(reviewedEssays){
+  const rows = reviewedEssays.slice().sort((a, b) =>
+    new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0));
+  const scroll = el('div', { style:{ overflowX:'auto', borderTop:'1px solid var(--border)' }});
+  const tbl = el('table', { class:'table report-table', style:{ minWidth:'640px', fontSize:'12px' }});
+  const head = el('tr', null,
+    el('th', { style:{ textAlign:'left', minWidth:'160px' }}, 'Ученик'),
+    el('th', { style:{ textAlign:'left' }}, 'Дата сдачи'),
+    el('th', { style:{ textAlign:'center' }}, 'Формат'),
+    el('th', { style:{ textAlign:'center' }}, 'Слов'),
+    el('th', { style:{ textAlign:'center', background:'var(--p-soft)' }}, 'Итог'));
+  tbl.append(el('thead', null, head));
+  const tbody = el('tbody', null);
+  rows.forEach(e => {
+    const date = e.submittedAt ? new Date(e.submittedAt).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' }) : '—';
+    const total = e.finalScore;
+    let bg, fg;
+    if(total >= 18){ bg='#D1FAE5'; fg='#065F46'; }
+    else if(total >= 14){ bg='#FEF3C7'; fg='#92400E'; }
+    else if(total != null){ bg='#FEE2E2'; fg='#991B1B'; }
+    else { bg='#F3F4F6'; fg='#9CA3AF'; }
+    const tr = el('tr', { style:{ cursor:'pointer' },
+      onclick: () => { STATE.essayOpen = e.id; render(); }
+    },
+      el('td', { style:{ fontWeight:'700' }}, e.studentName || '—'),
+      el('td', null, date),
+      el('td', { style:{ textAlign:'center' }},
+        e.format === 'photo' ? '📷 фото' : '⌨️ текст'),
+      el('td', { style:{ textAlign:'center', color:'var(--ink-2)' }},
+        e.wordCount || '—'),
+      el('td', { style:{ background:bg, color:fg, textAlign:'center', fontWeight:'700', fontSize:'13px' }},
+        total == null ? '—' : (total + '/22')));
+    tbody.append(tr);
+  });
+  tbl.append(tbody);
+  scroll.append(tbl);
+  return scroll;
 }
 
 /* =======================================================================
