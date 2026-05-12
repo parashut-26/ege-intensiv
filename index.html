@@ -367,6 +367,11 @@ body.no-anim .fade-in{animation:none}
 .bubble .time{font-size:10px;opacity:.6;margin-top:4px}
 .bubble .helped-btn{margin-top:6px;background:rgba(16,185,129,.15);color:var(--green);font-size:10px;padding:3px 8px;border-radius:999px;cursor:pointer;font-weight:700}
 .bubble .helped-btn.active{background:var(--green);color:#fff}
+/* Крестик удаления — появляется при наведении на десктопе, всегда виден на тач-устройствах */
+.bubble .bubble-delete{position:absolute;top:-8px;right:-8px;width:22px;height:22px;padding:0;line-height:18px;font-size:16px;font-weight:700;border-radius:50%;background:#EF4444;color:#fff;border:2px solid #fff;cursor:pointer;opacity:0;transition:opacity .15s;box-shadow:0 1px 3px rgba(0,0,0,.2);display:flex;align-items:center;justify-content:center}
+.bubble:hover .bubble-delete{opacity:1}
+@media (hover:none){ .bubble .bubble-delete{opacity:.85} }
+.bubble .bubble-delete:hover{background:#DC2626;opacity:1}
 .chat-input{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border);background:var(--surface);align-items:center;position:relative}
 .chat-input input{flex:1;min-width:120px;padding:8px 12px;border:1px solid var(--border-2);border-radius:10px;font-size:13px}
 .chat-input button{padding:8px 14px;border-radius:10px;background:var(--p);color:#fff;font-weight:700;font-size:12px}
@@ -1826,6 +1831,29 @@ async function markChatMessageHelped(messageId){
     await loadChatMessages();
   }
   return { alreadyHelped: false, beesAwarded: HELPED_BEES, authorId: msg.author_id };
+}
+
+/* Удаление сообщения. Автор удаляет своё, учитель/куратор — любое.
+   RLS политика msgs_delete (миграция add_chat_delete_policy.sql) принудит
+   проверку на стороне БД — если у юзера нет прав, DELETE вернёт 0 rows. */
+async function deleteChatMessage(messageId){
+  if(!sb || !MY_PROFILE) return;
+  if(!confirm('Удалить это сообщение? Оно исчезнет у всех.')) return;
+  try {
+    await restRequest('DELETE',
+      '/chat_messages?id=eq.' + encodeURIComponent(messageId),
+      null, { prefer: 'return=minimal' });
+    /* Обновляем текущий канал */
+    if(STATE.chatChannel === 'dm' && STATE.dmRoomId){
+      await loadDmMessages();
+    } else {
+      await loadChatMessages();
+    }
+    render();
+    showToast('Сообщение удалено');
+  } catch(e){
+    showToast('⚠ Не удалось удалить: ' + (e.message || 'ошибка'));
+  }
 }
 
 function startChatPolling(){
@@ -4297,10 +4325,14 @@ async function disableWebPush(){
 
 /* Универсальный вызов push-send (как notifyViaTelegram, fire-and-forget) */
 function notifyViaPush(userId, title, body, link){
-  if(!sb || !MY_PROFILE || !userId) return;
+  console.log('[PUSH] notifyViaPush вызван', { userId, hasSb: !!sb, hasProfile: !!MY_PROFILE });
+  if(!sb){ console.warn('[PUSH] sb пуст — отмена'); return; }
+  if(!MY_PROFILE){ console.warn('[PUSH] MY_PROFILE пуст — отмена'); return; }
+  if(!userId){ console.warn('[PUSH] userId пуст — отмена'); return; }
   const token = getAccessToken();
-  if(!token) return;
+  if(!token){ console.warn('[PUSH] нет access_token — отмена'); return; }
   const url = SUPABASE_URL + '/functions/v1/push-send';
+  console.log('[PUSH] POST →', url);
   fetch(url, {
     method:'POST',
     headers:{
@@ -4309,7 +4341,8 @@ function notifyViaPush(userId, title, body, link){
       'apikey': SUPABASE_KEY,
     },
     body: JSON.stringify({ user_id: userId, title, body, url: link || null })
-  }).catch(e => console.warn('notifyViaPush упал:', e.message));
+  }).then(r => r.text().then(t => console.log('[PUSH] ответ', r.status, t)))
+    .catch(e => console.warn('[PUSH] fetch упал:', e.message));
 }
 
 /* Карточка для Профиля: «Push в браузере».
@@ -11430,10 +11463,19 @@ function chatBubbleDb(m, role, meId){
   const authorName = (author && author.full_name) || 'Участник';
   const authorRole = author && author.role;
   const canMark = (role === 'teacher' || role === 'curator') && !mine && !m.marked_helped_by;
+  const canDelete = mine || role === 'teacher' || role === 'curator';
   const wasMarked = !!m.marked_helped_by;
   const time = (m.created_at ? new Date(m.created_at).toLocaleTimeString('ru-RU', { hour:'2-digit', minute:'2-digit' }) : '');
 
   const bubble = el('div', { class: 'bubble ' + (mine ? 'me' : 'them') });
+  if(canDelete){
+    bubble.append(
+      el('button', {
+        class: 'bubble-delete',
+        title: 'Удалить сообщение',
+        onclick: (ev) => { ev.stopPropagation(); deleteChatMessage(m.id); }
+      }, '×'));
+  }
   if(!mine){
     const who = el('div', { class:'who' }, authorName);
     if(authorRole === 'curator') who.append(el('span', { class:'role-mini' }, '🤝 куратор'));
