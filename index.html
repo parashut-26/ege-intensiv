@@ -11728,23 +11728,30 @@ async function pdfExtractPages(arrayBuffer){
   return pages;
 }
 
-/* Безопасная очистка HTML — оставляем только b, i, u, strong, em, br */
+/* Безопасная очистка HTML — оставляем только b, i, u, strong, em, br.
+   Блочные теги <p>, <div> (которые contenteditable вставляет при Enter)
+   конвертируем в \n чтобы сохранить переносы строк. */
 function sanitizeQuestionHtml(html){
   if(!html) return '';
+  let s = String(html);
+  /* Сначала заменяем блочные теги на текстовые переносы (до парсинга в DOM,
+     потому что иначе мы потеряем границы при «разворачивании» содержимого) */
+  s = s
+    .replace(/<\/(p|div|li|h[1-6])\s*>/gi, '\n')
+    .replace(/<(p|div|li|h[1-6])(\s[^>]*)?>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n');
   /* Парсим в DOM и обходим, оставляя только разрешённые теги */
   const tmpl = document.createElement('template');
-  tmpl.innerHTML = String(html);
-  const allowed = new Set(['B', 'I', 'U', 'STRONG', 'EM', 'BR']);
+  tmpl.innerHTML = s;
+  const allowed = new Set(['B', 'I', 'U', 'STRONG', 'EM']);
   const walk = (node) => {
     const children = Array.from(node.childNodes);
     for(const ch of children){
       if(ch.nodeType === 1){
         if(!allowed.has(ch.tagName)){
-          /* Раскрываем теневое содержимое наружу */
           while(ch.firstChild) ch.parentNode.insertBefore(ch.firstChild, ch);
           ch.remove();
         } else {
-          /* Удаляем все атрибуты */
           [...ch.attributes].forEach(a => ch.removeAttribute(a.name));
           walk(ch);
         }
@@ -11752,7 +11759,8 @@ function sanitizeQuestionHtml(html){
     }
   };
   walk(tmpl.content);
-  return tmpl.innerHTML;
+  /* Финальный текст: ужмём множественные пустые строки до двойного перевода */
+  return tmpl.innerHTML.replace(/\n{3,}/g, '\n\n');
 }
 
 /* Простой rich-text редактор: contenteditable + тулбар Ж/К/П */
