@@ -11856,22 +11856,46 @@ function normalizeSourceText(text){
 }
 
 /* Парсер DOCX-варианта через mammoth.js.
-   Конвертирует Word → HTML → текст с inline-форматированием и \n. */
+   Конвертирует Word → HTML → текст с inline-форматированием и \n.
+   КЛЮЧЕВОЙ ШАГ: <ol><li>...</li></ol> от Word'а нумеруем явно: 1) 2) 3),
+   потому что в Word'е варианты ответов часто без явных цифр (стиль List Paragraph). */
 async function parseVariantDocx(arrayBuffer){
   if(!window.mammoth) throw new Error('mammoth не загружен. Обнови страницу.');
   const result = await window.mammoth.convertToHtml({ arrayBuffer });
-  let s = result.value || '';
-  /* Конвертируем block-level теги в переносы строк */
-  s = s
+  let html = result.value || '';
+  /* Шаг 1: преобразуем нумерованные/маркированные списки в текст с явными цифрами */
+  html = numberDocxLists(html);
+  /* Шаг 2: block-level теги в \n */
+  let s = html
     .replace(/<\/(p|div|li|h[1-6])\s*>/gi, '\n')
     .replace(/<(p|div|li|h[1-6])(\s[^>]*)?>/gi, '')
+    .replace(/<\/(ol|ul)\s*>/gi, '\n')
+    .replace(/<(ol|ul)(\s[^>]*)?>/gi, '')
     .replace(/<br\s*\/?>/gi, '\n');
-  /* Убираем теги-обёртки заголовков «Задание N.», «Вариант N.» если внутри strong/b */
-  s = s.replace(/<\/?(strong|b)>(\s*(Вариант|Задание))/gi, '$2')
-       .replace(/(Вариант\s+\d+\.|Задание\s+\d+\.)\s*<\/(strong|b)>/gi, '$1');
+  /* Раскрываем strong/b вокруг заголовков «Вариант» / «Задание» */
+  s = s.replace(/<\/?(strong|b)>/gi, m => m); /* оставляем как есть, regex поиска ниже не зависит от тегов */
   /* Sanitize: оставить только b/i/u/strong/em */
   s = sanitizeQuestionHtml(s);
   return parseVariantTextCommon(s, /* fromDocx= */ true);
+}
+
+/* Прохода по HTML: каждый <ol> нумеруем своим счётчиком, добавляем «N) » в начало <li>.
+   Для <ul> — добавляем «• » в начало <li>. Это даёт явный текст в результате. */
+function numberDocxLists(html){
+  const tmpl = document.createElement('template');
+  tmpl.innerHTML = html;
+  const lists = tmpl.content.querySelectorAll('ol, ul');
+  lists.forEach(list => {
+    const items = list.querySelectorAll(':scope > li');
+    items.forEach((li, idx) => {
+      const prefix = list.tagName === 'OL' ? ((idx + 1) + ') ') : '';
+      /* Вставляем prefix в начало li (как текстовый узел) */
+      if(prefix){
+        li.insertBefore(document.createTextNode(prefix), li.firstChild);
+      }
+    });
+  });
+  return tmpl.innerHTML;
 }
 
 /* Парсер PDF-варианта */
@@ -11883,57 +11907,35 @@ async function parseVariantPdf(arrayBuffer){
 
 /* Универсальная функция разбора уже извлечённого текста.
    Поддерживаются варианты заголовков: «Вариант 1.», «Вариант 1:», «Вариант 1»,
-   «ВАРИАНТ 1», «Вариант №1». Заголовки заданий аналогично.
-   Структура: «Вариант N <название>» → «Задание 1» ... «Задание 27». */
+   «ВАРИАНТ 1», «Вариант №1». Заголовки заданий аналогично. */
 function parseVariantTextCommon(full, fromDocx){
-  /* Гибкое разделение по заголовкам вариантов */
-  const variantHeaderRe = /(?:^|\n)\s*Вариант\s*№?\s*(\d+)\s*[\.\:]?\s*/gi;
-  /* Сначала находим все позиции заголовков вариантов */
-  const variantPositions = [];
-  let vm;
-  while((vm = variantHeaderRe.exec(full)) !== null){
-    variantPositions.push({ start: vm.index + vm[0].length, num: parseInt(vm[1], 10), headerEnd: vm.index + vm[0].length });
-  }
-  /* Если ни одного «Вариант N» — обрабатываем весь текст как один безымянный вариант */
-  if(!variantPositions.length){
-    variantPositions.push({ start: 0, num: 1, headerEnd: 0 });
-  }
-  /* Формируем секции */
-  const sections = [];
-  for(let i = 0; i < variantPositions.length; i++){
-    const start = variantPositions[i].start;
-    const end = i + 1 < variantPositions.length ? variantPositions[i + 1].headerEnd - variantPositions[i + 1].num.toString().length - 10 : full.length;
-    sections.push({
-      num: variantPositions[i].num,
-      body: full.slice(start, end),
-      /* title — первая непустая строка после заголовка */
-      title: ''
-    });
-  }
-  /* Извлекаем title для каждой секции */
-  sections.forEach(s => {
-    const firstLine = (s.body.split('\n').find(l => l.trim().length > 0) || '').trim();
-    if(firstLine && firstLine.length < 100){
-      s.title = firstLine;
-      /* Уберём title из тела (он не часть текста) */
-      s.body = s.body.replace(firstLine, '').trim();
-    } else {
-      s.title = 'Вариант ' + s.num;
-    }
-  });
-
+  /* Разделяем по заголовкам «Вариант N» (любой формат) */
+  const sections = full.split(/\n(?=Вариант\s*№?\s*\d+\b)/i);
+  /* Если split дал одну секцию и она не начинается с «Вариант» — обрабатываем как
+     один безымянный вариант. */
   const variants = [];
   for(const sec of sections){
-    const num = sec.num;
-    const title = sec.title;
-    const body = sec.body;
+    /* Гибкий заголовок: «Вариант 1.», «Вариант 1:», «Вариант 1», «Вариант №1» */
+    let mh = sec.match(/^\s*Вариант\s*№?\s*(\d+)\s*[\.\:]?\s*(.+?)(?:\n|$)/i);
+    let num, title, body;
+    if(mh){
+      num = parseInt(mh[1], 10);
+      title = (mh[2] || '').trim() || ('Вариант ' + num);
+      body = sec.slice(mh[0].length);
+    } else {
+      /* Безымянный — берём весь текст как один вариант */
+      if(variants.length || !sec.trim()) continue;
+      num = 1;
+      title = 'Вариант 1';
+      body = sec;
+    }
     const src13Match = body.match(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s*1\s*[−–-]\s*3\s*[\.\:]?\s*\n([\s\S]+?)(?=\n\s*Задание\s*№?\s*1\b)/i);
     const src22Match = body.match(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s*22\s*[−–-]\s*26\s*[\.\:]?\s*\n([\s\S]+?)(?=\n\s*Задание\s*№?\s*22\b)/i);
     const tasks = {};
     /* Гибкий заголовок задания: «Задание 1.», «Задание 1:», «Задание №1.», «Задание 1» */
-    const taskRe = /\n\s*Задание\s*№?\s*(\d+)\s*[\.\:]?\s*([\s\S]+?)(?=\n\s*Задание\s*№?\s*\d+\s*[\.\:]?\s|$)/gi;
+    const taskRe = /Задание\s*№?\s*(\d+)\s*[\.\:]?\s*([\s\S]+?)(?=\bЗадание\s*№?\s*\d+\b|$)/gi;
     let m;
-    while((m = taskRe.exec(sec)) !== null){
+    while((m = taskRe.exec(body)) !== null){
       const n = parseInt(m[1], 10);
       if(n < 1 || n > 27) continue;
       let body = m[2].trim();
