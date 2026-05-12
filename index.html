@@ -4228,11 +4228,13 @@ function webPushAvailable(){
          VAPID_PUBLIC_KEY && VAPID_PUBLIC_KEY !== 'PASTE_YOUR_VAPID_PUBLIC_KEY_HERE';
 }
 
-/* Получить текущую подписку (если есть) */
+/* Получить текущую подписку (если есть). Используем getRegistration —
+   .ready может висеть вечно если SW ещё не зарегистрирован. */
 async function getCurrentPushSubscription(){
   if(!webPushAvailable()) return null;
   try {
-    const reg = await navigator.serviceWorker.ready;
+    const reg = await navigator.serviceWorker.getRegistration();
+    if(!reg) return null;
     return await reg.pushManager.getSubscription();
   } catch(_){ return null; }
 }
@@ -4310,49 +4312,53 @@ function notifyViaPush(userId, title, body, link){
   }).catch(e => console.warn('notifyViaPush упал:', e.message));
 }
 
-/* Карточка для Профиля: «Push в браузере» */
+/* Карточка для Профиля: «Push в браузере».
+   По умолчанию рисуем состояние «не включено» — это правильно в 99% случаев
+   при первом заходе. Потом async-проверка обновит состояние если подписка уже есть. */
 function webPushCard(){
   if(!MY_PROFILE) return null;
   if(!webPushAvailable()){
-    return null;  /* Не показываем карточку если ключи не настроены или браузер не умеет */
+    return null;
   }
   const card = el('div', { class:'card', style:{ marginBottom:'16px' }});
-  /* Текущий статус — спросим у браузера через async и обновим */
   const statusBlock = el('div', { style:{ flex:1, minWidth:'200px' }});
-  const refresh = async () => {
-    const sub = await getCurrentPushSubscription();
+  let actionBtn = null;
+  const renderState = (subscribed) => {
     statusBlock.innerHTML = '';
-    const subscribed = !!sub && Notification.permission === 'granted';
     statusBlock.append(
-      el('h3', { style:{ marginBottom:'2px' }}, subscribed ? '✅ Push в этом браузере включён' : '🔔 Push-уведомления в браузере'),
+      el('h3', { style:{ marginBottom:'2px' }},
+        subscribed ? '✅ Push в этом браузере включён' : '🔔 Push-уведомления в браузере'),
       el('div', { style:{ color:'var(--ink-2)', fontSize:'13px' }},
         subscribed
           ? 'Сюда будут приходить пуши параллельно с Telegram.'
           : 'Дополнительный канал на случай если Telegram под рукой нет.'));
-    /* Кнопка */
     if(actionBtn) actionBtn.remove();
     actionBtn = subscribed
       ? el('button', { class:'btn btn-secondary btn-sm',
           onclick: async () => {
             await disableWebPush();
             showToast('Push отключён');
-            refresh();
+            renderState(false);
           }
         }, 'Отключить')
       : el('button', { class:'btn btn-teal',
           onclick: async () => {
             const ok = await enableWebPush();
-            if(ok){ showToast('✅ Push включён'); refresh(); }
+            if(ok){ showToast('✅ Push включён'); renderState(true); }
           }
         }, '🔔 Включить');
     row.append(actionBtn);
   };
-  let actionBtn = null;
   const row = el('div', { style:{ display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap' }},
     el('span', { style:{ fontSize:'28px' }}, '🔔'),
     statusBlock);
   card.append(row);
-  setTimeout(refresh, 0);
+  /* Сразу рисуем "не включено" — это безопасный дефолт */
+  renderState(false);
+  /* Асинхронно проверим — если уже есть активная подписка, обновим */
+  getCurrentPushSubscription().then(sub => {
+    if(sub && Notification.permission === 'granted') renderState(true);
+  }).catch(() => {});
   return card;
 }
 
