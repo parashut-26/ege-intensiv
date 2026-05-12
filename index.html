@@ -7508,7 +7508,9 @@ function studentVariantsCard(){
           return;
         }
         const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(48px, 1fr))', gap:'4px', marginTop:'4px' }});
-        answers.forEach(ans => {
+        /* Показываем только задания 1-26. №27 = сочинение,
+           оно идёт отдельно через сданные сочинения. */
+        answers.filter(a => a.question_num >= 1 && a.question_num <= 26).forEach(ans => {
           const max = Number(ans.max_points || 0);
           const pts = Number(ans.points || 0);
           let bg, color;
@@ -11788,13 +11790,14 @@ function viewVariantSummary(){
   const v = data.variant;
   const attempts = data.attempts;
   const byAttempt = data.answersByAttempt;
-  const qCount = v.questions_count || 27;
+  /* В UI показываем только задания 1-26. Задание 27 = сочинение,
+     оно учтено отдельно через К1-К10 (по привязанной работе). */
+  const qCount = Math.min(26, v.questions_count || 26);
 
   wrap.append(
     el('h1', null, '📋 ' + v.title),
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'18px' }},
-      attempts.length + ' учеников · ' + qCount + ' заданий' +
-      (v.total_max_score ? ' · макс ' + v.total_max_score + ' б' : '')));
+      attempts.length + ' учеников · ' + qCount + ' заданий (1-26) + сочинение К1-К10'));
 
   if(!attempts.length){
     wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)' }},
@@ -12104,10 +12107,9 @@ function viewVariantsByStudent(){
 
   if(!attempts.length) return wrap;
 
-  /* Определяем максимум question_num по всем попыткам — чтобы знать сколько колонок 1..N */
-  let maxQ = 0;
-  Object.values(answersByAttempt).forEach(d => Object.keys(d).forEach(q => { if(+q > maxQ) maxQ = +q; }));
-  if(maxQ < 26) maxQ = 26;  // обычно ровно 26+27, но на всякий случай
+  /* Всегда 26 колонок — задания 1-26. №27 = сочинение, не показываем,
+     оно учитывается через К1-К10. */
+  const maxQ = 26;
 
   const tableWrap = el('div', { style:{ overflowX:'auto', background:'var(--surface)', borderRadius:'12px', border:'1px solid var(--border)' }});
   const table = el('table', { class:'variants-summary', style:{ borderCollapse:'collapse', minWidth:'100%' }});
@@ -12257,7 +12259,9 @@ function testScoreToGrade(testScore){
 }
 
 /* Сумма баллов по «тестовой части» — задания 1-26 (исключая 27 сочинение).
-   answers — массив объектов { question_num, points, max_points }. */
+   answers — массив объектов { question_num, points, max_points }.
+   Округление вниз (Math.floor): в заданиях 7 и 22 бывают пол-баллы (0.5),
+   но итоговый «тест» по правилам ЕГЭ округляется в меньшую сторону. */
 function calcVariantTestSum(answers){
   if(!Array.isArray(answers)) return null;
   let sum = 0, hasAny = false;
@@ -12268,7 +12272,7 @@ function calcVariantTestSum(answers){
       if(a.max_points > 0) hasAny = true;
     }
   });
-  return hasAny ? sum : null;
+  return hasAny ? Math.floor(sum) : null;
 }
 
 /* Сумма К1..К10 из review-объекта (как finalScore в DB_ESSAYS) */
