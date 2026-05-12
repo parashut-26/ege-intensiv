@@ -580,6 +580,8 @@ const STATE = {
   myReportTried: false,
   /* === Архив интенсива === */
   archiveOpen: false,
+  /* === Запись голосового в чате === */
+  chatRecording: false,
   /* === Splash-анимация «Краш-тест» при входе ученика === */
   studentSplashActive: false,     // прямо сейчас крутится splash
   studentSplashChecked: false,    // уже проверяли localStorage в этой вкладке
@@ -1753,7 +1755,7 @@ async function loadChatMessages(){
   try {
     const arr = await restRequest('GET',
       '/chat_messages?room_id=eq.' + STATE.chatRoomId +
-      '&select=id,author_id,body,marked_helped_by,created_at,' +
+      '&select=id,author_id,body,voice_url,image_url,marked_helped_by,created_at,' +
       'author:profiles!chat_messages_author_id_fkey(full_name,role)' +
       '&order=created_at.asc&limit=200');
     if(Array.isArray(arr)){
@@ -1767,13 +1769,14 @@ async function loadChatMessages(){
   }
 }
 
-async function sendChatMessage(text){
+async function sendChatMessage(text, extra){
   if(!sb || !MY_PROFILE) throw new Error('не авторизован');
   const rid = await ensureGroupChatRoom();
   if(!rid) throw new Error('комната ещё не создана учителем');
-  await restRequest('POST', '/chat_messages',
-    { room_id: rid, author_id: MY_PROFILE.id, body: text },
-    { prefer: 'return=minimal' });
+  const payload = { room_id: rid, author_id: MY_PROFILE.id, body: text || '' };
+  if(extra && extra.voice_url) payload.voice_url = extra.voice_url;
+  if(extra && extra.image_url) payload.image_url = extra.image_url;
+  await restRequest('POST', '/chat_messages', payload, { prefer: 'return=minimal' });
   /* Сразу подтянем — чтобы и наше сообщение появилось без ожидания poll-тика */
   await loadChatMessages();
 }
@@ -1921,7 +1924,7 @@ async function loadDmMessages(){
   try {
     const arr = await restRequest('GET',
       '/chat_messages?room_id=eq.' + STATE.dmRoomId +
-      '&select=id,author_id,body,marked_helped_by,created_at,' +
+      '&select=id,author_id,body,voice_url,image_url,marked_helped_by,created_at,' +
       'author:profiles!chat_messages_author_id_fkey(full_name,role)' +
       '&order=created_at.asc&limit=200');
     if(Array.isArray(arr)){
@@ -1935,21 +1938,27 @@ async function loadDmMessages(){
   }
 }
 
-async function sendDmMessage(text){
+async function sendDmMessage(text, extra){
   if(!sb || !MY_PROFILE) throw new Error('не авторизован');
   if(!STATE.dmRoomId) throw new Error('нет открытой ЛС');
-  await restRequest('POST', '/chat_messages',
-    { room_id: STATE.dmRoomId, author_id: MY_PROFILE.id, body: text },
-    { prefer: 'return=minimal' });
+  const payload = { room_id: STATE.dmRoomId, author_id: MY_PROFILE.id, body: text || '' };
+  if(extra && extra.voice_url) payload.voice_url = extra.voice_url;
+  if(extra && extra.image_url) payload.image_url = extra.image_url;
+  await restRequest('POST', '/chat_messages', payload, { prefer: 'return=minimal' });
   await loadDmMessages();
-  /* TG-уведомление собеседнику. Не ждём ответа — в фоне (fire-and-forget).
-     Если у получателя нет привязки или отключены уведомления, edge-функция
-     просто вернёт ok:false без побочных эффектов. */
+  /* Уведомления собеседнику — TG и Push параллельно, fire-and-forget. */
   if(STATE.dmPartner && STATE.dmPartner.id){
     const myName = (MY_PROFILE.full_name || 'Кто-то').split(/\s+/)[0];
-    const preview = text.length > 220 ? text.slice(0, 220) + '…' : text;
+    const previewBody = text && text.length > 220 ? text.slice(0, 220) + '…' : (text || '');
+    const previewAttach = extra && extra.voice_url ? '🎤 голосовое' :
+                          extra && extra.image_url ? '📷 фото' : '';
+    const preview = previewBody || previewAttach || '(пусто)';
     notifyViaTelegram(STATE.dmPartner.id,
       '💬 <b>' + escHtml(myName) + '</b> написал в чат:\n\n' + escHtml(preview),
+      'https://zebrus.online');
+    notifyViaPush(STATE.dmPartner.id,
+      '💬 ' + myName + ' написал в чат',
+      preview,
       'https://zebrus.online');
   }
 }
@@ -2608,6 +2617,124 @@ function makeVoiceRecorder(initialUrl, onChange){
   };
   refresh();
   return { node: wrap, getUrl: () => currentUrl, abort: forceAbort };
+}
+
+/* Загрузить картинку в bucket chat-media. С сжатием как у сочинений. */
+async function uploadChatImage(file){
+  if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
+  const compressed = await compressImage(file);
+  const ext = (compressed.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'jpg'])[1].toLowerCase();
+  const path = MY_PROFILE.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
+  await uploadToStorage('chat-media', path, compressed, compressed.type || 'image/jpeg');
+  return SUPABASE_DIRECT_URL + '/storage/v1/object/public/chat-media/' + path;
+}
+
+/* Загрузить голосовое (Blob от MediaRecorder) в chat-media. */
+async function uploadChatAudio(blob){
+  if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
+  const mime = blob.type || 'audio/webm';
+  const ext = mime.includes('mp4') ? 'm4a' : mime.includes('ogg') ? 'ogg' : 'webm';
+  const path = MY_PROFILE.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
+  await uploadToStorage('chat-media', path, blob, mime);
+  return SUPABASE_DIRECT_URL + '/storage/v1/object/public/chat-media/' + path;
+}
+
+/* === Запись голосового в чат === */
+let _chatRec = null;
+let _chatRecChunks = [];
+async function startChatVoiceRecording(){
+  if(_chatRec) return;
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    /* Используем самый совместимый MIME из доступных */
+    let mime = '';
+    if(window.MediaRecorder){
+      const candidates = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg'];
+      for(const c of candidates){
+        if(MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(c)){ mime = c; break; }
+      }
+    }
+    _chatRecChunks = [];
+    _chatRec = new MediaRecorder(stream, mime ? { mimeType: mime } : undefined);
+    _chatRec.ondataavailable = ev => { if(ev.data && ev.data.size) _chatRecChunks.push(ev.data); };
+    _chatRec.onstop = () => { stream.getTracks().forEach(t => t.stop()); };
+    _chatRec.start();
+    STATE.chatRecording = true;
+    render();
+  } catch(e){
+    showToast('⚠ Нет доступа к микрофону');
+    _chatRec = null;
+  }
+}
+async function stopChatVoiceRecording(send){
+  if(!_chatRec) return;
+  const rec = _chatRec;
+  _chatRec = null;
+  STATE.chatRecording = false;
+  await new Promise(res => { rec.onstop = res; rec.stop(); });
+  if(!send){ _chatRecChunks = []; render(); return; }
+  if(!_chatRecChunks.length){ showToast('⚠ Запись пустая'); render(); return; }
+  const blob = new Blob(_chatRecChunks, { type: _chatRecChunks[0].type || 'audio/webm' });
+  _chatRecChunks = [];
+  try {
+    showToast('⏳ Загружаю голосовое…');
+    const url = await uploadChatAudio(blob);
+    /* Отправляем как новое сообщение чата */
+    if(STATE.chatChannel === 'dm' && STATE.dmRoomId){
+      await sendDmMessage('', { voice_url: url });
+    } else {
+      await sendChatMessage('', { voice_url: url });
+    }
+    showToast('✓ Голосовое отправлено');
+    render();
+  } catch(e){ showToast('⚠ ' + e.message); }
+}
+
+/* Кнопки «📷 Фото» и «🎤 Голосовое» для чата. Возвращают набор элементов. */
+function chatAttachButtons(){
+  const photoInput = el('input', { type:'file', accept:'image/*', style:{ display:'none' },
+    onchange: async ev => {
+      const f = ev.target.files[0];
+      if(!f) return;
+      try {
+        showToast('⏳ Загружаю фото…');
+        const url = await uploadChatImage(f);
+        if(STATE.chatChannel === 'dm' && STATE.dmRoomId){
+          await sendDmMessage('', { image_url: url });
+        } else {
+          await sendChatMessage('', { image_url: url });
+        }
+        showToast('✓ Фото отправлено');
+        render();
+      } catch(err){ showToast('⚠ ' + err.message); }
+      finally { ev.target.value = ''; }
+    }});
+  const photoBtn = el('button', { type:'button', class:'emoji-btn', title:'Прикрепить фото',
+    onclick: ev => { ev.preventDefault(); photoInput.click(); }
+  }, '📷');
+
+  /* Кнопка-микрофон: переключает запись (старт/стоп с отправкой) */
+  const micBtn = el('button', { type:'button', class:'emoji-btn',
+    style: STATE.chatRecording ? { background:'var(--red-soft)', color:'var(--red)' } : null,
+    title: STATE.chatRecording ? 'Остановить и отправить' : 'Записать голосовое',
+    onclick: ev => {
+      ev.preventDefault();
+      if(STATE.chatRecording) stopChatVoiceRecording(true);
+      else startChatVoiceRecording();
+    }
+  }, STATE.chatRecording ? '⏹' : '🎤');
+
+  /* Если идёт запись — добавим кнопку «✕ Отмена» */
+  const cancelBtn = STATE.chatRecording
+    ? el('button', { type:'button', class:'emoji-btn', title:'Отмена',
+        onclick: ev => { ev.preventDefault(); stopChatVoiceRecording(false); }
+      }, '✕')
+    : null;
+
+  const wrap = el('div', { style:{ display:'flex', gap:'2px', alignItems:'center' }},
+    photoInput, photoBtn, micBtn);
+  if(cancelBtn) wrap.append(cancelBtn);
+  return wrap;
 }
 
 /* Эмодзи-пикер. Возвращает <div> с кнопкой 😀 и выпадающей палитрой.
@@ -4069,6 +4196,161 @@ function showToast(text){
   STATE.toast = text;
   render();
   setTimeout(() => { STATE.toast = null; render(); }, 2400);
+}
+
+/* =======================================================================
+   WEB PUSH — браузерные уведомления (параллельно с Telegram).
+   ======================================================================= */
+
+/* ВАЖНО: VAPID public key. Замени на свой после генерации.
+   Команда генерации (в Терминале):
+     npx --yes web-push generate-vapid-keys
+   Вставь PUBLIC key сюда, PRIVATE → Supabase Secrets как VAPID_PRIVATE_KEY. */
+const VAPID_PUBLIC_KEY = 'PASTE_YOUR_VAPID_PUBLIC_KEY_HERE';
+
+function urlBase64ToUint8Array(b64){
+  const padding = '='.repeat((4 - b64.length % 4) % 4);
+  const s = (b64 + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(s);
+  const arr = new Uint8Array(raw.length);
+  for(let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
+/* Готова ли среда: есть serviceWorker + PushManager + Notification + ключ настроен */
+function webPushAvailable(){
+  return ('serviceWorker' in navigator) &&
+         ('PushManager' in window) &&
+         ('Notification' in window) &&
+         VAPID_PUBLIC_KEY && VAPID_PUBLIC_KEY !== 'PASTE_YOUR_VAPID_PUBLIC_KEY_HERE';
+}
+
+/* Получить текущую подписку (если есть) */
+async function getCurrentPushSubscription(){
+  if(!webPushAvailable()) return null;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    return await reg.pushManager.getSubscription();
+  } catch(_){ return null; }
+}
+
+/* Включить push: запросить permission, подписаться, сохранить в БД */
+async function enableWebPush(){
+  if(!webPushAvailable()){
+    showToast('⚠ Web Push недоступен в этом браузере');
+    return false;
+  }
+  if(!MY_PROFILE){ showToast('Сначала войди в аккаунт'); return false; }
+  try {
+    /* Регистрируем sw.js (на root домена) */
+    const reg = await navigator.serviceWorker.register('/sw.js');
+    await navigator.serviceWorker.ready;
+    /* Запрашиваем permission */
+    const perm = await Notification.requestPermission();
+    if(perm !== 'granted'){
+      showToast('⚠ Без разрешения уведомления приходить не будут');
+      return false;
+    }
+    /* Подписываемся на push */
+    const subscription = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY)
+    });
+    const json = subscription.toJSON();
+    /* Сохраняем в БД */
+    await restRequest('POST', '/push_subscriptions',
+      {
+        user_id:    MY_PROFILE.id,
+        endpoint:   json.endpoint,
+        p256dh:     json.keys.p256dh,
+        auth:       json.keys.auth,
+        user_agent: (navigator.userAgent || '').slice(0, 200)
+      },
+      { prefer:'resolution=merge-duplicates,return=minimal' });
+    return true;
+  } catch(e){
+    showToast('⚠ ' + (e.message || 'не удалось включить'));
+    return false;
+  }
+}
+
+async function disableWebPush(){
+  try {
+    const sub = await getCurrentPushSubscription();
+    if(sub){
+      const endpoint = sub.endpoint;
+      await sub.unsubscribe();
+      /* Удаляем запись из БД */
+      try {
+        await restRequest('DELETE',
+          '/push_subscriptions?endpoint=eq.' + encodeURIComponent(endpoint),
+          null, { prefer:'return=minimal' });
+      } catch(_){}
+    }
+  } catch(_){}
+}
+
+/* Универсальный вызов push-send (как notifyViaTelegram, fire-and-forget) */
+function notifyViaPush(userId, title, body, link){
+  if(!sb || !MY_PROFILE || !userId) return;
+  const token = getAccessToken();
+  if(!token) return;
+  const url = SUPABASE_URL + '/functions/v1/push-send';
+  fetch(url, {
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'Authorization':'Bearer ' + token,
+      'apikey': SUPABASE_KEY,
+    },
+    body: JSON.stringify({ user_id: userId, title, body, url: link || null })
+  }).catch(e => console.warn('notifyViaPush упал:', e.message));
+}
+
+/* Карточка для Профиля: «Push в браузере» */
+function webPushCard(){
+  if(!MY_PROFILE) return null;
+  if(!webPushAvailable()){
+    return null;  /* Не показываем карточку если ключи не настроены или браузер не умеет */
+  }
+  const card = el('div', { class:'card', style:{ marginBottom:'16px' }});
+  /* Текущий статус — спросим у браузера через async и обновим */
+  const statusBlock = el('div', { style:{ flex:1, minWidth:'200px' }});
+  const refresh = async () => {
+    const sub = await getCurrentPushSubscription();
+    statusBlock.innerHTML = '';
+    const subscribed = !!sub && Notification.permission === 'granted';
+    statusBlock.append(
+      el('h3', { style:{ marginBottom:'2px' }}, subscribed ? '✅ Push в этом браузере включён' : '🔔 Push-уведомления в браузере'),
+      el('div', { style:{ color:'var(--ink-2)', fontSize:'13px' }},
+        subscribed
+          ? 'Сюда будут приходить пуши параллельно с Telegram.'
+          : 'Дополнительный канал на случай если Telegram под рукой нет.'));
+    /* Кнопка */
+    if(actionBtn) actionBtn.remove();
+    actionBtn = subscribed
+      ? el('button', { class:'btn btn-secondary btn-sm',
+          onclick: async () => {
+            await disableWebPush();
+            showToast('Push отключён');
+            refresh();
+          }
+        }, 'Отключить')
+      : el('button', { class:'btn btn-teal',
+          onclick: async () => {
+            const ok = await enableWebPush();
+            if(ok){ showToast('✅ Push включён'); refresh(); }
+          }
+        }, '🔔 Включить');
+    row.append(actionBtn);
+  };
+  let actionBtn = null;
+  const row = el('div', { style:{ display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap' }},
+    el('span', { style:{ fontSize:'28px' }}, '🔔'),
+    statusBlock);
+  card.append(row);
+  setTimeout(refresh, 0);
+  return card;
 }
 
 /* =======================================================================
@@ -7027,6 +7309,9 @@ function viewStudentProfile(){
   /* Карточка привязки Telegram (если есть профиль из БД) */
   const tgCard = telegramLinkCard();
   if(tgCard) wrap.append(tgCard);
+  /* Push в браузере */
+  const pushCard = webPushCard();
+  if(pushCard) wrap.append(pushCard);
 
   /* Реальные данные профиля если залогинены, иначе моки */
   const realName = MY_PROFILE && MY_PROFILE.full_name ? MY_PROFILE.full_name : ME_STUDENT.fullname;
@@ -7144,6 +7429,10 @@ function viewTeacherOverview(){
   /* Привязка Telegram — у учителя своя карточка */
   const tgCard = telegramLinkCard();
   if(tgCard) wrap.append(tgCard);
+
+  /* Web Push в браузере */
+  const pushCard = webPushCard();
+  if(pushCard) wrap.append(pushCard);
 
   /* Чек-лист готовности — до и во время интенсива */
   const rdCard = readinessCard();
@@ -10803,6 +11092,9 @@ function viewCuratorStudents(){
   /* Привязка Telegram — куратору тоже */
   const tgCard = telegramLinkCard();
   if(tgCard) wrap.append(tgCard);
+  /* Web Push */
+  const pushCard = webPushCard();
+  if(pushCard) wrap.append(pushCard);
   wrap.append(
     el('div', { class:'card', style:{ padding:0, overflowX:'auto', overflowY:'hidden', WebkitOverflowScrolling:'touch' }},
       el('table', { class:'table' },
@@ -10999,11 +11291,12 @@ function chatPanel(role){
 
     panel.append(
       el('div', { class:'chat-input' },
+        MY_PROFILE ? chatAttachButtons() : null,
         emojiButton('chat-i'),
-        el('input', { id:'chat-i', placeholder: MY_PROFILE ? 'Сообщение…' : 'Войдите, чтобы писать',
-          disabled: !MY_PROFILE,
+        el('input', { id:'chat-i', placeholder: MY_PROFILE ? (STATE.chatRecording ? '🔴 Идёт запись…' : 'Сообщение…') : 'Войдите, чтобы писать',
+          disabled: !MY_PROFILE || STATE.chatRecording,
           onkeydown: e => { if(e.key === 'Enter'){ e.preventDefault(); sendChat(); }}}),
-        el('button', { onclick: () => sendChat(), disabled: !MY_PROFILE }, 'Отправить')));
+        el('button', { onclick: () => sendChat(), disabled: !MY_PROFILE || STATE.chatRecording }, 'Отправить')));
   }
 
   /* === ВКЛАДКА «ЛС» === */
@@ -11097,10 +11390,12 @@ function chatPanel(role){
 
       panel.append(
         el('div', { class:'chat-input' },
+          chatAttachButtons(),
           emojiButton('chat-i'),
-          el('input', { id:'chat-i', placeholder:'Сообщение…',
+          el('input', { id:'chat-i', placeholder: STATE.chatRecording ? '🔴 Идёт запись…' : 'Сообщение…',
+            disabled: STATE.chatRecording,
             onkeydown: e => { if(e.key === 'Enter'){ e.preventDefault(); sendChat(); }}}),
-          el('button', { onclick: () => sendChat() }, 'Отправить')));
+          el('button', { onclick: () => sendChat(), disabled: STATE.chatRecording }, 'Отправить')));
     }
   }
 
@@ -11136,7 +11431,23 @@ function chatBubbleDb(m, role, meId){
     if(authorRole === 'teacher') who.append(el('span', { class:'role-mini', style:{ background:'var(--p-soft)', color:'var(--p-deep)' }}, '👩‍🏫 учитель'));
     bubble.append(who);
   }
-  bubble.append(el('div', { style:{ whiteSpace:'pre-wrap', wordBreak:'break-word' }}, m.body));
+  if(m.body){
+    bubble.append(el('div', { style:{ whiteSpace:'pre-wrap', wordBreak:'break-word' }}, m.body));
+  }
+  /* Прикреплённое голосовое */
+  if(m.voice_url){
+    const audio = el('audio', { controls: true,
+      style:{ width:'100%', maxWidth:'260px', marginTop:'6px', display:'block' }});
+    audio.src = m.voice_url;
+    bubble.append(audio);
+  }
+  /* Прикреплённое фото */
+  if(m.image_url){
+    bubble.append(el('img', { src: m.image_url,
+      style:{ maxWidth:'100%', maxHeight:'320px', borderRadius:'8px', marginTop:'6px', display:'block', cursor:'pointer' },
+      onclick: () => window.open(m.image_url, '_blank')
+    }));
+  }
   bubble.append(el('div', { class:'time' }, time + (wasMarked ? ' · 🤝 помогло' : '')));
   if(canMark){
     bubble.append(
