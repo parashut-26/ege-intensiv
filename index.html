@@ -12301,11 +12301,24 @@ function modalEssayImport(){
             const result = await importEssayResults(pickedFile, dateInput.value || null, themeInput.value);
             if(result){
               resultBlock.innerHTML = '';
-              resultBlock.append(el('div', { style:{ padding:'10px 12px', background:'#D1FAE5', color:'#065F46', borderRadius:'8px', marginBottom:'8px', fontWeight:'700' }},
-                '✅ Импортировано: ' + result.imported + ' из ' + result.total));
-              if(result.skipped.length){
+              if(result.imported === 0 && result.total > 0){
+                /* Все упали — скорее всего RLS не настроена. Покажем явную плашку. */
+                const sample = result.skipped[0] || '';
+                const isRls = /42501|row-level|forbidden|403/i.test(sample);
+                resultBlock.append(el('div', { style:{ padding:'12px 14px', background:'#FEE2E2', color:'#991B1B', borderRadius:'8px', marginBottom:'8px' }},
+                  el('div', { style:{ fontWeight:'700', marginBottom:'6px' }},
+                    '❌ Ни одна работа не импортирована'),
+                  el('div', { style:{ fontSize:'13px' }},
+                    isRls
+                      ? 'БД не разрешает учителю создавать сочинения от имени ученика. Прогони в Supabase SQL Editor миграцию sql/add_essays_teacher_insert.sql — после этого попробуй импорт снова.'
+                      : 'Все ' + result.total + ' строк выдали ошибку. Подробности — в консоли браузера (F12 → Console).')));
+              } else if(result.imported > 0){
+                resultBlock.append(el('div', { style:{ padding:'10px 12px', background:'#D1FAE5', color:'#065F46', borderRadius:'8px', marginBottom:'8px', fontWeight:'700' }},
+                  '✅ Импортировано: ' + result.imported + ' из ' + result.total));
+              }
+              if(result.skipped.length && result.imported > 0){
                 resultBlock.append(el('div', { style:{ padding:'10px 12px', background:'#FEF3C7', color:'#92400E', borderRadius:'8px', fontSize:'12px' }},
-                  '⚠ Не сматчили (нет в базе или ошибка): ' + result.skipped.join(', ') +
+                  '⚠ Не сматчили: ' + result.skipped.join(', ') +
                   '. Эти ученики не созданы. Добавь их в раздел «Ученики» и попробуй снова.'));
               }
               /* Перерисуем список сочинений */
