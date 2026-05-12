@@ -561,6 +561,8 @@ const STATE = {
   linkEssay: null,                // { attemptId, currentEssayId, studentId, studentName }
   /* Сводная по сочинениям: 'criteria' (К1-К10) | 'list' (все работы) */
   essayReportView: 'criteria',
+  /* Модалка импорта сочинений из Excel */
+  essayImportOpen: false,
   contentEditTaskN: null,  // открыта модалка редактирования теории по номеру
   chatOpen: false,
   chatChannel: 'group',
@@ -9518,9 +9520,12 @@ function viewTeacherEssays(){
         el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }},
           'Очередь работ на проверку. Кликните на сочинение, чтобы открыть форму проверки К1–К10.')),
       el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' }},
+        el('button', { class:'btn btn-y btn-sm',
+          onclick: () => { STATE.essayImportOpen = true; render(); }
+        }, '📥 Импорт из Excel'),
         el('button', { class:'btn btn-teal btn-sm',
           onclick: () => exportEssaysCSV(essays)
-        }, '📥 Экспорт CSV'),
+        }, '📤 Экспорт CSV'),
         el('button', { class:'btn btn-secondary btn-sm',
           onclick: async () => {
             showToast('⏳ Обновляю список…');
@@ -11494,6 +11499,148 @@ function otpParseDate(v){
   return isNaN(d.getTime()) ? null : d.toISOString();
 }
 
+/* ============================================================
+   Импорт сочинений из Excel-таблицы учителя (ручная сводка
+   баллов К1-К10, например после CloudText, где экспорта нет).
+   Формат: первый столбец — имя ученика, далее любые столбцы,
+   среди них К1..К10 (заголовки). Допустимы лишние колонки.
+   ============================================================ */
+function parseEssayResultsWorkbook(arrayBuffer){
+  const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
+  if(!aoa.length) throw new Error('Файл пустой');
+
+  /* Ищем строку, где встречаются заголовки К1-К10 (часто это не первая строка,
+     может быть подзаголовок типа «Задания»). Проверяем первые 5 строк. */
+  let headerRow = -1;
+  let kPositions = {};
+  let namePosition = 0;
+  const upper = s => String(s || '').trim().toUpperCase().replace(/\s+/g, '').replace(/Ё/g, 'Е');
+  for(let r = 0; r < Math.min(6, aoa.length); r++){
+    const row = aoa[r] || [];
+    const positions = {};
+    row.forEach((cell, idx) => {
+      const c = upper(cell);
+      /* Заголовки К1..К10 (русская К или латинская K) */
+      const m = c.match(/^[КK](\d{1,2})$/);
+      if(m){
+        const num = parseInt(m[1], 10);
+        if(num >= 1 && num <= 10) positions['k' + num] = idx;
+      }
+    });
+    if(positions.k1 != null && positions.k10 != null){
+      headerRow = r;
+      kPositions = positions;
+      /* Имя — первая ненулевая колонка ДО первой К-колонки */
+      const firstK = Math.min(...Object.values(positions));
+      for(let i = 0; i < firstK; i++){
+        const sample = (aoa[r + 1] && aoa[r + 1][i]) || '';
+        if(String(sample).trim().length > 1){ namePosition = i; break; }
+      }
+      break;
+    }
+  }
+  if(headerRow < 0){
+    throw new Error('Не нашлась строка с заголовками К1-К10. Проверь что в Excel есть столбцы «К1», «К2», ..., «К10».');
+  }
+
+  const students = [];
+  for(let r = headerRow + 1; r < aoa.length; r++){
+    const row = aoa[r];
+    if(!row || !row.length) continue;
+    const name = String(row[namePosition] || '').trim();
+    if(!name) continue;
+    /* Пропускаем явные служебные строки */
+    if(/^(средн|итого|всего)/i.test(name)) continue;
+    const ks = {};
+    let hasAny = false;
+    for(let i = 1; i <= 10; i++){
+      const col = kPositions['k' + i];
+      if(col == null) continue;
+      const val = row[col];
+      if(val == null || val === '') continue;
+      const n = parseFloat(String(val).replace(',', '.'));
+      if(!isNaN(n)){
+        ks['k' + i] = n;
+        hasAny = true;
+      }
+    }
+    if(hasAny) students.push({ name, ks });
+  }
+  return students;
+}
+
+/* Создание сочинений и review-записей через REST */
+async function importEssayResults(file, workDate, theme){
+  if(typeof XLSX === 'undefined'){
+    showToast('⚠ XLSX-парсер не загрузился. Обнови страницу.');
+    return null;
+  }
+  const buf = await file.arrayBuffer();
+  let parsed;
+  try { parsed = parseEssayResultsWorkbook(buf); }
+  catch(e){ showToast('⚠ ' + e.message); return null; }
+  if(!parsed.length){ showToast('В файле не нашли учеников'); return null; }
+
+  showToast('⏳ Импортирую ' + parsed.length + ' работ…');
+
+  const studentsRaw = await restRequest('GET', '/profiles?role=eq.student&select=id,full_name');
+  const allStudents = Array.isArray(studentsRaw) ? studentsRaw : [];
+
+  const submittedAt = workDate
+    ? new Date(workDate + 'T12:00:00').toISOString()
+    : new Date().toISOString();
+  const teacherId = MY_PROFILE && MY_PROFILE.id || null;
+  const themeText = (theme || '').trim() || '(сочинение, импорт из Excel)';
+
+  let imported = 0;
+  const skipped = [];
+  for(const row of parsed){
+    const profileId = matchOtpToProfile(row.name, allStudents);
+    if(!profileId){ skipped.push(row.name); continue; }
+    let total = 0;
+    for(let i = 1; i <= 10; i++) if(row.ks['k' + i] != null) total += row.ks['k' + i];
+
+    try {
+      /* 1. Создаём само сочинение, сразу статус done */
+      const essayResp = await restRequest('POST', '/essays', {
+        student_id: profileId,
+        format: 'typed',
+        status: 'done',
+        body_text: themeText,
+        submitted_at: submittedAt,
+        finalized_by: teacherId,
+        finalized_at: new Date().toISOString()
+      }, { prefer: 'return=representation' });
+      const essayId = Array.isArray(essayResp) ? essayResp[0].id : essayResp.id;
+
+      /* 2. Review с К1-К10 */
+      const reviewPayload = {
+        essay_id: essayId,
+        total: total,
+        is_pre_check: false,
+        reviewer_id: teacherId,
+        reviewed_at: new Date().toISOString(),
+        general_comment: theme ? ('Импорт из Excel — ' + theme) : 'Импорт из Excel'
+      };
+      for(let i = 1; i <= 10; i++){
+        if(row.ks['k' + i] != null) reviewPayload['k' + i] = row.ks['k' + i];
+      }
+      await restRequest('POST', '/essay_reviews', reviewPayload,
+        { prefer: 'resolution=merge-duplicates,return=minimal' });
+      imported++;
+    } catch(e){
+      console.warn('[essay import] failed for', row.name, e.message);
+      skipped.push(row.name + ' (ошибка: ' + e.message + ')');
+    }
+  }
+
+  /* Перезагружаем кэш сочинений */
+  await loadEssaysFromDb();
+  return { imported, skipped, total: parsed.length };
+}
+
 /* --- Fuzzy-match OTP-имени к profile_id. -------------------------------
    Простая нормализация (lowercase, без пробелов и знаков), плюс
    sliding-сравнение first_name × last_name × initial. */
@@ -12011,6 +12158,94 @@ function otpFormatTime(s){
   const m = Math.floor(s / 60);
   const sec = s % 60;
   return m + ':' + String(sec).padStart(2,'0');
+}
+
+/* Модалка импорта сочинений из Excel. Учитель выбирает .xlsx,
+   указывает дату работы и тему — платформа парсит К1-К10 и создаёт
+   essays + essay_reviews для всех найденных учеников. */
+function modalEssayImport(){
+  if(!STATE.essayImportOpen) return null;
+  const close = () => { STATE.essayImportOpen = false; render(); };
+  let pickedFile = null;
+  const fileLabel = el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px', minHeight:'14px' }});
+  const fileInput = el('input', {
+    type:'file', accept:'.xlsx,.xls',
+    style:{ display:'none' },
+    onchange: (ev) => {
+      pickedFile = ev.target.files && ev.target.files[0];
+      fileLabel.textContent = pickedFile ? ('📎 ' + pickedFile.name) : '';
+    }
+  });
+  const today = new Date().toISOString().slice(0, 10);
+  const dateInput = el('input', {
+    type:'date', value: today,
+    style:{ padding:'8px 12px', border:'1px solid var(--border-2)', borderRadius:'10px', fontSize:'13px' }
+  });
+  const themeInput = el('input', {
+    type:'text', placeholder:'Например: Сочинение по тексту Ваншенкина',
+    style:{ width:'100%', padding:'8px 12px', border:'1px solid var(--border-2)', borderRadius:'10px', fontSize:'13px', boxSizing:'border-box' }
+  });
+  const resultBlock = el('div', { style:{ marginTop:'12px' }});
+
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        '📥 Импорт из Excel'),
+      el('h2', { style:{ marginTop:'4px' }}, 'Сочинения учеников')),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const body = el('div', { class:'modal-body' },
+    el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'14px' }},
+      'Если ребята сдают сочинение там, где нет экспорта (например, CloudText) — веди их баллы в своей Excel-таблице (первый столбец = имя ученика, дальше столбцы К1, К2, ..., К10). Загрузи файл — платформа создаст сочинения и поставит финальные баллы.'),
+
+    el('div', { style:{ marginBottom:'10px' }},
+      el('label', { style:{ display:'block', fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px', fontWeight:'700' }}, 'Дата работы'),
+      dateInput),
+    el('div', { style:{ marginBottom:'10px' }},
+      el('label', { style:{ display:'block', fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px', fontWeight:'700' }}, 'Тема / название (опционально)'),
+      themeInput),
+    el('div', { style:{ marginBottom:'14px' }},
+      el('label', { style:{ display:'block', fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px', fontWeight:'700' }}, 'Файл Excel'),
+      el('button', { class:'btn btn-secondary',
+        onclick: () => fileInput.click()
+      }, '📂 Выбрать файл'),
+      fileInput,
+      fileLabel),
+
+    el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' }},
+      el('button', { class:'btn btn-teal',
+        onclick: async (ev) => {
+          if(!pickedFile){ showToast('Сначала выбери файл'); return; }
+          ev.target.disabled = true;
+          ev.target.textContent = '⏳ Импортирую…';
+          try {
+            const result = await importEssayResults(pickedFile, dateInput.value || null, themeInput.value);
+            if(result){
+              resultBlock.innerHTML = '';
+              resultBlock.append(el('div', { style:{ padding:'10px 12px', background:'#D1FAE5', color:'#065F46', borderRadius:'8px', marginBottom:'8px', fontWeight:'700' }},
+                '✅ Импортировано: ' + result.imported + ' из ' + result.total));
+              if(result.skipped.length){
+                resultBlock.append(el('div', { style:{ padding:'10px 12px', background:'#FEF3C7', color:'#92400E', borderRadius:'8px', fontSize:'12px' }},
+                  '⚠ Не сматчили (нет в базе или ошибка): ' + result.skipped.join(', ') +
+                  '. Эти ученики не созданы. Добавь их в раздел «Ученики» и попробуй снова.'));
+              }
+              /* Перерисуем список сочинений */
+              render();
+            }
+          } catch(e){
+            showToast('⚠ ' + e.message);
+          } finally {
+            ev.target.disabled = false;
+            ev.target.textContent = '⬆ Импортировать';
+          }
+        }
+      }, '⬆ Импортировать'),
+      el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть')),
+    resultBlock);
+
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+  }, el('div', { class:'modal' }, head, body));
 }
 
 /* --- Выбор ученика для сводной по ученику --- */
@@ -13289,6 +13524,7 @@ function _renderNow(){
   if(STATE.variantMode) root.append(modalVariantBuilder());
   if(STATE.showOnboarding) root.append(modalOnboarding());
   if(STATE.essayDraftOpen) root.append(modalEssayDraft());
+  if(STATE.essayImportOpen) root.append(modalEssayImport());
   if(STATE.linkAttempt) root.append(modalLinkStudent());
   if(STATE.linkEssay) root.append(modalLinkEssay());
   if(STATE.studentEssayResultOpen != null) root.append(modalEssayResult(STATE.studentEssayResultOpen));
