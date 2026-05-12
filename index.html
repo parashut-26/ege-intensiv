@@ -11933,18 +11933,20 @@ function parseVariantTextCommon(full, fromDocx){
     const src22Match = body.match(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s*22\s*[−–-]\s*26\s*[\.\:]?\s*\n([\s\S]+?)(?=\n\s*Задание\s*№?\s*22\b)/i);
     const tasks = {};
     /* Гибкий заголовок задания: «Задание 1.», «Задание 1:», «Задание №1.», «Задание 1» */
-    const taskRe = /Задание\s*№?\s*(\d+)\s*[\.\:]?\s*([\s\S]+?)(?=\bЗадание\s*№?\s*\d+\b|$)/gi;
-    let m;
-    while((m = taskRe.exec(body)) !== null){
-      const n = parseInt(m[1], 10);
-      if(n < 1 || n > 27) continue;
-      let body = m[2].trim();
-      body = body.split(/\n*Ответ:\s*_+/)[0]
-                 .split(/\n*Часть\s*2/)[0]
-                 .split(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s+22/)[0]
-                 .trim();
-      body = fromDocx ? postProcessTaskTextDocx(body) : postProcessTaskText(body);
-      tasks[n] = body;
+    /* Простой split по заголовкам заданий. Делим на части,
+       нечётные индексы — это номера, чётные после них — тело задания. */
+    const taskParts = body.split(/Задание\s*№?\s*(\d+)\s*[\.\:]?\s*/i);
+    /* taskParts = [intro, '1', taskBody1, '2', taskBody2, ...] */
+    for(let i = 1; i < taskParts.length; i += 2){
+      const n = parseInt(taskParts[i], 10);
+      if(isNaN(n) || n < 1 || n > 27) continue;
+      let taskBody = (taskParts[i + 1] || '').trim();
+      taskBody = taskBody.split(/\n*Ответ:\s*_+/)[0]
+                         .split(/\n*Часть\s*2/)[0]
+                         .split(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s+22/)[0]
+                         .trim();
+      taskBody = fromDocx ? postProcessTaskTextDocx(taskBody) : postProcessTaskText(taskBody);
+      tasks[n] = taskBody;
     }
     variants.push({
       num,
