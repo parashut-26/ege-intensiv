@@ -2443,8 +2443,14 @@ async function notifyTeachersOfNewEssay(){
   }
   const text = '📝 <b>Новое сочинение на проверку</b>\n\n' +
                'От: <b>' + escHtml(myName) + '</b>';
+  /* Plain-text вариант для Web Push (там HTML-теги не нужны). */
+  const pushTitle = '📝 Новое сочинение от ' + myName;
+  const pushBody  = 'Зайди в кабинет → Сочинения, чтобы проверить';
   recipients.forEach(r => {
-    if(r && r.id) notifyViaTelegram(r.id, text, 'https://zebrus.online');
+    if(r && r.id){
+      notifyViaTelegram(r.id, text, 'https://zebrus.online');
+      notifyViaPush(r.id, pushTitle, pushBody, 'https://zebrus.online');
+    }
   });
 }
 
@@ -3272,11 +3278,15 @@ async function saveEssayReview(essayId, nextStatus, isPreCheck){
     if(nextStatus === 'done') e.finalScore = total;
     if(isPreCheck) e.preScore = total;
   }
-  /* TG-уведомления — fire-and-forget */
+  /* Уведомления (TG + Push параллельно) — fire-and-forget */
   if(nextStatus === 'done' && e && e.studentId){
     /* Сочинение финализировано — пишем ученику */
     notifyViaTelegram(e.studentId,
       '🎉 <b>Сочинение проверено!</b>\n\nИтоговый балл: <b>' + total + ' / 22</b>',
+      'https://zebrus.online');
+    notifyViaPush(e.studentId,
+      '🎉 Сочинение проверено!',
+      'Итоговый балл: ' + total + ' / 22',
       'https://zebrus.online');
   } else if(nextStatus === 'pre_checked'){
     /* Куратор сделал предварительную проверку — уведомляем учителя */
@@ -3285,16 +3295,21 @@ async function saveEssayReview(essayId, nextStatus, isPreCheck){
   return total;
 }
 
-/* Найти ID учителя в БД и отправить ему TG-уведомление */
+/* Найти ID учителя в БД и отправить ему уведомление (TG + Push) */
 async function notifyTeachersOfPreCheck(studentName, score){
   try {
     const arr = await restRequest('GET', '/profiles?role=eq.teacher&select=id&limit=1');
     if(Array.isArray(arr) && arr[0]){
-      notifyViaTelegram(arr[0].id,
+      const tid = arr[0].id;
+      notifyViaTelegram(tid,
         '👀 <b>Куратор проверил сочинение</b>\n\n' +
         'Ученик: ' + escHtml(studentName) + '\n' +
         'Предварительный балл: <b>' + score + ' / 22</b>\n\n' +
         'Откройте, чтобы подтвердить или поправить.',
+        'https://zebrus.online');
+      notifyViaPush(tid,
+        '👀 Куратор проверил сочинение',
+        studentName + ' · предварительно ' + score + '/22',
         'https://zebrus.online');
     }
   } catch(_){}
