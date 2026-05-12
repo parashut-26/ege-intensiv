@@ -31,6 +31,14 @@
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
 <!-- SheetJS: парсер xlsx-экспортов Online Test Pad для импорта вариантов -->
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<!-- pdf.js: парсер PDF-вариантов и ключей (ленивая загрузка через window.pdfjsLib) -->
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script>
+  if(window.pdfjsLib){
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+  }
+</script>
 <style>
 :root{
   --bg:#FFFAF2; --surface:#FFFFFF; --surface-soft:#FFF7E0;
@@ -565,6 +573,9 @@ const STATE = {
   essayReportView: 'criteria',
   /* Модалка импорта сочинений из Excel */
   essayImportOpen: false,
+  /* Модалка загрузки PDF варианта (этап 2 — решалка в платформе) */
+  pdfImportOpen: false,
+  pdfImportPreview: null,  // { variants: [...], keys: {...} } после парсинга
   contentEditTaskN: null,  // открыта модалка редактирования теории по номеру
   chatOpen: false,
   chatChannel: 'group',
@@ -11579,6 +11590,140 @@ function otpParseDate(v){
 }
 
 /* ============================================================
+   ПАРСЕР PDF — вариантов и ключей.
+   Использует pdfjs-dist (загружен через CDN в head как window.pdfjsLib).
+   Из PDF варианта извлекает 26 заданий + исходные тексты для 1-3 и 22-26
+   + текст для сочинения 27. Из PDF ключей — табличные строки «№ Ответ».
+   ============================================================ */
+
+/* Извлечь весь текст PDF постранично. Возвращает Array<string>. */
+async function pdfExtractPages(arrayBuffer){
+  if(!window.pdfjsLib) throw new Error('pdfjs не загружен');
+  const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+  const pages = [];
+  for(let i = 1; i <= pdf.numPages; i++){
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    /* Сгруппируем items по y-координате (одна линия), и в линии — по x.
+       Это даёт нормальный текст без лишних склеек. */
+    const items = tc.items.map(it => ({
+      str: it.str,
+      x: it.transform[4],
+      y: Math.round(it.transform[5]),
+    }));
+    /* Группируем по y с допуском */
+    const byY = {};
+    items.forEach(it => {
+      const key = Math.round(it.y);
+      if(!byY[key]) byY[key] = [];
+      byY[key].push(it);
+    });
+    const ys = Object.keys(byY).map(Number).sort((a, b) => b - a);
+    const lines = ys.map(y => {
+      const row = byY[y].slice().sort((a, b) => a.x - b.x);
+      return row.map(r => r.str).join('').replace(/\s+/g, ' ').trim();
+    }).filter(s => s.length > 0);
+    pages.push(lines.join('\n'));
+  }
+  return pages;
+}
+
+/* Парсер PDF варианта.
+   Возвращает [{ num, title, source_1_3, source_22_26, tasks: {1:..., 2:..., ...} }] */
+async function parseVariantPdf(arrayBuffer){
+  const pages = await pdfExtractPages(arrayBuffer);
+  const full = pages.join('\n');
+  /* Каждый вариант начинается с «Вариант N. <название>» */
+  const sections = full.split(/\n(?=Вариант\s+\d+\.\s)/);
+  const variants = [];
+  for(const sec of sections){
+    const mh = sec.match(/^Вариант\s+(\d+)\.\s*(.+?)(?:\n|$)/);
+    if(!mh) continue;
+    const num = parseInt(mh[1], 10);
+    const title = mh[2].trim();
+    /* Исходные тексты для 1-3 и 22-26 */
+    const src13Match = sec.match(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s*1\s*[−–-]\s*3\.\s*\n([\s\S]+?)(?=\n\s*Задание\s+1\.)/);
+    const src22Match = sec.match(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s*22\s*[−–-]\s*26\.\s*\n([\s\S]+?)(?=\n\s*Задание\s+22\.)/);
+    /* Разбиваем по заданиям */
+    const tasks = {};
+    const taskRe = /\nЗадание\s+(\d+)\.\s*([\s\S]+?)(?=\nЗадание\s+\d+\.|$)/g;
+    let m;
+    while((m = taskRe.exec(sec)) !== null){
+      const n = parseInt(m[1], 10);
+      if(n < 1 || n > 27) continue;
+      let body = m[2].trim();
+      /* Обрезаем хвост после "Ответ: ___" */
+      body = body.split(/\n*Ответ:\s*_+/)[0]
+                 .split(/\n*Часть\s*2/)[0]
+                 .split(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s+22/)[0]
+                 .trim();
+      tasks[n] = body;
+    }
+    variants.push({
+      num,
+      title,
+      source_1_3: src13Match ? src13Match[1].trim() : '',
+      source_22_26: src22Match ? src22Match[1].trim() : '',
+      tasks
+    });
+  }
+  return variants;
+}
+
+/* Парсер PDF ключей.
+   Возвращает { 1: { title, answers: {1: '...', 2: '...', ...} }, 2: {...}, ... } */
+async function parseKeysPdf(arrayBuffer){
+  if(!window.pdfjsLib) throw new Error('pdfjs не загружен');
+  const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
+  const keys = {};
+  for(let i = 1; i <= pdf.numPages; i++){
+    const page = await pdf.getPage(i);
+    const tc = await page.getTextContent();
+    /* Группируем все items по y координате */
+    const byY = {};
+    tc.items.forEach(it => {
+      const y = Math.round(it.transform[5]);
+      if(!byY[y]) byY[y] = [];
+      byY[y].push({ str: it.str, x: it.transform[4] });
+    });
+    /* Заголовок «Ответы к варианту N "название"» */
+    const allText = Object.values(byY).flat().sort((a, b) => a.x - b.x).map(it => it.str).join(' ');
+    const mh = allText.match(/Ответы\s+к\s+варианту\s+(\d+)\s*«([^»]+)»/);
+    if(!mh) continue;
+    const var_num = parseInt(mh[1], 10);
+    const var_title = mh[2];
+    if(!keys[var_num]) keys[var_num] = { title: var_title, answers: {} };
+
+    /* Каждая строка таблицы — y-группа, в ней первая колонка = №, вторая = ответ.
+       Колонки определяем по x-позиции — берём те items что левее самого правого узкого блока.
+       Эмпирически: ответ — это items со x в первых 30% ширины страницы. */
+    const ys = Object.keys(byY).map(Number).sort((a, b) => b - a);
+    /* Найдём pageWidth для определения границы */
+    const viewport = page.getViewport({ scale: 1 });
+    const pageW = viewport.width;
+    /* Левая колонка ответов обычно занимает первые 30-40% страницы.
+       Берём text-items с x < 0.40*pageWidth — это №+ответ. */
+    const xLimit = pageW * 0.42;
+    for(const y of ys){
+      const row = byY[y].slice().sort((a, b) => a.x - b.x);
+      const leftItems = row.filter(it => it.x < xLimit);
+      if(!leftItems.length) continue;
+      const leftText = leftItems.map(it => it.str).join('').replace(/\s+/g, ' ').trim();
+      /* Строка вида "1 наоборот/напротив" — № задания и ответ */
+      const m = leftText.match(/^(\d{1,2})\s+(.+)$/);
+      if(!m) continue;
+      const n = parseInt(m[1], 10);
+      if(n < 1 || n > 26) continue;
+      let ans = m[2].trim();
+      /* Если в ответ всё же затесался лишний хвост от 27-задания — обрезаем */
+      ans = ans.replace(/\s+(Примерный|Авторская|\d\)\s+Проблема).*$/i, '').trim();
+      keys[var_num].answers[n] = ans;
+    }
+  }
+  return keys;
+}
+
+/* ============================================================
    Импорт сочинений из Excel-таблицы учителя (ручная сводка
    баллов К1-К10, например после CloudText, где экспорта нет).
    Формат: первый столбец — имя ученика, далее любые столбцы,
@@ -11962,6 +12107,17 @@ function viewTeacherVariants(){
     fileLabel);
   wrap.append(importCard);
 
+  /* Карточка загрузки PDF (этап 2 — решалка в платформе) */
+  const pdfCard = el('div', { class:'card', style:{ marginBottom:'18px', background:'#F5F3FF', borderColor:'#A78BFA' }});
+  pdfCard.append(
+    el('h3', null, '📄 Загрузить PDF варианта (новое — решалка в платформе)'),
+    el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginTop:'4px', marginBottom:'12px' }},
+      'Загрузи PDF с заданиями (1 или несколько вариантов в одном файле) и PDF с ключами — платформа распарсит, и ученики смогут решать прямо здесь. Ответы свободным вводом, регистр и пробелы не учитываются.'),
+    el('button', { class:'btn btn-p',
+      onclick: () => { STATE.pdfImportOpen = true; STATE.pdfImportPreview = null; render(); }
+    }, '📄 Загрузить PDF'));
+  wrap.append(pdfCard);
+
   /* Список уже загруженных вариантов */
   if(!STATE.variantsListLoaded){
     loadVariantsList().then(() => render());
@@ -12237,6 +12393,261 @@ function otpFormatTime(s){
   const m = Math.floor(s / 60);
   const sec = s % 60;
   return m + ':' + String(sec).padStart(2,'0');
+}
+
+/* Модалка загрузки PDF варианта.
+   Учитель выбирает 2 файла (вариант + ключи), они парсятся через pdf.js
+   на клиенте. Дальше — превью с возможностью редактировать вопросы
+   и ответы перед сохранением. Сохраняется как N вариантов в БД с
+   полями source='pdf_import' и questions. */
+function modalPdfImport(){
+  if(!STATE.pdfImportOpen) return null;
+  const close = () => { STATE.pdfImportOpen = false; STATE.pdfImportPreview = null; render(); };
+
+  let pickedVariantPdf = null, pickedKeysPdf = null;
+  const vLabel = el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px', minHeight:'14px' }});
+  const kLabel = el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px', minHeight:'14px' }});
+  const vInput = el('input', { type:'file', accept:'.pdf', style:{ display:'none' },
+    onchange: ev => { pickedVariantPdf = ev.target.files && ev.target.files[0];
+      vLabel.textContent = pickedVariantPdf ? ('📄 ' + pickedVariantPdf.name) : ''; }});
+  const kInput = el('input', { type:'file', accept:'.pdf', style:{ display:'none' },
+    onchange: ev => { pickedKeysPdf = ev.target.files && ev.target.files[0];
+      kLabel.textContent = pickedKeysPdf ? ('🔑 ' + pickedKeysPdf.name) : ''; }});
+
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        '📄 Загрузка PDF'),
+      el('h2', { style:{ marginTop:'4px' }}, 'Вариант + ключи')),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const previewContainer = el('div', { style:{ marginTop:'14px' }});
+
+  /* Если превью уже распарсено — рисуем его */
+  if(STATE.pdfImportPreview){
+    previewContainer.append(renderPdfPreview(STATE.pdfImportPreview, close));
+  }
+
+  const body = el('div', { class:'modal-body' },
+    el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'12px' }},
+      'Файл с вариантами должен иметь структуру «Вариант N. Название» → «Задание 1.» ... «Задание 27.». Файл ключей — таблицу «№ Ответ». После парсинга можно поправить любую формулировку или ответ перед сохранением.'),
+
+    el('div', { style:{ marginBottom:'10px' }},
+      el('label', { style:{ display:'block', fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px', fontWeight:'700' }},
+        'PDF варианта (обязательно)'),
+      el('button', { class:'btn btn-secondary', onclick: () => vInput.click() }, '📂 Выбрать PDF варианта'),
+      vInput,
+      vLabel),
+    el('div', { style:{ marginBottom:'14px' }},
+      el('label', { style:{ display:'block', fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px', fontWeight:'700' }},
+        'PDF ключей (рекомендуется, без них автопроверка не сработает)'),
+      el('button', { class:'btn btn-secondary', onclick: () => kInput.click() }, '🔑 Выбрать PDF ключей'),
+      kInput,
+      kLabel),
+    el('button', { class:'btn btn-p',
+      onclick: async (ev) => {
+        if(!pickedVariantPdf){ showToast('Выбери PDF варианта'); return; }
+        if(!window.pdfjsLib){ showToast('⚠ pdfjs не загрузился. Обнови страницу.'); return; }
+        ev.target.disabled = true;
+        ev.target.textContent = '⏳ Парсю…';
+        try {
+          const vBuf = await pickedVariantPdf.arrayBuffer();
+          const variants = await parseVariantPdf(vBuf);
+          let keys = {};
+          if(pickedKeysPdf){
+            const kBuf = await pickedKeysPdf.arrayBuffer();
+            keys = await parseKeysPdf(kBuf);
+          }
+          if(!variants.length){
+            showToast('⚠ Не нашлось «Вариант N.» в PDF — проверь формат');
+            return;
+          }
+          STATE.pdfImportPreview = { variants, keys };
+          render();
+        } catch(e){
+          console.error(e);
+          showToast('⚠ Ошибка парсинга: ' + e.message);
+        } finally {
+          ev.target.disabled = false;
+          ev.target.textContent = '🔍 Распарсить и показать';
+        }
+      }
+    }, '🔍 Распарсить и показать'),
+    previewContainer);
+
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+  }, el('div', { class:'modal', style:{ maxWidth:'920px' }}, head, body));
+}
+
+/* Превью распарсенных вариантов с возможностью править и сохранять. */
+function renderPdfPreview(preview, closeFn){
+  const wrap = el('div', null);
+  wrap.append(el('div', { style:{ padding:'12px 14px', background:'#D1FAE5', color:'#065F46', borderRadius:'8px', marginBottom:'12px', fontWeight:'700' }},
+    '✅ Распарсено вариантов: ' + preview.variants.length +
+    ' · Ключей загружено: ' + Object.keys(preview.keys).length));
+
+  preview.variants.forEach((v, idx) => {
+    const keysFor = preview.keys[v.num] || { answers: {} };
+    const det = el('details', { open: idx === 0, style:{ marginBottom:'8px', background:'var(--bg)', borderRadius:'10px', padding:'10px 12px' }});
+    const summary = el('summary', { style:{ cursor:'pointer', listStyle:'none', fontWeight:'700', fontSize:'14px' }},
+      '📋 Вариант ' + v.num + ' · «' + v.title + '» — ' + Object.keys(v.tasks).length + ' заданий');
+    det.append(summary);
+    /* Поле названия для сохранения в БД */
+    const titleField = el('input', {
+      type:'text',
+      value: 'Вариант ' + v.num + ': ' + v.title,
+      style:{ width:'100%', marginTop:'10px', padding:'8px 10px', border:'1px solid var(--border-2)', borderRadius:'8px', fontSize:'13px', fontWeight:'700', boxSizing:'border-box' }
+    });
+    det.append(
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'10px' }}, 'Название варианта (как ученик увидит)'),
+      titleField);
+
+    /* Сетка по заданиям 1-26 — текст + ответ */
+    const taskInputs = {};
+    const ansInputs = {};
+    for(let n = 1; n <= 26; n++){
+      const taskTxt = v.tasks[n] || '';
+      const ans = keysFor.answers[n] || '';
+      const block = el('div', { style:{ marginTop:'10px', padding:'8px 10px', background:'var(--surface)', borderRadius:'8px', border:'1px solid var(--border)' }});
+      const taskTA = el('textarea', { rows:3,
+        style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'12px', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit' }
+      });
+      taskTA.value = taskTxt;
+      const ansInp = el('input', { type:'text', value: ans,
+        style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'13px', fontWeight:'700', boxSizing:'border-box', marginTop:'4px' }
+      });
+      taskInputs[n] = taskTA;
+      ansInputs[n] = ansInp;
+      block.append(
+        el('div', { style:{ display:'flex', justifyContent:'space-between', marginBottom:'4px', fontSize:'12px', fontWeight:'700', color:'var(--p-deep)' }},
+          el('span', null, '№' + n),
+          el('span', { style:{ color: ans ? 'var(--green)' : 'var(--red)', fontSize:'10px' }},
+            ans ? '🔑 ответ есть' : '⚠ ответ не распознан')),
+        el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginBottom:'2px' }}, 'Формулировка'),
+        taskTA,
+        el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginTop:'4px', marginBottom:'2px' }},
+          'Ответ (несколько вариантов через /, регистр и пробелы не важны)'),
+        ansInp);
+      det.append(block);
+    }
+
+    /* Источники текстов */
+    const src13 = el('textarea', { rows:4,
+      style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'11px', boxSizing:'border-box', resize:'vertical', marginTop:'4px' }
+    });
+    src13.value = v.source_1_3 || '';
+    const src22 = el('textarea', { rows:4,
+      style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'11px', boxSizing:'border-box', resize:'vertical', marginTop:'4px' }
+    });
+    src22.value = v.source_22_26 || '';
+    const src27 = el('textarea', { rows:4,
+      style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'11px', boxSizing:'border-box', resize:'vertical', marginTop:'4px' }
+    });
+    src27.value = v.tasks[27] || '';
+
+    det.append(
+      el('div', { style:{ marginTop:'12px', fontSize:'11px', fontWeight:'700', color:'var(--ink-2)' }}, '📖 Исходный текст для заданий 1-3'),
+      src13,
+      el('div', { style:{ marginTop:'8px', fontSize:'11px', fontWeight:'700', color:'var(--ink-2)' }}, '📖 Исходный текст для заданий 22-26'),
+      src22,
+      el('div', { style:{ marginTop:'8px', fontSize:'11px', fontWeight:'700', color:'var(--ink-2)' }}, '✍️ Текст для сочинения (№27)'),
+      src27);
+
+    /* Кнопка сохранения этого варианта */
+    const saveBtn = el('button', { class:'btn btn-teal',
+      style:{ marginTop:'12px' },
+      onclick: async (ev) => {
+        ev.target.disabled = true;
+        ev.target.textContent = '⏳ Сохраняю…';
+        try {
+          await savePdfVariantToDb({
+            title: titleField.value.trim() || ('Вариант ' + v.num),
+            tasks: Object.fromEntries(Object.entries(taskInputs).map(([n, ta]) => [n, ta.value])),
+            answers: Object.fromEntries(Object.entries(ansInputs).map(([n, inp]) => [n, inp.value])),
+            source_1_3: src13.value,
+            source_22_26: src22.value,
+            essay_text: src27.value
+          });
+          showToast('✅ Вариант «' + (titleField.value || 'без названия') + '» сохранён в платформу');
+          saveBtn.textContent = '✓ Сохранено';
+        } catch(e){
+          console.error(e);
+          showToast('⚠ Ошибка сохранения: ' + e.message);
+          ev.target.disabled = false;
+          ev.target.textContent = '💾 Сохранить этот вариант';
+        }
+      }
+    }, '💾 Сохранить этот вариант');
+    det.append(saveBtn);
+    wrap.append(det);
+  });
+
+  wrap.append(el('div', { style:{ marginTop:'14px', color:'var(--ink-3)', fontSize:'12px' }},
+    '💡 Жми «Сохранить» под каждым вариантом по отдельности. Это позволит загружать только нужные. После сохранения — закрой окно и обновись.'));
+  return wrap;
+}
+
+/* Сохранение распарсенного варианта в БД */
+async function savePdfVariantToDb(data){
+  /* 1. Сам вариант */
+  const totalMax = 26;  // оценочно, реально считается через max_points всех вопросов
+  const variantResp = await restRequest('POST', '/test_variants', {
+    title: data.title,
+    source: 'pdf_import',
+    questions_count: 27,
+    total_max_score: 50,  // 28 тест + 22 сочинение (типично для ЕГЭ)
+    created_by: MY_PROFILE && MY_PROFILE.id || null,
+  }, { prefer: 'return=representation' });
+  const variantId = Array.isArray(variantResp) ? variantResp[0].id : variantResp.id;
+
+  /* 2. Вопросы 1-26 */
+  const questionsBatch = [];
+  for(let n = 1; n <= 26; n++){
+    const txt = (data.tasks[n] || '').trim();
+    const ans = (data.answers[n] || '').trim();
+    if(!txt && !ans) continue;
+    /* Максимум баллов: задания 7 и 22 — 2 балла, остальные — 1; 8 — 2; некоторые могут быть 3.
+       На уровне ФИПИ-2026 точная таблица меняется, поэтому ставим 1 по умолчанию.
+       Учитель может потом скорректировать. */
+    let maxPts = 1;
+    questionsBatch.push({
+      variant_id: variantId,
+      num: n,
+      question_text: txt,
+      correct_answer: ans || null,
+      max_points: maxPts,
+      source_kind: (n >= 1 && n <= 3) ? 'shared_1_3' : (n >= 22 && n <= 26) ? 'shared_22_26' : 'standalone'
+    });
+  }
+  /* №27 — сочинение, ответа нет */
+  if((data.essay_text || '').trim()){
+    questionsBatch.push({
+      variant_id: variantId,
+      num: 27,
+      question_text: data.essay_text.trim(),
+      correct_answer: null,
+      max_points: 22,
+      source_kind: 'standalone'
+    });
+  }
+  if(questionsBatch.length){
+    await restRequest('POST', '/test_variant_questions', questionsBatch, { prefer: 'return=minimal' });
+  }
+
+  /* 3. Исходные тексты */
+  const sources = [];
+  if((data.source_1_3 || '').trim()){
+    sources.push({ variant_id: variantId, kind: 'text_1_3', body: data.source_1_3.trim() });
+  }
+  if((data.source_22_26 || '').trim()){
+    sources.push({ variant_id: variantId, kind: 'text_22_26', body: data.source_22_26.trim() });
+  }
+  if(sources.length){
+    await restRequest('POST', '/test_variant_source_texts', sources, { prefer: 'return=minimal' });
+  }
+
+  return variantId;
 }
 
 /* Модалка импорта сочинений из Excel. Учитель выбирает .xlsx,
@@ -13617,6 +14028,7 @@ function _renderNow(){
   if(STATE.showOnboarding) root.append(modalOnboarding());
   if(STATE.essayDraftOpen) root.append(modalEssayDraft());
   if(STATE.essayImportOpen) root.append(modalEssayImport());
+  if(STATE.pdfImportOpen) root.append(modalPdfImport());
   if(STATE.linkAttempt) root.append(modalLinkStudent());
   if(STATE.linkEssay) root.append(modalLinkEssay());
   if(STATE.studentEssayResultOpen != null) root.append(modalEssayResult(STATE.studentEssayResultOpen));
