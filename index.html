@@ -11909,8 +11909,14 @@ async function parseVariantPdf(arrayBuffer){
    Поддерживаются варианты заголовков: «Вариант 1.», «Вариант 1:», «Вариант 1»,
    «ВАРИАНТ 1», «Вариант №1». Заголовки заданий аналогично. */
 function parseVariantTextCommon(full, fromDocx){
+  /* Диагностика: первые 3000 символов полного текста — увидим как Word
+     был сконвертирован и где могут теряться задания. */
+  console.log('[variant parser] полный текст (' + full.length + ' симв), первые 3000:');
+  console.log(full.slice(0, 3000));
+  console.log('---');
   /* Разделяем по заголовкам «Вариант N» (любой формат) */
   const sections = full.split(/\n(?=Вариант\s*№?\s*\d+\b)/i);
+  console.log('[variant parser] секций по «Вариант N»: ' + sections.length);
   /* Если split дал одну секцию и она не начинается с «Вариант» — обрабатываем как
      один безымянный вариант. */
   const variants = [];
