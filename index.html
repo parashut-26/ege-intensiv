@@ -11649,7 +11649,9 @@ function otpParseDate(v){
 async function pdfExtractPages(arrayBuffer){
   if(!window.pdfjsLib) throw new Error('pdfjs не загружен');
   const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
-  const COL_GAP_PX = 60;          /* промежуток между колонками */
+  const COL_GAP_PX  = 80;          /* промежуток между колонками — поднят чтобы не путать с justified-пробелом */
+  const COL_X_TOL   = 25;          /* допуск по X-позиции разрыва между подряд идущими строками таблицы */
+  const MIN_TABLE_ROWS = 3;        /* минимум строк подряд с одинаковым gap_x = это таблица */
   const pages = [];
   for(let i = 1; i <= pdf.numPages; i++){
     const page = await pdf.getPage(i);
@@ -11659,7 +11661,6 @@ async function pdfExtractPages(arrayBuffer){
       x: it.transform[4],
       y: Math.round(it.transform[5]),
     }));
-    /* Группируем по Y */
     const byY = {};
     items.forEach(it => {
       const key = Math.round(it.y);
@@ -11667,10 +11668,11 @@ async function pdfExtractPages(arrayBuffer){
       byY[key].push(it);
     });
     const ys = Object.keys(byY).map(Number).sort((a, b) => b - a);
-    /* Формируем строки. Для каждой определяем — одна колонка или две. */
+    /* Формируем строки. Для каждой определяем — одна колонка или потенциально две.
+       Помечаем gap_x — где находится промежуток. Дальше принимаем «две колонки»
+       только если 3+ подряд строк имеют похожий gap_x. */
     const lines = ys.map(y => {
       const row = byY[y].slice().sort((a, b) => a.x - b.x);
-      /* Ищем самый большой gap между соседними items */
       let maxGap = 0, gapIdx = -1;
       for(let i = 1; i < row.length; i++){
         const gap = row[i].x - row[i - 1].x;
@@ -11679,33 +11681,41 @@ async function pdfExtractPages(arrayBuffer){
       if(maxGap > COL_GAP_PX && gapIdx > 0){
         const left  = row.slice(0, gapIdx).map(r => r.str).join('').replace(/\s+/g, ' ').trim();
         const right = row.slice(gapIdx)   .map(r => r.str).join('').replace(/\s+/g, ' ').trim();
-        return { kind: 'two', left, right, y };
+        const gap_x = row[gapIdx].x;
+        return { kind: 'two', left, right, gap_x, y, fullText: row.map(r => r.str).join('').replace(/\s+/g, ' ').trim() };
       }
       const text = row.map(r => r.str).join('').replace(/\s+/g, ' ').trim();
       return { kind: 'one', text, y };
     }).filter(l => (l.kind === 'one' && l.text) ||
                    (l.kind === 'two' && (l.left || l.right)));
-    /* Группируем подряд идущие двухколоночные строки и в выводе ставим
-       сначала все левые (по Y), потом все правые. Это даст корректный порядок
-       для таблиц соответствий вроде задания 8. */
+    /* Группируем подряд идущие двухколоночные строки. «Настоящая таблица» —
+       это минимум 3 подряд строки с близкими gap_x. Иначе считаем это
+       обычным justified-текстом и склеиваем как одну строку. */
     const output = [];
     let block = [];
     const flushBlock = () => {
       if(!block.length) return;
-      /* Если в блоке только 1 строка — это вероятно не настоящая таблица,
-         а случайный большой пробел. Выводим как есть в одну строку. */
-      if(block.length < 2){
-        const l = block[0];
-        output.push((l.left || '') + (l.left && l.right ? '   ' : '') + (l.right || ''));
-        block = [];
-        return;
+      const isTable = block.length >= MIN_TABLE_ROWS;
+      if(isTable){
+        /* Левая колонка сверху-вниз, потом правая */
+        block.forEach(l => { if(l.left)  output.push(l.left);  });
+        block.forEach(l => { if(l.right) output.push(l.right); });
+      } else {
+        /* Не таблица — выводим каждую строку как есть, с одним пробелом
+           между «левой» и «правой» частями (это был обычный justified-текст) */
+        block.forEach(l => output.push(l.fullText || ((l.left || '') + ' ' + (l.right || '')).trim()));
       }
-      block.forEach(l => { if(l.left)  output.push(l.left);  });
-      block.forEach(l => { if(l.right) output.push(l.right); });
       block = [];
     };
     for(const l of lines){
       if(l.kind === 'two'){
+        /* Если уже есть блок — проверяем близость gap_x */
+        if(block.length){
+          const firstGapX = block[0].gap_x;
+          if(Math.abs(l.gap_x - firstGapX) > COL_X_TOL){
+            flushBlock();
+          }
+        }
         block.push(l);
       } else {
         flushBlock();
