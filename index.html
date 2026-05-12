@@ -367,17 +367,20 @@ body.no-anim .fade-in{animation:none}
 .bubble .time{font-size:10px;opacity:.6;margin-top:4px}
 .bubble .helped-btn{margin-top:6px;background:rgba(16,185,129,.15);color:var(--green);font-size:10px;padding:3px 8px;border-radius:999px;cursor:pointer;font-weight:700}
 .bubble .helped-btn.active{background:var(--green);color:#fff}
-.chat-input{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border);background:var(--surface);align-items:center}
-.chat-input input{flex:1;padding:8px 12px;border:1px solid var(--border-2);border-radius:10px;font-size:13px}
+.chat-input{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border);background:var(--surface);align-items:center;position:relative}
+.chat-input input{flex:1;min-width:120px;padding:8px 12px;border:1px solid var(--border-2);border-radius:10px;font-size:13px}
 .chat-input button{padding:8px 14px;border-radius:10px;background:var(--p);color:#fff;font-weight:700;font-size:12px}
 /* Эмодзи-пикер */
-.emoji-wrap{position:relative;flex:0 0 auto}
+.emoji-wrap{flex:0 0 auto}
 .emoji-btn{padding:6px 8px!important;border:0!important;background:transparent!important;cursor:pointer;font-size:20px;border-radius:8px;color:inherit!important;font-weight:normal!important}
 .emoji-btn:hover{background:var(--bg)!important}
-.emoji-popup{position:absolute;bottom:calc(100% + 8px);right:0;background:#fff;border:1px solid var(--border-2);border-radius:12px;padding:8px;display:grid;grid-template-columns:repeat(8,1fr);gap:2px;box-shadow:0 6px 24px rgba(0,0,0,.15);z-index:50;min-width:280px}
+/* Палитра — absolute относительно .chat-input (position:relative выше),
+   занимает всю ширину панели чата. */
+.emoji-popup{position:absolute;left:10px;right:10px;bottom:calc(100% + 2px);background:#fff;border:1px solid var(--border-2);border-radius:12px;padding:10px;display:grid;grid-template-columns:repeat(6,1fr);gap:4px;box-shadow:0 -2px 16px rgba(0,0,0,.12);z-index:50}
 .emoji-popup.hidden{display:none}
-.emoji-popup button{padding:4px!important;border:0!important;background:transparent!important;font-size:20px!important;cursor:pointer;border-radius:6px;color:inherit!important;font-weight:normal!important;min-width:32px}
+.emoji-popup button{padding:6px!important;border:0!important;background:transparent!important;font-size:24px!important;cursor:pointer;border-radius:8px;color:inherit!important;font-weight:normal!important;min-height:42px}
 .emoji-popup button:hover{background:var(--bg)!important}
+.emoji-popup button:active{transform:scale(.92)}
 
 /* ============ МОДАЛКА ============ */
 .modal-bg{position:fixed;inset:0;background:rgba(26,27,58,.55);z-index:30;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)}
