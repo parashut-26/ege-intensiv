@@ -39,6 +39,8 @@
       'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
   }
 </script>
+<!-- mammoth.js: парсер DOCX-вариантов (Word-документы парсятся чище чем PDF) -->
+<script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
 <style>
 :root{
   --bg:#FFFAF2; --surface:#FFFFFF; --surface-soft:#FFF7E0;
@@ -11841,12 +11843,35 @@ function normalizeSourceText(text){
   return t.trim();
 }
 
-/* Парсер PDF варианта.
-   Возвращает [{ num, title, source_1_3, source_22_26, tasks: {1:..., 2:..., ...} }] */
+/* Парсер DOCX-варианта через mammoth.js.
+   Конвертирует Word → HTML → текст с inline-форматированием и \n. */
+async function parseVariantDocx(arrayBuffer){
+  if(!window.mammoth) throw new Error('mammoth не загружен. Обнови страницу.');
+  const result = await window.mammoth.convertToHtml({ arrayBuffer });
+  let s = result.value || '';
+  /* Конвертируем block-level теги в переносы строк */
+  s = s
+    .replace(/<\/(p|div|li|h[1-6])\s*>/gi, '\n')
+    .replace(/<(p|div|li|h[1-6])(\s[^>]*)?>/gi, '')
+    .replace(/<br\s*\/?>/gi, '\n');
+  /* Убираем теги-обёртки заголовков «Задание N.», «Вариант N.» если внутри strong/b */
+  s = s.replace(/<\/?(strong|b)>(\s*(Вариант|Задание))/gi, '$2')
+       .replace(/(Вариант\s+\d+\.|Задание\s+\d+\.)\s*<\/(strong|b)>/gi, '$1');
+  /* Sanitize: оставить только b/i/u/strong/em */
+  s = sanitizeQuestionHtml(s);
+  return parseVariantTextCommon(s, /* fromDocx= */ true);
+}
+
+/* Парсер PDF-варианта */
 async function parseVariantPdf(arrayBuffer){
   const pages = await pdfExtractPages(arrayBuffer);
   const full = pages.join('\n');
-  /* Каждый вариант начинается с «Вариант N. <название>» */
+  return parseVariantTextCommon(full, /* fromDocx= */ false);
+}
+
+/* Универсальная функция разбора уже извлечённого текста.
+   Структура: «Вариант N. Название» → «Задание 1.» ... «Задание 27.» */
+function parseVariantTextCommon(full, fromDocx){
   const sections = full.split(/\n(?=Вариант\s+\d+\.\s)/);
   const variants = [];
   for(const sec of sections){
@@ -11854,10 +11879,8 @@ async function parseVariantPdf(arrayBuffer){
     if(!mh) continue;
     const num = parseInt(mh[1], 10);
     const title = mh[2].trim();
-    /* Исходные тексты для 1-3 и 22-26 */
     const src13Match = sec.match(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s*1\s*[−–-]\s*3\.\s*\n([\s\S]+?)(?=\n\s*Задание\s+1\.)/);
     const src22Match = sec.match(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s*22\s*[−–-]\s*26\.\s*\n([\s\S]+?)(?=\n\s*Задание\s+22\.)/);
-    /* Разбиваем по заданиям */
     const tasks = {};
     const taskRe = /\nЗадание\s+(\d+)\.\s*([\s\S]+?)(?=\nЗадание\s+\d+\.|$)/g;
     let m;
@@ -11865,7 +11888,6 @@ async function parseVariantPdf(arrayBuffer){
       const n = parseInt(m[1], 10);
       if(n < 1 || n > 27) continue;
       let body = m[2].trim();
-      /* Обрезаем хвост после "Ответ: ___" */
       body = body.split(/\n*Ответ:\s*_+/)[0]
                  .split(/\n*Часть\s*2/)[0]
                  .split(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s+22/)[0]
@@ -11876,12 +11898,89 @@ async function parseVariantPdf(arrayBuffer){
     variants.push({
       num,
       title,
-      source_1_3: src13Match ? normalizeSourceText(src13Match[1].trim()) : '',
-      source_22_26: src22Match ? normalizeSourceText(src22Match[1].trim()) : '',
+      /* Для DOCX исходный текст уже разбит на корректные абзацы — лишний normalize не нужен.
+         Для PDF — склеиваем разрывы внутри предложений. */
+      source_1_3: src13Match ? (fromDocx ? src13Match[1].trim() : normalizeSourceText(src13Match[1].trim())) : '',
+      source_22_26: src22Match ? (fromDocx ? src22Match[1].trim() : normalizeSourceText(src22Match[1].trim())) : '',
       tasks
     });
   }
   return variants;
+}
+
+/* Универсальная обёртка: парсит файл варианта (PDF или DOCX) по расширению */
+async function parseVariantFile(file){
+  const name = (file.name || '').toLowerCase();
+  const buf = await file.arrayBuffer();
+  if(name.endsWith('.docx') || name.endsWith('.doc')){
+    return parseVariantDocx(buf);
+  }
+  return parseVariantPdf(buf);
+}
+
+/* Аналогично для ключей (только PDF пока — Word-таблицы сложнее) */
+async function parseKeysFile(file){
+  const name = (file.name || '').toLowerCase();
+  const buf = await file.arrayBuffer();
+  if(name.endsWith('.docx') || name.endsWith('.doc')){
+    return parseKeysDocx(buf);
+  }
+  return parseKeysPdf(buf);
+}
+
+/* Парсер ключей из DOCX. Если в Word таблица — mammoth выдаёт <table>.
+   Если простой текст — построчно ищем «N ответ». */
+async function parseKeysDocx(arrayBuffer){
+  if(!window.mammoth) throw new Error('mammoth не загружен.');
+  const result = await window.mammoth.convertToHtml({ arrayBuffer });
+  let html = result.value || '';
+  const tmpl = document.createElement('template');
+  tmpl.innerHTML = html;
+  const keys = {};
+  let currentVariant = null;
+
+  /* Идём по структуре документа сверху вниз */
+  const walk = (root) => {
+    for(const node of root.children){
+      const tag = node.tagName;
+      const text = (node.textContent || '').trim();
+      /* Заголовок варианта */
+      const mh = text.match(/Ответы\s+к\s+варианту\s+(\d+)\s*«([^»]+)»/);
+      if(mh){
+        currentVariant = parseInt(mh[1], 10);
+        if(!keys[currentVariant]) keys[currentVariant] = { title: mh[2], answers: {} };
+        continue;
+      }
+      /* Таблица */
+      if(tag === 'TABLE' && currentVariant != null){
+        for(const tr of node.querySelectorAll('tr')){
+          const cells = Array.from(tr.children).map(td => (td.textContent || '').trim());
+          if(cells.length < 2) continue;
+          const n = parseInt(cells[0], 10);
+          if(isNaN(n) || n < 1 || n > 26) continue;
+          const ans = cells[1].replace(/\s+/g, ' ').trim();
+          if(ans) keys[currentVariant].answers[n] = ans;
+        }
+        continue;
+      }
+      /* Параграф вида "N ответ" (если ключи без таблицы) */
+      if(currentVariant != null && /^[\dA-Z]/.test(text)){
+        const ml = text.match(/^(\d{1,2})\s+(.+)$/);
+        if(ml){
+          const n = parseInt(ml[1], 10);
+          if(n >= 1 && n <= 26){
+            const ans = ml[2].replace(/\s+(Примерный|Авторская|\d\)\s+Проблема).*$/i, '').trim();
+            keys[currentVariant].answers[n] = ans;
+            continue;
+          }
+        }
+      }
+      /* Рекурсивно в дочерние */
+      if(node.children.length) walk(node);
+    }
+  };
+  walk(tmpl.content);
+  return keys;
 }
 
 /* Парсер PDF ключей.
@@ -12321,15 +12420,15 @@ function viewTeacherVariants(){
     fileLabel);
   wrap.append(importCard);
 
-  /* Карточка загрузки PDF (этап 2 — решалка в платформе) */
+  /* Карточка загрузки PDF/DOCX (этап 2 — решалка в платформе) */
   const pdfCard = el('div', { class:'card', style:{ marginBottom:'18px', background:'#F5F3FF', borderColor:'#A78BFA' }});
   pdfCard.append(
-    el('h3', null, '📄 Загрузить PDF варианта (новое — решалка в платформе)'),
+    el('h3', null, '📄 Загрузить PDF или Word варианта'),
     el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginTop:'4px', marginBottom:'12px' }},
-      'Загрузи PDF с заданиями (1 или несколько вариантов в одном файле) и PDF с ключами — платформа распарсит, и ученики смогут решать прямо здесь. Ответы свободным вводом, регистр и пробелы не учитываются.'),
+      'Загрузи файл с заданиями (PDF или DOCX, 1 или несколько вариантов в одном файле) и файл с ключами — платформа распарсит, и ученики смогут решать прямо здесь. Word парсится чище и сохраняет жирный шрифт.'),
     el('button', { class:'btn btn-p',
       onclick: () => { STATE.pdfImportOpen = true; STATE.pdfImportPreview = null; render(); }
-    }, '📄 Загрузить PDF'));
+    }, '📄 Загрузить файл варианта'));
   wrap.append(pdfCard);
 
   /* Список уже загруженных вариантов */
@@ -12676,10 +12775,10 @@ function modalPdfImport(){
   let pickedVariantPdf = null, pickedKeysPdf = null;
   const vLabel = el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px', minHeight:'14px' }});
   const kLabel = el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px', minHeight:'14px' }});
-  const vInput = el('input', { type:'file', accept:'.pdf', style:{ display:'none' },
+  const vInput = el('input', { type:'file', accept:'.pdf,.docx,.doc', style:{ display:'none' },
     onchange: ev => { pickedVariantPdf = ev.target.files && ev.target.files[0];
       vLabel.textContent = pickedVariantPdf ? ('📄 ' + pickedVariantPdf.name) : ''; }});
-  const kInput = el('input', { type:'file', accept:'.pdf', style:{ display:'none' },
+  const kInput = el('input', { type:'file', accept:'.pdf,.docx,.doc', style:{ display:'none' },
     onchange: ev => { pickedKeysPdf = ev.target.files && ev.target.files[0];
       kLabel.textContent = pickedKeysPdf ? ('🔑 ' + pickedKeysPdf.name) : ''; }});
 
@@ -12699,33 +12798,33 @@ function modalPdfImport(){
 
   const body = el('div', { class:'modal-body' },
     el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'12px' }},
-      'Файл с вариантами должен иметь структуру «Вариант N. Название» → «Задание 1.» ... «Задание 27.». Файл ключей — таблицу «№ Ответ». После парсинга можно поправить любую формулировку или ответ перед сохранением.'),
+      'Можно загружать ', el('b', null, 'PDF или Word (.docx)'),
+      '. Структура: «Вариант N. Название» → «Задание 1.» ... «Задание 27.». Файл ключей — таблица «№ Ответ». ',
+      el('b', null, 'Word парсится чище и сохраняет жирный шрифт.'),
+      ' После парсинга можно поправить любую формулировку или ответ перед сохранением.'),
 
     el('div', { style:{ marginBottom:'10px' }},
       el('label', { style:{ display:'block', fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px', fontWeight:'700' }},
-        'PDF варианта (обязательно)'),
-      el('button', { class:'btn btn-secondary', onclick: () => vInput.click() }, '📂 Выбрать PDF варианта'),
+        'Файл варианта (PDF или DOCX, обязательно)'),
+      el('button', { class:'btn btn-secondary', onclick: () => vInput.click() }, '📂 Выбрать файл'),
       vInput,
       vLabel),
     el('div', { style:{ marginBottom:'14px' }},
       el('label', { style:{ display:'block', fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px', fontWeight:'700' }},
-        'PDF ключей (рекомендуется, без них автопроверка не сработает)'),
-      el('button', { class:'btn btn-secondary', onclick: () => kInput.click() }, '🔑 Выбрать PDF ключей'),
+        'Файл ключей (PDF или DOCX, рекомендуется — без них автопроверка не сработает)'),
+      el('button', { class:'btn btn-secondary', onclick: () => kInput.click() }, '🔑 Выбрать файл ключей'),
       kInput,
       kLabel),
     el('button', { class:'btn btn-p',
       onclick: async (ev) => {
-        if(!pickedVariantPdf){ showToast('Выбери PDF варианта'); return; }
-        if(!window.pdfjsLib){ showToast('⚠ pdfjs не загрузился. Обнови страницу.'); return; }
+        if(!pickedVariantPdf){ showToast('Выбери файл варианта'); return; }
         ev.target.disabled = true;
         ev.target.textContent = '⏳ Парсю…';
         try {
-          const vBuf = await pickedVariantPdf.arrayBuffer();
-          const variants = await parseVariantPdf(vBuf);
+          const variants = await parseVariantFile(pickedVariantPdf);
           let keys = {};
           if(pickedKeysPdf){
-            const kBuf = await pickedKeysPdf.arrayBuffer();
-            keys = await parseKeysPdf(kBuf);
+            keys = await parseKeysFile(pickedKeysPdf);
           }
           if(!variants.length){
             showToast('⚠ Не нашлось «Вариант N.» в PDF — проверь формат');
