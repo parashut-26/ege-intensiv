@@ -29,6 +29,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+<!-- SheetJS: парсер xlsx-экспортов Online Test Pad для импорта вариантов -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
 :root{
   --bg:#FFFAF2; --surface:#FFFFFF; --surface-soft:#FFF7E0;
@@ -372,6 +374,19 @@ body.no-anim .fade-in{animation:none}
 .bubble:hover .bubble-delete{opacity:1}
 @media (hover:none){ .bubble .bubble-delete{opacity:.85} }
 .bubble .bubble-delete:hover{background:#DC2626;opacity:1}
+/* Сводная по варианту-пробнику (импорт OTP) */
+.variants-summary{font-size:12px;border-collapse:collapse}
+.variants-summary th{background:#F9FAFB;color:var(--ink-2);font-size:11px;font-weight:700;text-align:center;padding:6px 8px;border-bottom:2px solid var(--border);border-right:1px solid var(--border);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+.variants-summary td{padding:6px 8px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);text-align:center;background:var(--surface)}
+.variants-summary tbody tr:hover td{background:#FAFBFC}
+.variants-summary .vh-sticky{position:sticky;left:0;z-index:1;background:#F9FAFB}
+.variants-summary tbody td.vh-sticky{background:var(--surface)}
+.variants-summary .vh-name{min-width:160px;text-align:left}
+.variants-summary tbody td.vh-name{text-align:left}
+.variants-summary tbody tr:hover td.vh-sticky{background:#FAFBFC}
+.variants-summary .vh-q{min-width:34px;font-size:10px}
+.variants-summary .vc{min-width:34px;cursor:help}
+.variants-summary .vc-empty{color:var(--ink-3);min-width:34px}
 .chat-input{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border);background:var(--surface);align-items:center;position:relative}
 .chat-input input{flex:1;min-width:120px;padding:8px 12px;border:1px solid var(--border-2);border-radius:10px;font-size:13px}
 .chat-input button{padding:8px 14px;border-radius:10px;background:var(--p);color:#fff;font-weight:700;font-size:12px}
@@ -527,8 +542,15 @@ const STATE = {
   view: 'login',           // login | student | curator | teacher
   studentTab: 'home',      // home | days | theory | achievements | profile
   curatorTab: 'students',  // students | essays | chat
-  teacherTab: 'overview',  // overview | students | attendance | payments | essays | analytics | content | days
+  teacherTab: 'overview',  // overview | students | attendance | payments | essays | analytics | variants | content | days
   contentTab: 'theory',    // theory | tests | materials | samples
+  /* Сводная по пробникам (импорт OTP) */
+  selectedVariantId: null,        // если выбрана конкретная сводная — id варианта
+  variantsList: [],               // список заголовков вариантов (загружаются один раз)
+  variantsListLoaded: false,
+  currentVariantData: null,       // { variant, attempts, answersByAttempt }
+  myVariantAttempts: [],          // у ученика: его попытки по всем вариантам
+  myVariantAttemptsLoaded: false,
   contentEditTaskN: null,  // открыта модалка редактирования теории по номеру
   chatOpen: false,
   chatChannel: 'group',
@@ -4256,6 +4278,28 @@ function webPushAvailable(){
          VAPID_PUBLIC_KEY && VAPID_PUBLIC_KEY !== 'PASTE_YOUR_VAPID_PUBLIC_KEY_HERE';
 }
 
+/* Детект iOS-устройства */
+function isIOSDevice(){
+  return /iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+}
+
+/* Запущено ли как PWA (с главного экрана). На iOS — navigator.standalone,
+   на других — display-mode: standalone. */
+function isRunningAsPWA(){
+  if(typeof window === 'undefined') return false;
+  if(navigator.standalone === true) return true;  /* iOS Safari PWA */
+  try {
+    return window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+  } catch(_){ return false; }
+}
+
+/* На iOS Web Push работает ТОЛЬКО из PWA (добавленной на главный экран).
+   Если ученик открыл сайт в обычном Safari — подписка создастся, но Apple
+   Push Service её отбросит с 403. Показываем явную подсказку. */
+function iOSNeedsPWAHint(){
+  return isIOSDevice() && !isRunningAsPWA();
+}
+
 /* Получить текущую подписку (если есть). Используем getRegistration —
    .ready может висеть вечно если SW ещё не зарегистрирован. */
 async function getCurrentPushSubscription(){
@@ -4347,11 +4391,34 @@ function notifyViaPush(userId, title, body, link){
 
 /* Карточка для Профиля: «Push в браузере».
    По умолчанию рисуем состояние «не включено» — это правильно в 99% случаев
-   при первом заходе. Потом async-проверка обновит состояние если подписка уже есть. */
+   при первом заходе. Потом async-проверка обновит состояние если подписка уже есть.
+   Спецслучай: iOS Safari вне PWA — рисуем подсказку «добавь на главный экран». */
 function webPushCard(){
   if(!MY_PROFILE) return null;
   if(!webPushAvailable()){
     return null;
+  }
+  /* iOS Safari вне PWA — Apple Push Service всё равно отобьёт 403.
+     Показываем подсказку как добавить на главный экран, БЕЗ кнопки «Включить». */
+  if(iOSNeedsPWAHint()){
+    return el('div', { class:'card', style:{ marginBottom:'16px', background:'#FFF7E6', borderColor:'#FACC15' }},
+      el('div', { style:{ display:'flex', alignItems:'flex-start', gap:'12px' }},
+        el('span', { style:{ fontSize:'28px', flexShrink:0 }}, '📱'),
+        el('div', { style:{ flex:1, minWidth:0 }},
+          el('h3', { style:{ marginBottom:'4px' }}, '🔔 Push-уведомления на iPhone'),
+          el('div', { style:{ color:'var(--ink-2)', fontSize:'13px', lineHeight:'1.5' }},
+            'Чтобы пуши приходили на айфон, надо открыть ЗебРус не через Safari, ',
+            'а через иконку на главном экране. Это особенность Apple — без этого ',
+            'iOS не пускает уведомления.',
+            el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'#fff', borderRadius:'8px', fontSize:'12px' }},
+              el('b', null, 'Как добавить:'),
+              el('ol', { style:{ margin:'4px 0 0 18px', padding:0 }},
+                el('li', null, 'Внизу Safari кнопка «', el('b', null, 'Поделиться'), '» — квадрат со стрелкой вверх'),
+                el('li', null, 'Пролистай меню вниз → «', el('b', null, 'На экран „Домой"'), '» → «Добавить»'),
+                el('li', null, 'Закрой Safari, запусти ЗебРус ', el('b', null, 'с новой иконки на главном экране')),
+                el('li', null, 'Зайди в Профиль → нажми «🔔 Включить» уже из приложения'))),
+            el('div', { style:{ marginTop:'8px', color:'var(--ink-3)', fontSize:'11px' }},
+              'А пока пуши идут в Telegram — это надёжнее всего.'))));
   }
   const card = el('div', { class:'card', style:{ marginBottom:'16px' }});
   const statusBlock = el('div', { style:{ flex:1, minWidth:'200px' }});
@@ -5913,6 +5980,30 @@ function viewStudentHome(){
     });
   }
 
+  /* Карточка свободной сдачи сочинения — доступна в любой момент,
+     не привязана к дням интенсива. Особенно полезна ДО старта,
+     чтобы можно было разогреваться и тренироваться. */
+  const myExistingEssay = (MY_PROFILE && MY_PROFILE.id)
+    ? DB_ESSAYS.find(x => x.studentId === MY_PROFILE.id) : null;
+  const freeEssayCard = el('div', { class:'card', style:{ marginBottom:'16px', background:'#FFF7E6', borderColor:'#FACC15' }},
+    el('div', { style:{ display:'flex', alignItems:'flex-start', gap:'14px', flexWrap:'wrap' }},
+      el('div', { style:{ fontSize:'36px', flexShrink:0 }}, '✍️'),
+      el('div', { style:{ flex:1, minWidth:'200px' }},
+        el('h3', { style:{ marginBottom:'4px' }}, 'Сдать сочинение на проверку'),
+        el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', lineHeight:'1.5', margin:0 }},
+          myExistingEssay
+            ? 'У тебя уже есть сданное сочинение. Можешь сдать ещё одно — Ольга проверит его отдельно.'
+            : 'Можно сдавать в любое время, не дожидаясь старта интенсива. Минимум 150 слов. Можно текстом или фото рукописи.')),
+      el('button', { class:'btn btn-p',
+        onclick: () => {
+          STATE.essayDraftOpen = true;
+          STATE.essayDraftText = '';
+          STATE.essayDraftPhotos = [];
+          STATE.essayDraftMode = 'typed';
+          render();
+        }
+      }, myExistingEssay ? '↻ Сдать ещё' : '✍️ Сдать сейчас')));
+
   const wrap = el('div', { class:'fade-in' });
   wrap.append(
     el('h1', null,
@@ -5923,6 +6014,7 @@ function viewStudentHome(){
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'24px' }},
       'Сегодня Краш-тест в самом разгаре. Поехали 🐝'),
     hero, el('div', { style:{ height:'16px' }}),
+    freeEssayCard,
     kpi, el('div', { style:{ height:'16px' }}),
     map, el('div', { style:{ height:'16px' }}));
   /* Личная сводная по 26 заданиям ЕГЭ — между картой и достижениями */
@@ -7313,6 +7405,113 @@ function modalVariantBuilder(){
 }
 
 /* =======================================================================
+   УЧЕНИК · МОИ ПРОБНИКИ (импорт OTP — только свой ряд)
+   ======================================================================= */
+function studentVariantsCard(){
+  if(!MY_PROFILE || !MY_PROFILE.id) return null;
+  const card = el('div', { class:'card', style:{ marginBottom:'16px' }});
+  const header = el('div', null,
+    el('h3', { style:{ marginBottom:'4px' }}, '📋 Мои пробники'),
+    el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'12px' }},
+      'Твои результаты по пробным вариантам ЕГЭ. Чужие баллы не показываются.'));
+  card.append(header);
+  const list = el('div', null);
+  card.append(list);
+
+  /* Ленивая загрузка: один раз за рендер ищем свои попытки */
+  if(!STATE.myVariantAttemptsLoaded){
+    list.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'10px 0' }}, '⏳ Загружаю результаты…'));
+    (async () => {
+      try {
+        const atts = await restRequest('GET',
+          '/test_variant_attempts?profile_id=eq.' + MY_PROFILE.id +
+          '&select=*,variant:test_variants(id,title,questions_count,total_max_score)' +
+          '&order=finished_at.desc.nullslast,imported_at.desc');
+        STATE.myVariantAttempts = Array.isArray(atts) ? atts : [];
+        STATE.myVariantAttemptsLoaded = true;
+        render();
+      } catch(e){
+        console.warn('[student variants] load error:', e.message);
+        STATE.myVariantAttempts = [];
+        STATE.myVariantAttemptsLoaded = true;
+        render();
+      }
+    })();
+    return card;
+  }
+
+  const atts = STATE.myVariantAttempts || [];
+  if(!atts.length){
+    list.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'10px 0', textAlign:'center' }},
+      'Пока нет результатов. Когда учитель загрузит сводную по пробнику и привяжет тебя — увидишь здесь.'));
+    return card;
+  }
+
+  atts.forEach(a => {
+    const v = a.variant || {};
+    const det = el('details', { style:{ marginBottom:'8px', background:'var(--bg)', borderRadius:'10px', padding:'10px 12px' }});
+    const pct = a.percent_correct != null ? Number(a.percent_correct).toFixed(0) + '%' : '—';
+    const pctColor = a.percent_correct == null ? 'var(--ink-3)'
+      : a.percent_correct >= 70 ? 'var(--green)'
+      : a.percent_correct >= 50 ? '#D97706'
+      : 'var(--red)';
+    det.append(
+      el('summary', { style:{ cursor:'pointer', listStyle:'none', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px' }},
+        el('div', null,
+          el('div', { style:{ fontWeight:'700', fontSize:'13px' }}, v.title || '(вариант)'),
+          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }},
+            (v.questions_count || 27) + ' заданий · время: ' + otpFormatTime(a.time_spent_seconds) +
+            (a.total_score != null ? ' · ' + a.total_score + ' первичных баллов' : ''))),
+        el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
+          el('span', { style:{ fontWeight:'700', fontSize:'18px', color: pctColor }}, pct),
+          el('span', { style:{ color:'var(--ink-3)', fontSize:'13px' }}, '▾'))));
+    /* Лениво грузим ответы для каждой попытки при раскрытии */
+    const inner = el('div', { style:{ marginTop:'10px' }});
+    det.append(inner);
+    det.addEventListener('toggle', async () => {
+      if(!det.open) return;
+      if(inner.dataset.loaded) return;
+      inner.dataset.loaded = '1';
+      inner.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px' }}, '⏳ Загружаю ответы…'));
+      try {
+        const answers = await restRequest('GET',
+          '/test_variant_answers?attempt_id=eq.' + a.id +
+          '&select=question_num,user_answer,points,max_points,is_correct&order=question_num.asc');
+        inner.innerHTML = '';
+        if(!Array.isArray(answers) || !answers.length){
+          inner.append(el('div', { style:{ color:'var(--ink-3)' }}, 'Ответов нет'));
+          return;
+        }
+        const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(48px, 1fr))', gap:'4px', marginTop:'4px' }});
+        answers.forEach(ans => {
+          const max = Number(ans.max_points || 0);
+          const pts = Number(ans.points || 0);
+          let bg, color;
+          if(max === 0){ bg='#F3F4F6'; color='#9CA3AF'; }
+          else if(pts >= max){ bg='#D1FAE5'; color='#065F46'; }
+          else if(pts <= 0){ bg='#FEE2E2'; color='#991B1B'; }
+          else { bg='#FEF3C7'; color='#92400E'; }
+          const cell = el('div', {
+            style:{ padding:'8px 4px', borderRadius:'6px', background:bg, color, textAlign:'center', fontSize:'11px', fontWeight:'700', cursor:'help' },
+            title:'Задание №' + ans.question_num + '\nТвой ответ: ' + (ans.user_answer == null ? '(пусто)' : ans.user_answer) + '\nБалл: ' + pts + ' / ' + max
+          },
+            el('div', { style:{ fontSize:'10px', opacity:.7 }}, '№' + ans.question_num),
+            el('div', null, max === 0 ? '—' : pts + '/' + max));
+          grid.append(cell);
+        });
+        inner.append(grid);
+      } catch(e){
+        inner.innerHTML = '';
+        inner.append(el('div', { style:{ color:'var(--red)' }}, '⚠ ' + e.message));
+      }
+    });
+    list.append(det);
+  });
+
+  return card;
+}
+
+/* =======================================================================
    УЧЕНИК · ДОСТИЖЕНИЯ
    ======================================================================= */
 function viewStudentAchievements(){
@@ -7401,6 +7600,10 @@ function viewStudentProfile(){
       }
     }, '🐝 Показать вступление снова'));
   wrap.append(main);
+
+  /* Мои пробники-варианты — если у ученика есть результаты, рисуем карточку */
+  const variantsBlock = studentVariantsCard();
+  if(variantsBlock) wrap.append(variantsBlock);
 
   /* Что я могу получить — сворачиваем все достижения */
   const ach = el('div', { class:'card' });
@@ -10935,6 +11138,443 @@ function modalEditTheory(n){
 }
 
 /* =======================================================================
+   УЧИТЕЛЬ · ВАРИАНТЫ (импорт Online Test Pad + сводная)
+   ======================================================================= */
+
+/* --- Парсер xlsx-экспорта OTP. Возвращает { rows, questionsCount } -- */
+function otpParseWorkbook(arrayBuffer){
+  const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
+  if(!aoa.length) throw new Error('Файл пустой');
+  /* Шапка: ищем индекс первой колонки «Вопрос № 1». От этого считаем число заданий. */
+  const header = aoa[0].map(c => (c == null ? '' : String(c)));
+  const firstQ = header.findIndex(c => /Вопрос\s*№?\s*1\b/i.test(c));
+  if(firstQ < 0) throw new Error('Не нашлась колонка «Вопрос № 1» — это точно экспорт Online Test Pad?');
+  /* Считаем сколько заданий в варианте: каждое занимает 2 колонки (ответ, балл). */
+  const qCount = Math.floor((header.length - firstQ) / 2);
+  if(qCount < 1) throw new Error('В файле нет вопросов');
+
+  const rows = [];
+  for(let r = 1; r < aoa.length; r++){
+    const row = aoa[r];
+    if(!row || !row.length) continue;
+    /* Пропускаем подзаголовки/пустые строки (нет имени) */
+    const uname = (row[2] || '').toString().trim();   /* «Пользователь» */
+    const fname = (row[6] || '').toString().trim();   /* «Имя и фамилия» */
+    if(!uname && !fname) continue;
+    const att = {
+      otp_user: uname || null,
+      otp_full_name: fname || uname || null,
+      otp_ip: (row[3] || '').toString().trim() || null,
+      finished_at: otpParseDate(row[4]),
+      time_spent_seconds: otpParseTimeSpent(row[5]),
+      correct_count: otpParseNumeric(row[7]),
+      percent_correct: otpParseNumeric(row[8]),
+      total_score: otpParseInt(row[9]),
+      answers: []
+    };
+    for(let q = 1; q <= qCount; q++){
+      const colA = firstQ + (q - 1) * 2;
+      const colP = colA + 1;
+      const ans = row[colA];
+      const pStr = (row[colP] || '').toString();
+      const parsed = otpParsePoints(pStr);  /* "1,5 из 2" → { points: 1.5, max: 2 } */
+      att.answers.push({
+        question_num: q,
+        user_answer: ans == null ? null : String(ans),
+        points:    parsed.points,
+        max_points: parsed.max,
+      });
+    }
+    rows.push(att);
+  }
+  return { rows, questionsCount: qCount };
+}
+
+function otpParsePoints(s){
+  /* "1,5 из 2" / "0 из 1" / "0 из 0" */
+  const m = String(s || '').replace(',', '.').match(/(-?\d+(?:\.\d+)?)\s*из\s*(-?\d+(?:\.\d+)?)/i);
+  if(!m) return { points: 0, max: 0 };
+  return { points: parseFloat(m[1]) || 0, max: parseFloat(m[2]) || 0 };
+}
+function otpParseNumeric(v){
+  if(v == null) return null;
+  const n = parseFloat(String(v).replace(',', '.'));
+  return isNaN(n) ? null : n;
+}
+function otpParseInt(v){
+  if(v == null) return null;
+  const n = parseInt(String(v).replace(/[^\d-]/g,''), 10);
+  return isNaN(n) ? null : n;
+}
+function otpParseTimeSpent(v){
+  if(v == null) return null;
+  const s = String(v);
+  /* «00:49:28» или «01:21:37» — час:мин:сек */
+  const m = s.match(/(\d+):(\d+):(\d+)/);
+  if(m) return (+m[1]) * 3600 + (+m[2]) * 60 + (+m[3]);
+  /* «49:28» — мин:сек */
+  const m2 = s.match(/(\d+):(\d+)/);
+  if(m2) return (+m2[1]) * 60 + (+m2[2]);
+  return null;
+}
+function otpParseDate(v){
+  if(!v) return null;
+  if(v instanceof Date) return isNaN(v.getTime()) ? null : v.toISOString();
+  const s = String(v).trim();
+  /* Русский формат «26.04.2026 17:31:31» или «26.04.2026» */
+  const m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:\s+(\d{1,2}):(\d{1,2})(?::(\d{1,2}))?)?$/);
+  if(m){
+    const d = new Date(Date.UTC(+m[3], +m[2] - 1, +m[1],
+      +(m[4]||0), +(m[5]||0), +(m[6]||0)));
+    return isNaN(d.getTime()) ? null : d.toISOString();
+  }
+  /* ISO или US-формат — даём шанс встроенному парсеру */
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d.toISOString();
+}
+
+/* --- Fuzzy-match OTP-имени к profile_id. -------------------------------
+   Простая нормализация (lowercase, без пробелов и знаков), плюс
+   sliding-сравнение first_name × last_name × initial. */
+function normalizeNameForMatch(s){
+  return String(s || '').toLowerCase()
+    .replace(/ё/g,'е')
+    .replace(/[^a-zа-я0-9]/gi,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+function matchOtpToProfile(otpName, students){
+  const target = normalizeNameForMatch(otpName);
+  if(!target) return null;
+  const targetParts = target.split(' ').filter(Boolean);
+  /* 1. exact или starts-with на нормализованной строке */
+  for(const s of students){
+    const full = normalizeNameForMatch(s.full_name);
+    if(full === target) return s.id;
+  }
+  /* 2. имя+инициал фамилии: target «ульяна о» → student «ульяна осипова» — оба начинаются */
+  for(const s of students){
+    const full = normalizeNameForMatch(s.full_name);
+    const fullParts = full.split(' ').filter(Boolean);
+    if(targetParts.length >= 2 && fullParts.length >= 2){
+      /* match имя */
+      if(fullParts[0] === targetParts[0] || targetParts[0] === fullParts[1]){
+        /* match фамилия или её первая буква */
+        const tLast = targetParts[targetParts.length - 1];
+        const fLast = fullParts[fullParts.length - 1];
+        if(tLast === fLast) return s.id;
+        if(tLast.length === 1 && fLast.startsWith(tLast)) return s.id;
+        if(fLast.length === 1 && tLast.startsWith(fLast)) return s.id;
+      }
+    }
+    /* 3. одно имя, совпадает с первым словом профиля (с риском коллизии — мы делаем такой матч ТОЛЬКО если он один) */
+  }
+  /* 4. только имя: возвращаем единственного совпавшего ученика, если он уникален */
+  if(targetParts.length === 1){
+    const cands = students.filter(s => normalizeNameForMatch(s.full_name).split(' ')[0] === targetParts[0]);
+    if(cands.length === 1) return cands[0].id;
+  }
+  return null;
+}
+
+/* --- Загрузка списка вариантов из БД -- */
+async function loadVariantsList(){
+  try {
+    const list = await restRequest('GET',
+      '/test_variants?select=id,title,questions_count,total_max_score,created_at,source&order=created_at.desc');
+    STATE.variantsList = Array.isArray(list) ? list : [];
+    STATE.variantsListLoaded = true;
+  } catch(e){
+    console.warn('[variants] load list error:', e.message);
+    STATE.variantsListLoaded = true;
+  }
+}
+
+/* --- Загрузка одного варианта со всеми попытками и ответами -- */
+async function loadVariantFull(variantId){
+  const variantArr = await restRequest('GET',
+    '/test_variants?id=eq.' + variantId + '&limit=1');
+  if(!Array.isArray(variantArr) || !variantArr.length) throw new Error('Вариант не найден');
+  const variant = variantArr[0];
+  const attempts = await restRequest('GET',
+    '/test_variant_attempts?variant_id=eq.' + variantId +
+    '&select=*,profile:profiles!test_variant_attempts_profile_id_fkey(full_name)' +
+    '&order=total_score.desc.nullslast,otp_full_name.asc');
+  const attemptIds = (attempts || []).map(a => a.id);
+  let answers = [];
+  if(attemptIds.length){
+    answers = await restRequest('GET',
+      '/test_variant_answers?attempt_id=in.(' + attemptIds.join(',') + ')' +
+      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct');
+  }
+  const byAttempt = {};
+  (answers || []).forEach(a => {
+    if(!byAttempt[a.attempt_id]) byAttempt[a.attempt_id] = {};
+    byAttempt[a.attempt_id][a.question_num] = a;
+  });
+  STATE.currentVariantData = { variant, attempts: attempts || [], answersByAttempt: byAttempt };
+}
+
+/* --- Импорт: создать вариант + попытки + ответы -- */
+async function importOtpFile(file, title){
+  if(!file || !title) return;
+  if(typeof XLSX === 'undefined'){
+    showToast('⚠ XLSX-парсер не загрузился. Обнови страницу.');
+    return;
+  }
+  const buf = await file.arrayBuffer();
+  let parsed;
+  try { parsed = otpParseWorkbook(buf); }
+  catch(e){ showToast('⚠ ' + e.message); return; }
+
+  if(!parsed.rows.length){ showToast('В файле нет учеников'); return; }
+  showToast('⏳ Импорт: ' + parsed.rows.length + ' учеников × ' + parsed.questionsCount + ' заданий…');
+
+  /* 1. Создаём вариант */
+  const totalMax = parsed.rows[0].answers.reduce((s,a) => s + (a.max_points || 0), 0);
+  const variantPayload = {
+    title,
+    source: 'otp_import',
+    questions_count: parsed.questionsCount,
+    total_max_score: Math.round(totalMax) || null,
+    created_by: MY_PROFILE && MY_PROFILE.id || null,
+  };
+  const variantRow = await restRequest('POST', '/test_variants',
+    variantPayload, { prefer: 'return=representation' });
+  const variantId = Array.isArray(variantRow) ? variantRow[0].id : variantRow.id;
+
+  /* 2. Грузим список учеников для fuzzy-match */
+  const studentsRaw = await restRequest('GET', '/profiles?role=eq.student&select=id,full_name');
+  const students = Array.isArray(studentsRaw) ? studentsRaw : [];
+
+  /* 3. Для каждой попытки: INSERT в attempts → получаем id → INSERT batched в answers */
+  let imported = 0;
+  for(const row of parsed.rows){
+    const profileId = matchOtpToProfile(row.otp_full_name || row.otp_user, students);
+    const attPayload = {
+      variant_id: variantId,
+      profile_id: profileId,
+      otp_user: row.otp_user,
+      otp_full_name: row.otp_full_name,
+      otp_ip: row.otp_ip,
+      finished_at: row.finished_at,
+      time_spent_seconds: row.time_spent_seconds,
+      correct_count: row.correct_count,
+      percent_correct: row.percent_correct,
+      total_score: row.total_score,
+    };
+    let attRow;
+    try {
+      attRow = await restRequest('POST', '/test_variant_attempts',
+        attPayload, { prefer: 'return=representation' });
+    } catch(e){
+      console.warn('[variants] attempt insert failed for', row.otp_full_name, e.message);
+      continue;
+    }
+    const attemptId = Array.isArray(attRow) ? attRow[0].id : attRow.id;
+    const answersBatch = row.answers.map(a => Object.assign({}, a, { attempt_id: attemptId }));
+    try {
+      await restRequest('POST', '/test_variant_answers',
+        answersBatch, { prefer: 'return=minimal' });
+    } catch(e){
+      console.warn('[variants] answers batch failed for attempt', attemptId, e.message);
+    }
+    imported++;
+  }
+
+  showToast('✅ Импорт готов: ' + imported + ' из ' + parsed.rows.length);
+  STATE.variantsListLoaded = false;
+  STATE.selectedVariantId = variantId;
+  await loadVariantsList();
+  await loadVariantFull(variantId);
+  render();
+}
+
+/* --- Главная вьюшка вкладки --- */
+function viewTeacherVariants(){
+  const wrap = el('div', { class:'fade-in' });
+
+  /* Если выбран конкретный вариант — показываем его сводную */
+  if(STATE.selectedVariantId){
+    return viewVariantSummary();
+  }
+
+  wrap.append(
+    el('h1', null, '📋 Варианты-пробники'),
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'18px' }},
+      'Загружай экспорт результатов из Online Test Pad — увидишь сводную по варианту: какой ученик на каком задании что написал и сколько баллов. Этап 1: импорт; решалка внутри платформы будет позже.'));
+
+  /* Карточка импорта */
+  const importCard = el('div', { class:'card', style:{ marginBottom:'18px', background:'#FFFDF7', borderColor:'#FACC15' }});
+  let pickedFile = null;
+  const fileLabel = el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px', minHeight:'14px' }});
+  const fileInput = el('input', {
+    type:'file', accept:'.xlsx,.xls',
+    style:{ display:'none' },
+    onchange: (ev) => {
+      pickedFile = ev.target.files && ev.target.files[0];
+      fileLabel.textContent = pickedFile ? ('📎 ' + pickedFile.name) : '';
+    }
+  });
+  const titleInput = el('input', {
+    type:'text', placeholder:'Например: Вариант 32 (26 апреля)',
+    style:{ flex:1, minWidth:'200px', padding:'8px 12px', border:'1px solid var(--border-2)', borderRadius:'10px', fontSize:'13px' }
+  });
+  importCard.append(
+    el('h3', null, '＋ Загрузить экспорт Online Test Pad'),
+    el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginTop:'4px', marginBottom:'12px' }},
+      'В OTP: Тесты → твой тест → «Статистика» → «Скачать как Excel». Получится файл с колонками «Пользователь», «Имя и фамилия», «Вопрос № 1», и т.д.'),
+    el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'10px', alignItems:'center' }},
+      titleInput,
+      el('button', { class:'btn btn-secondary',
+        onclick: () => fileInput.click()
+      }, '📂 Выбрать файл'),
+      fileInput,
+      el('button', { class:'btn btn-teal',
+        onclick: async () => {
+          if(!pickedFile){ showToast('Сначала выбери файл'); return; }
+          const title = titleInput.value.trim();
+          if(!title){ showToast('Введи название варианта'); return; }
+          await importOtpFile(pickedFile, title);
+        }
+      }, '⬆ Импортировать')),
+    fileLabel);
+  wrap.append(importCard);
+
+  /* Список уже загруженных вариантов */
+  if(!STATE.variantsListLoaded){
+    loadVariantsList().then(() => render());
+    wrap.append(el('div', { style:{ color:'var(--ink-3)', padding:'20px', textAlign:'center' }}, '⏳ Загружаю список вариантов…'));
+    return wrap;
+  }
+
+  if(!STATE.variantsList.length){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)' }},
+      'Пока нет загруженных вариантов. Загрузи первый файл сверху ⬆'));
+    return wrap;
+  }
+
+  STATE.variantsList.forEach(v => {
+    wrap.append(el('div', { class:'card', style:{ marginBottom:'10px', cursor:'pointer', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px' },
+      onclick: async () => {
+        STATE.selectedVariantId = v.id;
+        STATE.currentVariantData = null;
+        render();
+        try { await loadVariantFull(v.id); } catch(e){ showToast('⚠ ' + e.message); }
+        render();
+      }
+    },
+      el('div', null,
+        el('h3', null, '📋 ' + v.title),
+        el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'2px' }},
+          (v.questions_count || 27) + ' заданий · ' +
+          (v.total_max_score ? 'макс ' + v.total_max_score + ' б · ' : '') +
+          'загружен ' + new Date(v.created_at).toLocaleDateString('ru-RU'))),
+      el('span', { style:{ color:'var(--p)', fontSize:'14px', fontWeight:'700' }}, 'Открыть →')));
+  });
+
+  return wrap;
+}
+
+/* --- Сводная по конкретному варианту -- */
+function viewVariantSummary(){
+  const wrap = el('div', { class:'fade-in' });
+  const data = STATE.currentVariantData;
+
+  /* Хлебная крошка */
+  wrap.append(
+    el('div', { style:{ marginBottom:'10px' }},
+      el('button', { class:'btn btn-secondary btn-sm',
+        onclick: () => { STATE.selectedVariantId = null; STATE.currentVariantData = null; render(); }
+      }, '← Все варианты')));
+
+  if(!data){
+    wrap.append(el('div', { style:{ textAlign:'center', color:'var(--ink-3)', padding:'30px' }}, '⏳ Загружаю сводную…'));
+    return wrap;
+  }
+  const v = data.variant;
+  const attempts = data.attempts;
+  const byAttempt = data.answersByAttempt;
+  const qCount = v.questions_count || 27;
+
+  wrap.append(
+    el('h1', null, '📋 ' + v.title),
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'18px' }},
+      attempts.length + ' учеников · ' + qCount + ' заданий' +
+      (v.total_max_score ? ' · макс ' + v.total_max_score + ' б' : '')));
+
+  if(!attempts.length){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)' }},
+      'Нет попыток. Возможно при импорте все ученики были пропущены.'));
+    return wrap;
+  }
+
+  /* Таблица: строки = ученики, колонки = №1..N + время + % + итог + привязка */
+  const tableWrap = el('div', { style:{ overflowX:'auto', background:'var(--surface)', borderRadius:'12px', border:'1px solid var(--border)' }});
+  const table = el('table', { class:'variants-summary', style:{ borderCollapse:'collapse', minWidth:'100%' }});
+  const thead = el('thead', null);
+  const trHead = el('tr', null,
+    el('th', { class:'vh-sticky' }, '#'),
+    el('th', { class:'vh-sticky vh-name' }, 'Ученик'),
+    el('th', null, 'Время'),
+    el('th', null, '%'),
+    el('th', null, 'Итог'));
+  for(let q = 1; q <= qCount; q++){
+    trHead.append(el('th', { class:'vh-q', title:'Задание №' + q }, q));
+  }
+  thead.append(trHead);
+  table.append(thead);
+
+  const tbody = el('tbody', null);
+  attempts.forEach((a, idx) => {
+    const tr = el('tr', null);
+    const profileName = (a.profile && a.profile.full_name) || a.otp_full_name || a.otp_user || '?';
+    const isLinked = !!a.profile_id;
+    tr.append(
+      el('td', { class:'vh-sticky', style:{ color:'var(--ink-3)' }}, String(idx + 1)),
+      el('td', { class:'vh-sticky vh-name', style:{ fontWeight:'600' }},
+        el('div', null, profileName),
+        el('div', { style:{ fontSize:'10px', color: isLinked ? 'var(--green)' : 'var(--orange)' }},
+          isLinked ? '✓ привязан' : '⚠ ' + (a.otp_full_name || a.otp_user || 'без имени') + ' — нет в базе')),
+      el('td', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, otpFormatTime(a.time_spent_seconds)),
+      el('td', { style:{ fontWeight:'700' }}, a.percent_correct != null ? Number(a.percent_correct).toFixed(0) + '%' : '—'),
+      el('td', { style:{ fontWeight:'700' }}, a.total_score != null ? a.total_score : '—'));
+    for(let q = 1; q <= qCount; q++){
+      const ans = byAttempt[a.id] && byAttempt[a.id][q];
+      tr.append(variantCell(ans));
+    }
+    tbody.append(tr);
+  });
+  table.append(tbody);
+  tableWrap.append(table);
+  wrap.append(tableWrap);
+  return wrap;
+}
+
+function variantCell(ans){
+  if(!ans) return el('td', { class:'vc-empty' }, '—');
+  const points = Number(ans.points || 0);
+  const max = Number(ans.max_points || 0);
+  let bg, color, label;
+  if(max === 0){ bg = '#F3F4F6'; color = '#9CA3AF'; label = '—'; }
+  else if(points >= max){ bg = '#D1FAE5'; color = '#065F46'; label = points; }
+  else if(points <= 0){ bg = '#FEE2E2'; color = '#991B1B'; label = '0'; }
+  else { bg = '#FEF3C7'; color = '#92400E'; label = points; }  /* частично */
+  const title = 'Ответ ученика: ' + (ans.user_answer == null ? '(пусто)' : ans.user_answer) +
+                '\nБалл: ' + points + ' из ' + max;
+  return el('td', { class:'vc', style:{ background:bg, color, textAlign:'center', fontWeight:'700', fontSize:'12px' }, title }, String(label));
+}
+
+function otpFormatTime(s){
+  if(s == null) return '—';
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return m + ':' + String(sec).padStart(2,'0');
+}
+
+/* =======================================================================
    УЧИТЕЛЬ · ДНИ
    ======================================================================= */
 function viewTeacherDays(){
@@ -11743,6 +12383,7 @@ function _renderNow(){
       { key:'payments', label:'Оплаты', ic:'💰' },
       { key:'essays', label:'Сочинения', ic:'📝', badge: (newEssays + preCheckEssays) || null },
       { key:'analytics', label:'Аналитика', ic:'📈' },
+      { key:'variants', label:'Варианты', ic:'📋' },
       { key:'content', label:'Контент', ic:'📚' },
       { key:'days', label:'Дни', ic:'📅' },
     ];
@@ -11753,6 +12394,7 @@ function _renderNow(){
       payments: viewTeacherPayments,
       essays: viewTeacherEssays,
       analytics: viewTeacherAnalytics,
+      variants: viewTeacherVariants,
       content: viewTeacherContent,
       days: viewTeacherDays,
     };
