@@ -551,6 +551,8 @@ const STATE = {
   currentVariantData: null,       // { variant, attempts, answersByAttempt }
   myVariantAttempts: [],          // у ученика: его попытки по всем вариантам
   myVariantAttemptsLoaded: false,
+  /* Модалка ручной привязки попытки к ученику */
+  linkAttempt: null,              // { attemptId, currentName, profileId }
   contentEditTaskN: null,  // открыта модалка редактирования теории по номеру
   chatOpen: false,
   chatChannel: 'group',
@@ -11547,12 +11549,22 @@ function viewVariantSummary(){
     const tr = el('tr', null);
     const profileName = (a.profile && a.profile.full_name) || a.otp_full_name || a.otp_user || '?';
     const isLinked = !!a.profile_id;
+    const otpRaw = a.otp_full_name || a.otp_user || 'без имени';
     tr.append(
       el('td', { class:'vh-sticky', style:{ color:'var(--ink-3)' }}, String(idx + 1)),
-      el('td', { class:'vh-sticky vh-name', style:{ fontWeight:'600' }},
-        el('div', null, profileName),
+      el('td', { class:'vh-sticky vh-name', style:{ fontWeight:'600', cursor:'pointer' },
+          title: 'Кликни чтобы изменить привязку к ученику',
+          onclick: () => {
+            STATE.linkAttempt = { attemptId: a.id, currentName: profileName, profileId: a.profile_id || null, otpName: otpRaw };
+            render();
+          }},
+        el('div', { style:{ display:'flex', alignItems:'center', gap:'6px' }},
+          el('span', null, profileName),
+          el('span', { style:{ fontSize:'11px', color:'var(--p)', opacity:.7 }}, '🔗')),
         el('div', { style:{ fontSize:'10px', color: isLinked ? 'var(--green)' : 'var(--orange)' }},
-          isLinked ? '✓ привязан' : '⚠ ' + (a.otp_full_name || a.otp_user || 'без имени') + ' — нет в базе')),
+          isLinked
+            ? '✓ привязан · OTP: ' + otpRaw
+            : '⚠ ' + otpRaw + ' — нет в базе, нажми чтобы выбрать')),
       el('td', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, otpFormatTime(a.time_spent_seconds)),
       el('td', { style:{ fontWeight:'700' }}, a.percent_correct != null ? Number(a.percent_correct).toFixed(0) + '%' : '—'),
       el('td', { style:{ fontWeight:'700' }}, a.total_score != null ? a.total_score : '—'));
@@ -11587,6 +11599,114 @@ function otpFormatTime(s){
   const m = Math.floor(s / 60);
   const sec = s % 60;
   return m + ':' + String(sec).padStart(2,'0');
+}
+
+/* Модалка ручной привязки попытки к ученику в твоей базе.
+   Открывается кликом по имени в сводной. Показывает поисковую строку
+   и список всех учеников. Клик по ученику → PATCH profile_id, перезагрузка. */
+function modalLinkStudent(){
+  if(!STATE.linkAttempt) return null;
+  const { attemptId, currentName, profileId, otpName } = STATE.linkAttempt;
+  const close = () => { STATE.linkAttempt = null; render(); };
+
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        '🔗 Привязка к ученику'),
+      el('h2', { style:{ marginTop:'4px' }}, otpName)),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const searchInput = el('input', {
+    type:'text', placeholder:'Найти по имени или фамилии…',
+    style:{ width:'100%', padding:'10px 14px', border:'1px solid var(--border-2)', borderRadius:'10px', fontSize:'14px', marginBottom:'12px' }
+  });
+  const listContainer = el('div', { style:{ maxHeight:'60vh', overflowY:'auto' }});
+
+  /* Если уже привязан — кнопка «Отвязать» */
+  const unlinkBtn = profileId ? el('button', {
+    class:'btn btn-secondary',
+    style:{ marginBottom:'12px', width:'100%' },
+    onclick: async () => {
+      try {
+        await restRequest('PATCH', '/test_variant_attempts?id=eq.' + attemptId,
+          { profile_id: null }, { prefer:'return=minimal' });
+        showToast('🔓 Отвязано');
+        STATE.linkAttempt = null;
+        /* Перезагружаем вариант — обновится сводная */
+        if(STATE.selectedVariantId) await loadVariantFull(STATE.selectedVariantId);
+        render();
+      } catch(e){ showToast('⚠ ' + e.message); }
+    }
+  }, '🔓 Отвязать от «' + currentName + '»') : null;
+
+  /* Загружаем список учеников один раз для этой модалки */
+  let allStudents = [];
+  const renderList = (query) => {
+    listContainer.innerHTML = '';
+    const q = normalizeNameForMatch(query || '');
+    const items = q
+      ? allStudents.filter(s => normalizeNameForMatch(s.full_name).includes(q) ||
+                                normalizeNameForMatch(s.email || '').includes(q))
+      : allStudents;
+    if(!items.length){
+      listContainer.append(el('div', { style:{ padding:'20px', textAlign:'center', color:'var(--ink-3)' }},
+        q ? 'Никого не нашли' : 'Список пуст'));
+      return;
+    }
+    items.forEach(s => {
+      const isCurrent = s.id === profileId;
+      const row = el('div', {
+        style:{ padding:'10px 14px', borderRadius:'8px', cursor:'pointer', marginBottom:'4px',
+                background: isCurrent ? 'var(--p-soft)' : 'var(--bg)',
+                display:'flex', justifyContent:'space-between', alignItems:'center' },
+        onclick: async () => {
+          if(isCurrent){ close(); return; }
+          try {
+            await restRequest('PATCH', '/test_variant_attempts?id=eq.' + attemptId,
+              { profile_id: s.id }, { prefer:'return=minimal' });
+            showToast('✓ Привязано к «' + s.full_name + '»');
+            STATE.linkAttempt = null;
+            if(STATE.selectedVariantId) await loadVariantFull(STATE.selectedVariantId);
+            render();
+          } catch(e){ showToast('⚠ ' + e.message); }
+        }
+      },
+        el('div', null,
+          el('div', { style:{ fontWeight:'600', fontSize:'14px' }}, s.full_name || '—'),
+          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, s.email || '—')),
+        isCurrent ? el('span', { style:{ fontSize:'12px', color:'var(--p)' }}, '✓ текущий') : null);
+      listContainer.append(row);
+    });
+  };
+
+  /* Загрузка учеников */
+  (async () => {
+    try {
+      const arr = await restRequest('GET',
+        '/profiles?role=eq.student&select=id,full_name,email&order=full_name.asc');
+      allStudents = Array.isArray(arr) ? arr : [];
+      renderList('');
+    } catch(e){
+      listContainer.innerHTML = '';
+      listContainer.append(el('div', { style:{ padding:'20px', textAlign:'center', color:'var(--red)' }},
+        '⚠ Не удалось загрузить учеников: ' + e.message));
+    }
+  })();
+
+  searchInput.addEventListener('input', () => renderList(searchInput.value));
+
+  const body = el('div', { class:'modal-body' },
+    el('div', { style:{ marginBottom:'12px', color:'var(--ink-2)', fontSize:'13px' }},
+      profileId
+        ? 'Сейчас привязано к «' + currentName + '». Выбери другого ученика или нажми «Отвязать».'
+        : 'Выбери ученика из своей базы, чтобы привязать к нему эту попытку.'),
+    unlinkBtn,
+    searchInput,
+    listContainer);
+
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+  }, el('div', { class:'modal' }, head, body));
 }
 
 /* =======================================================================
@@ -12447,6 +12567,7 @@ function _renderNow(){
   if(STATE.variantMode) root.append(modalVariantBuilder());
   if(STATE.showOnboarding) root.append(modalOnboarding());
   if(STATE.essayDraftOpen) root.append(modalEssayDraft());
+  if(STATE.linkAttempt) root.append(modalLinkStudent());
   if(STATE.studentEssayResultOpen != null) root.append(modalEssayResult(STATE.studentEssayResultOpen));
   if(STATE.sampleOpen != null) root.append(modalEssaySample(STATE.sampleOpen));
   if(STATE.sampleEditOpen != null) root.append(modalEssaySampleEdit());
