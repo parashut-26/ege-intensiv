@@ -11752,7 +11752,8 @@ function richTextEditor(initialHtml, opts){
   const toolbar = el('div', { style:{ display:'flex', gap:'2px', padding:'4px 6px', background:'#F9FAFB', borderBottom:'1px solid var(--border)' }});
   const editor = el('div', { contenteditable: 'true',
     style:{ padding:'8px 10px', fontSize: (opts.fontSize || '13px'), minHeight: (opts.minHeight || '60px'),
-            outline:'none', fontFamily:'inherit', lineHeight:'1.5' }});
+            outline:'none', fontFamily:'inherit', lineHeight:'1.5',
+            whiteSpace:'pre-wrap' }});
   editor.innerHTML = sanitizeQuestionHtml(initialHtml || '');
   const btn = (label, cmd, title) => el('button', {
     type:'button',
