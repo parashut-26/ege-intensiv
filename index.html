@@ -11763,7 +11763,9 @@ function sanitizeQuestionHtml(html){
   return tmpl.innerHTML.replace(/\n{3,}/g, '\n\n');
 }
 
-/* Простой rich-text редактор: contenteditable + тулбар Ж/К/П */
+/* Простой rich-text редактор: contenteditable + тулбар Ж/К/П.
+   opts.onChange(html) — вызывается на каждое изменение (input), чтобы можно
+   было синхронизировать значение в STATE и не терять при render(). */
 function richTextEditor(initialHtml, opts){
   opts = opts || {};
   const wrap = el('div', { style:{ border:'1px solid var(--border-2)', borderRadius:'6px', overflow:'hidden', background:'#fff', marginTop:'4px' }});
@@ -11773,6 +11775,12 @@ function richTextEditor(initialHtml, opts){
             outline:'none', fontFamily:'inherit', lineHeight:'1.5',
             whiteSpace:'pre-wrap' }});
   editor.innerHTML = sanitizeQuestionHtml(initialHtml || '');
+  /* Синхронизация: на каждое изменение зовём onChange */
+  if(opts.onChange){
+    editor.addEventListener('input', () => {
+      opts.onChange(sanitizeQuestionHtml(editor.innerHTML));
+    });
+  }
   const btn = (label, cmd, title) => el('button', {
     type:'button',
     style:{ padding:'2px 8px', border:'1px solid var(--border-2)', background:'#fff', borderRadius:'4px', cursor:'pointer', fontSize:'12px', fontWeight: cmd === 'bold' ? '700' : 'normal', fontStyle: cmd === 'italic' ? 'italic' : 'normal', textDecoration: cmd === 'underline' ? 'underline' : 'none' },
@@ -13352,25 +13360,56 @@ function modalEditVariant(){
   questions.forEach(q => { qByNum[q.num] = q; });
   const srcByKind = {};
   sourceTexts.forEach(s => { srcByKind[s.kind] = s; });
+  /* Гарантируем что для каждого num=1..26 есть object в qByNum — туда писать изменения */
+  for(let n = 1; n <= 26; n++){
+    if(!qByNum[n]){
+      const placeholder = { variant_id: variant.id, num: n, question_text: '', correct_answer: '', max_points: 1 };
+      questions.push(placeholder);
+      qByNum[n] = placeholder;
+    }
+  }
+  /* Аналогично для источников */
+  const ensureSrc = (kind) => {
+    if(!srcByKind[kind]){
+      const ph = { variant_id: variant.id, kind, body: '' };
+      sourceTexts.push(ph);
+      srcByKind[kind] = ph;
+    }
+    return srcByKind[kind];
+  };
+  ensureSrc('text_1_3');
+  ensureSrc('text_22_26');
+  if(!qByNum[27]){
+    const placeholder = { variant_id: variant.id, num: 27, question_text: '', correct_answer: null, max_points: 22 };
+    questions.push(placeholder);
+    qByNum[27] = placeholder;
+  }
 
-  /* Поле названия */
+  /* Поле названия — onChange пишет в variant.title чтобы пережить render() */
   const titleInput = el('input', { type:'text', value: variant.title,
     style:{ width:'100%', padding:'8px 12px', border:'1px solid var(--border-2)', borderRadius:'8px', fontSize:'14px', fontWeight:'700', boxSizing:'border-box', marginBottom:'14px' }
   });
+  titleInput.oninput = () => { variant.title = titleInput.value; };
   body.append(
     el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px', fontWeight:'700' }}, 'Название'),
     titleInput);
 
-  /* Сетка по заданиям 1-26 — каждое = rich-text-редактор + answer input */
+  /* Сетка по заданиям 1-26 — каждое = rich-text-редактор + answer input.
+     onChange пишет в STATE.editVariantData.questions сразу — поэтому
+     любой render() не теряет правки. */
   const taskInputs = {};
   const ansInputs = {};
   for(let n = 1; n <= 26; n++){
     const q = qByNum[n];
     const block = el('div', { style:{ marginTop:'10px', padding:'8px 10px', background:'var(--bg)', borderRadius:'8px', border:'1px solid var(--border)' }});
-    const taskEd = richTextEditor(q ? (q.question_text || '') : '', { minHeight:'60px', fontSize:'12px' });
-    const ansInp = el('input', { type:'text', value: q ? (q.correct_answer || '') : '',
+    const taskEd = richTextEditor(q.question_text || '', {
+      minHeight:'60px', fontSize:'12px',
+      onChange: (html) => { q.question_text = html; }
+    });
+    const ansInp = el('input', { type:'text', value: q.correct_answer || '',
       style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'13px', fontWeight:'700', boxSizing:'border-box', marginTop:'4px' }
     });
+    ansInp.oninput = () => { q.correct_answer = ansInp.value; };
     taskInputs[n] = taskEd;
     ansInputs[n] = ansInp;
     block.append(
@@ -13383,10 +13422,16 @@ function modalEditVariant(){
     body.append(block);
   }
 
-  /* Исходные тексты — тоже rich-text */
-  const src13Ed = richTextEditor((srcByKind['text_1_3'] || {}).body || '', { minHeight:'100px', fontSize:'11px' });
-  const src22Ed = richTextEditor((srcByKind['text_22_26'] || {}).body || '', { minHeight:'100px', fontSize:'11px' });
-  const src27Ed = richTextEditor(qByNum[27] ? (qByNum[27].question_text || '') : '', { minHeight:'100px', fontSize:'11px' });
+  /* Исходные тексты — onChange синхронит body источников */
+  const src13Obj = srcByKind['text_1_3'];
+  const src22Obj = srcByKind['text_22_26'];
+  const q27 = qByNum[27];
+  const src13Ed = richTextEditor(src13Obj.body || '', { minHeight:'100px', fontSize:'11px',
+    onChange: (html) => { src13Obj.body = html; }});
+  const src22Ed = richTextEditor(src22Obj.body || '', { minHeight:'100px', fontSize:'11px',
+    onChange: (html) => { src22Obj.body = html; }});
+  const src27Ed = richTextEditor(q27.question_text || '', { minHeight:'100px', fontSize:'11px',
+    onChange: (html) => { q27.question_text = html; }});
 
   body.append(
     el('div', { style:{ marginTop:'14px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }}, '📖 Исходный текст для заданий 1-3'),
@@ -13396,51 +13441,52 @@ function modalEditVariant(){
     el('div', { style:{ marginTop:'10px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }}, '✍️ Текст для сочинения (№27)'),
     src27Ed);
 
-  /* Сохранить и закрыть */
+  /* Сохранить и закрыть.
+     Берём значения из STATE.editVariantData (а не из DOM-ссылок), потому что
+     все onChange-хендлеры уже синхронизировали изменения туда. Это переживает
+     любой render() — даже если модалка была пересоздана. */
   const saveBtn = el('button', { class:'btn btn-teal',
     style:{ marginTop:'18px', width:'100%' },
     onclick: async (ev) => {
       ev.target.disabled = true;
       ev.target.textContent = '⏳ Сохраняю…';
       try {
+        const d = STATE.editVariantData;
+        const v = d.variant;
         /* 1. Title */
-        if(titleInput.value.trim() !== variant.title){
-          await restRequest('PATCH', '/test_variants?id=eq.' + variant.id,
-            { title: titleInput.value.trim() }, { prefer: 'return=minimal' });
-        }
-        /* 2. Вопросы 1-26 — upsert через POST с merge-duplicates по (variant_id, num) */
+        await restRequest('PATCH', '/test_variants?id=eq.' + v.id,
+          { title: (v.title || '').trim() || 'Без названия' }, { prefer: 'return=minimal' });
+
+        /* 2. Все вопросы 1-26 + 27 — собираем из STATE */
         const qBatch = [];
-        for(let n = 1; n <= 26; n++){
-          const newTxt = taskInputs[n].getHtml().trim();
-          const newAns = ansInputs[n].value.trim();
-          if(!newTxt && !newAns) continue;
+        d.questions.forEach(q => {
+          if(q.num < 1 || q.num > 27) return;
+          const txt = (q.question_text || '').trim();
+          const ans = q.num === 27 ? null : ((q.correct_answer || '').trim() || null);
+          if(!txt && !ans) return;
           qBatch.push({
-            variant_id: variant.id,
-            num: n,
-            question_text: newTxt,
-            correct_answer: newAns || null,
-            max_points: (qByNum[n] && qByNum[n].max_points) || 1,
-            source_kind: (n >= 1 && n <= 3) ? 'shared_1_3' : (n >= 22 && n <= 26) ? 'shared_22_26' : 'standalone'
+            variant_id: v.id,
+            num: q.num,
+            question_text: txt,
+            correct_answer: ans,
+            max_points: q.max_points || (q.num === 27 ? 22 : 1),
+            source_kind: (q.num >= 1 && q.num <= 3) ? 'shared_1_3'
+                       : (q.num >= 22 && q.num <= 26) ? 'shared_22_26'
+                       : 'standalone'
           });
-        }
+        });
         if(qBatch.length){
           await restRequest('POST', '/test_variant_questions?on_conflict=variant_id,num', qBatch,
             { prefer: 'resolution=merge-duplicates,return=minimal' });
         }
-        /* №27 */
-        if(src27Ed.getHtml().trim()){
-          await restRequest('POST', '/test_variant_questions?on_conflict=variant_id,num', [{
-            variant_id: variant.id, num: 27,
-            question_text: src27Ed.getHtml().trim(),
-            correct_answer: null,
-            max_points: 22,
-            source_kind: 'standalone'
-          }], { prefer: 'resolution=merge-duplicates,return=minimal' });
-        }
+
         /* 3. Исходные тексты */
         const sBatch = [];
-        if(src13Ed.getHtml().trim()) sBatch.push({ variant_id: variant.id, kind: 'text_1_3', body: src13Ed.getHtml().trim() });
-        if(src22Ed.getHtml().trim()) sBatch.push({ variant_id: variant.id, kind: 'text_22_26', body: src22Ed.getHtml().trim() });
+        d.sourceTexts.forEach(s => {
+          const body = (s.body || '').trim();
+          if(!body) return;
+          sBatch.push({ variant_id: v.id, kind: s.kind, body });
+        });
         if(sBatch.length){
           await restRequest('POST', '/test_variant_source_texts?on_conflict=variant_id,kind', sBatch,
             { prefer: 'resolution=merge-duplicates,return=minimal' });
