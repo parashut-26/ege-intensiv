@@ -77,12 +77,19 @@ serve(async (req) => {
     }
   }
 
+  console.log('[push-send] sender=' + senderId + ' role=' + senderRole + ' → target=' + body.user_id);
+
   // Достаём все активные подписки этого юзера
-  const { data: subs } = await sbAdmin
+  const { data: subs, error: subsErr } = await sbAdmin
     .from('push_subscriptions')
     .select('id, endpoint, p256dh, auth')
     .eq('user_id', body.user_id);
 
+  if (subsErr) {
+    console.error('[push-send] subs query error:', subsErr);
+    return json({ ok: false, reason: 'subs_query_error', error: subsErr.message });
+  }
+  console.log('[push-send] подписок найдено:', subs ? subs.length : 0);
   if (!subs || !subs.length) return json({ ok: false, reason: 'no_subscriptions' });
 
   // Шлём по всем подпискам параллельно. Если 410/404 — подписка протухла, удаляем.
@@ -93,6 +100,7 @@ serve(async (req) => {
   });
 
   let sent = 0, failed = 0;
+  const errors: string[] = [];
   await Promise.all(subs.map(async (s) => {
     const subscription = {
       endpoint: s.endpoint,
@@ -100,16 +108,21 @@ serve(async (req) => {
     };
     try {
       await webpush.sendNotification(subscription, payload);
+      console.log('[push-send] ✓ доставлено для подписки id=' + s.id);
       sent++;
     } catch (err: any) {
       failed++;
-      if (err && (err.statusCode === 404 || err.statusCode === 410)) {
+      const msg = err && (err.message || err.body || String(err)) || 'unknown';
+      const code = err && err.statusCode;
+      console.error('[push-send] ✗ ошибка для подписки id=' + s.id + ' code=' + code + ' msg=' + msg);
+      errors.push('id=' + s.id + ': ' + (code ? code + ' ' : '') + msg);
+      if (code === 404 || code === 410) {
         await sbAdmin.from('push_subscriptions').delete().eq('id', s.id);
       }
     }
   }));
 
-  return json({ ok: sent > 0, sent, failed });
+  return json({ ok: sent > 0, sent, failed, errors });
 });
 
 function json(obj: unknown, status = 200) {
