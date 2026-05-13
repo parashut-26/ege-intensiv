@@ -11865,10 +11865,12 @@ async function parseVariantDocx(arrayBuffer){
   let html = result.value || '';
   /* Шаг 1: нумеруем элементы списков (<ol><li>) добавляя «N) » в начало */
   html = numberDocxLists(html);
-  /* Шаг 2: убираем inline-обёртки вокруг служебных заголовков «Вариант N.» и
-     «Задание N.» — иначе regex split не найдёт их (заголовки часто в strong). */
-  /* Заменяем целые однострочные <strong>...Вариант N. ...</strong> на голый текст */
+  /* Шаг 2: убираем inline-обёртки (strong/b/em/i) вокруг служебных заголовков:
+     «Вариант N.», «Задание N.», «Часть 1»/«Часть 2», «Прочитайте текст...». */
   html = html.replace(/<(strong|b|em|i)>([^<]*?(?:Вариант|Задание)\s*№?\s*\d+[^<]*?)<\/\1>/gi, '$2');
+  html = html.replace(/<(strong|b|em|i)>([^<]*?Прочитайте\s+текст[^<]*?)<\/\1>/gi, '$2');
+  html = html.replace(/<(strong|b|em|i)>(\s*Часть\s*\d+\s*)<\/\1>/gi, '$2');
+  html = html.replace(/<(strong|b|em|i)>([^<]*?Ответ:\s*_+\s*)<\/\1>/gi, '$2');
   /* Шаг 3: все block-level теги → переносы строк \n. Включая table-related. */
   let s = html
     .replace(/<\/(p|div|li|h[1-6]|td|tr|tbody|thead|table|ol|ul)\s*>/gi, '\n')
