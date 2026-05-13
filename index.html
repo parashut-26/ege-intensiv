@@ -13474,6 +13474,10 @@ function viewSolverVariant(){
   };
   drawRight();
 
+  /* Задание 27 — сочинение, необязательное. Добавим карточку в конце левой колонки.
+     Используем существующую инфраструктуру modalEssayDraft. */
+  const task27 = data.questions.find(q => q.num === 27);
+
   /* Задания слева */
   questions.forEach(q => {
     const card = el('div', { class:'card', style:{ marginBottom:'12px' }});
@@ -13507,6 +13511,36 @@ function viewSolverVariant(){
     }
     left.append(card);
   });
+
+  /* Карточка задания 27 — сочинение, необязательное к выполнению в решалке.
+     Если у варианта есть текст для №27 — показываем большую жёлтую плашку:
+     - Текст для сочинения
+     - Кнопка «Открыть редактор сочинения» (modalEssayDraft) */
+  if(task27 && (task27.question_text || '').trim() && !filterNums){
+    const ecard = el('div', { class:'card',
+      style:{ marginBottom:'12px', background:'#FFFDF7', borderColor:'#FACC15' }});
+    ecard.append(
+      el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px', flexWrap:'wrap', gap:'8px' }},
+        el('div', null,
+          el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+            '✍️ Задание №27 · сочинение'),
+          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'4px' }},
+            'Необязательно — можно сдать позже. Откроется редактор сочинения.')),
+        el('button', { class:'btn btn-y btn-sm',
+          onclick: () => {
+            STATE.essayDraftOpen = true;
+            STATE.essayDraftText = '';
+            STATE.essayDraftPhotos = [];
+            STATE.essayDraftMode = 'typed';
+            render();
+          }
+        }, '✍️ Открыть редактор сочинения')));
+    /* Сам текст для сочинения (HTML) */
+    const essayText = el('div', { style:{ fontSize:'13px', lineHeight:'1.55', whiteSpace:'pre-wrap', padding:'10px 12px', background:'#fff', borderRadius:'8px' }});
+    essayText.innerHTML = sanitizeQuestionHtml(task27.question_text);
+    ecard.append(essayText);
+    left.append(ecard);
+  }
 
   grid.append(left, right);
   wrap.append(grid);
@@ -13573,6 +13607,26 @@ function viewSolverResult(){
         el('div', { style:{ fontSize:'13px', color:'var(--green)' }},
           'Правильный: ', el('b', null, r.correct))));
     });
+  }
+
+  /* Напоминание про сочинение №27 — если у варианта есть текст */
+  const task27 = (data.questions || []).find(q => q.num === 27);
+  if(task27 && (task27.question_text || '').trim()){
+    wrap.append(el('div', { class:'card', style:{ background:'#FFFDF7', borderColor:'#FACC15', marginTop:'18px' }},
+      el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
+        el('div', null,
+          el('h3', null, '✍️ Задание №27 — сочинение'),
+          el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginTop:'4px' }},
+            'Если ещё не написала сочинение по этому варианту — открой редактор и сдай отдельно. Учитель проверит вручную.')),
+        el('button', { class:'btn btn-y',
+          onclick: () => {
+            STATE.essayDraftOpen = true;
+            STATE.essayDraftText = '';
+            STATE.essayDraftPhotos = [];
+            STATE.essayDraftMode = 'typed';
+            render();
+          }
+        }, '✍️ Сдать сочинение'))));
   }
 
   /* Кнопки */
@@ -14207,6 +14261,18 @@ async function recalculateVariantScores(variantId){
   const qs = await restRequest('GET', '/test_variant_questions?variant_id=eq.' + variantId);
   const qByNum = {};
   (qs || []).forEach(q => { qByNum[q.num] = q; });
+  /* 1.5. Авто-починка max_points: №8 и №22 должны быть 2 балла, №27 — 22 балла.
+     Старые варианты (загружённые до правки) могут иметь max_points=1 — лечим. */
+  for(const q of (qs || [])){
+    const expected = (q.num === 8 || q.num === 22) ? 2 : (q.num === 27 ? 22 : 1);
+    if(Number(q.max_points || 0) !== expected){
+      try {
+        await restRequest('PATCH', '/test_variant_questions?id=eq.' + q.id,
+          { max_points: expected }, { prefer: 'return=minimal' });
+        q.max_points = expected;
+      } catch(e){ console.warn('max_points patch fail', e.message); }
+    }
+  }
   /* 2. Попытки */
   const attempts = await restRequest('GET', '/test_variant_attempts?variant_id=eq.' + variantId + '&select=id');
   const attIds = (attempts || []).map(a => a.id);
