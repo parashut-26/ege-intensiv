@@ -12865,7 +12865,7 @@ function viewVariantSummary(){
       el('td', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, otpFormatTime(a.time_spent_seconds)));
     for(let q = 1; q <= qCount; q++){
       const ans = byAttempt[a.id] && byAttempt[a.id][q];
-      tr.append(variantCell(ans));
+      tr.append(variantCell(ans, { variantId: v.id, num: q }));
     }
     /* К1..К10 ячейки — клик по любой открывает выбор сочинения */
     const review = row.essay && row.essay.review;
@@ -12966,7 +12966,8 @@ function exportVariantToExcel(variant, attempts, byAttempt, qCount){
   showToast('📥 Файл скачан');
 }
 
-function variantCell(ans){
+function variantCell(ans, opts){
+  opts = opts || {};
   if(!ans) return el('td', { class:'vc-empty' }, '—');
   const points = Number(ans.points || 0);
   const max = Number(ans.max_points || 0);
@@ -12976,8 +12977,21 @@ function variantCell(ans){
   else if(points <= 0){ bg = '#FEE2E2'; color = '#991B1B'; label = '0'; }
   else { bg = '#FEF3C7'; color = '#92400E'; label = points; }  /* частично */
   const title = 'Ответ ученика: ' + (ans.user_answer == null ? '(пусто)' : ans.user_answer) +
-                '\nБалл: ' + points + ' из ' + max;
-  return el('td', { class:'vc', style:{ background:bg, color, textAlign:'center', fontWeight:'700', fontSize:'12px' }, title }, String(label));
+                '\nБалл: ' + points + ' из ' + max +
+                (opts.variantId ? '\nКлик — открыть текст задания' : '');
+  const td = el('td', { class:'vc', style:{ background:bg, color, textAlign:'center', fontWeight:'700', fontSize:'12px',
+    cursor: opts.variantId ? 'pointer' : 'default' }, title }, String(label));
+  if(opts.variantId && opts.num){
+    td.onclick = (ev) => {
+      ev.stopPropagation();
+      STATE.examineQuestion = {
+        variantId: opts.variantId, num: opts.num,
+        userAnswer: ans.user_answer, points, max
+      };
+      render();
+    };
+  }
+  return td;
 }
 
 /* Модалка привязки сочинения к попытке варианта.
@@ -14260,7 +14274,7 @@ function viewVariantsByStudent(){
       el('td', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, otpFormatTime(a.time_spent_seconds)));
     for(let q = 1; q <= maxQ; q++){
       const ans = ansForAttempt[q];
-      tr.append(variantCell(ans));
+      tr.append(variantCell(ans, { variantId: v.id, num: q }));
     }
     const review = row.essay && row.essay.review;
     Object.keys(K_LIMITS).forEach(k => {
