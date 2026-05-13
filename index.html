@@ -11865,12 +11865,16 @@ async function parseVariantDocx(arrayBuffer){
   let html = result.value || '';
   /* Шаг 1: нумеруем элементы списков (<ol><li>) добавляя «N) » в начало */
   html = numberDocxLists(html);
-  /* Шаг 2: убираем inline-обёртки (strong/b/em/i) вокруг служебных заголовков:
-     «Вариант N.», «Задание N.», «Часть 1»/«Часть 2», «Прочитайте текст...». */
-  html = html.replace(/<(strong|b|em|i)>([^<]*?(?:Вариант|Задание)\s*№?\s*\d+[^<]*?)<\/\1>/gi, '$2');
-  html = html.replace(/<(strong|b|em|i)>([^<]*?Прочитайте\s+текст[^<]*?)<\/\1>/gi, '$2');
-  html = html.replace(/<(strong|b|em|i)>(\s*Часть\s*\d+\s*)<\/\1>/gi, '$2');
-  html = html.replace(/<(strong|b|em|i)>([^<]*?Ответ:\s*_+\s*)<\/\1>/gi, '$2');
+  /* Шаг 2: убираем inline-обёртки (strong/b/em/i) вокруг служебных заголовков.
+     Обёртки могут быть ВЛОЖЕННЫЕ (<strong><em>...</em></strong>) — поэтому
+     применяем replace в цикле пока что-то меняется. Внутренние снимутся первыми. */
+  const wrapperRe = /<(strong|b|em|i)>([^<]*?(?:Прочитайте\s+текст|Вариант\s*№?\s*\d|Задание\s*№?\s*\d|Часть\s*\d|Ответ:\s*_)[^<]*?)<\/\1>/gi;
+  let prevHtml = '';
+  let safety = 5;
+  while(prevHtml !== html && safety-- > 0){
+    prevHtml = html;
+    html = html.replace(wrapperRe, '$2');
+  }
   /* Шаг 3: все block-level теги → переносы строк \n. Включая table-related. */
   let s = html
     .replace(/<\/(p|div|li|h[1-6]|td|tr|tbody|thead|table|ol|ul)\s*>/gi, '\n')
