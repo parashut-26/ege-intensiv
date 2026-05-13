@@ -8681,6 +8681,29 @@ function studentRow(s){
                 openDmWith(s.id, { name: s.name, role: 'student' });
               }
             }, '💬'),
+            el('button', { class:'btn-icon', title:'Изменить имя ученика',
+              onclick: async () => {
+                const newName = prompt('Имя ученика (как в БД, для матчинга OTP):', s.name || '');
+                if(newName === null) return;
+                const trimmed = newName.trim();
+                if(!trimmed){ showToast('Имя не может быть пустым'); return; }
+                if(trimmed === s.name) return;
+                if(!/^[0-9a-f-]{36}$/i.test(s.id)){
+                  /* Локальный мок — не сохраняется в БД */
+                  s.name = trimmed;
+                  showToast('Имя обновлено (только локально)');
+                  render();
+                  return;
+                }
+                try {
+                  await restRequest('PATCH', '/profiles?id=eq.' + s.id,
+                    { full_name: trimmed }, { prefer: 'return=minimal' });
+                  s.name = trimmed;
+                  showToast('✓ Имя обновлено в БД');
+                  render();
+                } catch(e){ showToast('⚠ ' + e.message); }
+              }
+            }, '✏️'),
             el('button', { class:'btn-icon', title:'Сделать куратором',
               style:{ background:'var(--teal-soft)', color:'var(--teal)' },
               onclick: async () => {
@@ -12855,9 +12878,13 @@ function viewVariantSummary(){
             STATE.linkAttempt = { attemptId: a.id, currentName: profileName, profileId: a.profile_id || null, otpName: otpRaw };
             render();
           }},
-        el('div', { style:{ display:'flex', alignItems:'center', gap:'6px' }},
+        el('div', { style:{ display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' }},
           el('span', null, profileName),
-          el('span', { style:{ fontSize:'11px', color:'var(--p)', opacity:.7 }}, '🔗')),
+          el('span', { style:{ fontSize:'11px', color:'var(--p)', opacity:.7 }}, '🔗'),
+          a.parent_attempt_id ? el('span', {
+            style:{ fontSize:'9px', padding:'1px 5px', borderRadius:'999px',
+                    background:'#FEF3C7', color:'#92400E', fontWeight:'700' }
+          }, '🔁 РНО') : null),
         el('div', { style:{ fontSize:'10px', color: isLinked ? 'var(--green)' : 'var(--orange)' }},
           isLinked
             ? '✓ привязан · OTP: ' + otpRaw
@@ -14269,7 +14296,11 @@ function viewVariantsByStudent(){
             if(v.id) loadVariantFull(v.id).then(() => render()).catch(e => showToast('⚠ ' + e.message));
           },
           title: 'Открыть полную сводную по варианту'
-        }, v.title || '—'),
+        }, v.title || '—',
+        a.parent_attempt_id ? el('span', {
+          style:{ marginLeft:'6px', fontSize:'9px', padding:'1px 5px', borderRadius:'999px',
+                  background:'#FEF3C7', color:'#92400E', fontWeight:'700' }
+        }, '🔁 РНО') : null),
       el('td', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, dateStr),
       el('td', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, otpFormatTime(a.time_spent_seconds)));
     for(let q = 1; q <= maxQ; q++){
