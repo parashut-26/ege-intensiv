@@ -1559,12 +1559,10 @@ const EGE_TASKS = [
   { n:26,  topic: 'Логико-смысловые отношения (повтор)', day: 3 },
 ];
 
-/* Освоенность по заданиям для текущего ученика */
-const MY_SKILL = {
-  4: 'weak', 5: 'weak', 6: 'mid',
-  9: 'ok', 10: 'mid', 11: 'mid', 12: 'mid', 13: 'mid', 14: 'mid', 15: 'mid',
-  // остальные — null (не приступал)
-};
+/* Освоенность по заданиям для текущего ученика.
+   Реальная статистика рассчитывается на лету из attempts ученика (MY_STATS),
+   а это объект-заглушка. Пустой по умолчанию — у нового ученика ничего не горит. */
+const MY_SKILL = {};
 
 const DAYS = [
   { id: 1, kind: 'work', ord: '01', date: '29 мая', weekday: 'пятница', title: 'Орфография + задания 4–6 + сочинение',
@@ -3043,7 +3041,7 @@ async function loadStudentsFromDb(){
      В демо-режиме (без sb) сюда не заходим — моки остаются. */
   STUDENTS = [];
   try {
-    const arr = await restRequest('GET', '/profiles?role=eq.student&select=id,full_name,email,s_type,s_status,bee,avatar_color,avatar_url&order=full_name.asc');
+    const arr = await restRequest('GET', '/profiles?role=eq.student&select=id,full_name,email,s_type,s_status,bee,avatar_color,avatar_url,teacher_comment&order=full_name.asc');
     if(!Array.isArray(arr)){ console.warn('students load: не массив'); return; }
     STUDENTS = arr.map((p, i) => ({
       id: p.id,
@@ -3057,7 +3055,8 @@ async function loadStudentsFromDb(){
       color: p.avatar_color || _AVATAR_COLORS[i % _AVATAR_COLORS.length],
       avatarUrl: p.avatar_url || null,
       paid: false,      // отдельная таблица payments — подтянем позже
-      paidAmount: 0
+      paidAmount: 0,
+      teacher_comment: p.teacher_comment || ''
     }));
     STUDENTS_LOADED = true;
     console.log('✓ Учеников загружено: ' + STUDENTS.length);
@@ -8918,6 +8917,27 @@ function studentRow(s){
                 } catch(e){ showToast('⚠ ' + e.message); }
               }
             }, '✏️'),
+            el('button', { class:'btn-icon', title:'Удалить ученика',
+              style:{ background:'#FEE2E2', color:'#991B1B' },
+              onclick: async () => {
+                if(!confirm('Удалить ученика «' + s.name + '»? Это действие нельзя отменить.\n\nВсе его попытки, сочинения, чаты и достижения тоже удалятся (CASCADE).')) return;
+                if(!/^[0-9a-f-]{36}$/i.test(s.id)){
+                  /* Локальный мок — просто убираем из массива */
+                  const i = STUDENTS.indexOf(s);
+                  if(i >= 0) STUDENTS.splice(i, 1);
+                  showToast('🗑 Удалён локально');
+                  render();
+                  return;
+                }
+                try {
+                  await restRequest('DELETE', '/profiles?id=eq.' + s.id, null, { prefer: 'return=minimal' });
+                  const i = STUDENTS.indexOf(s);
+                  if(i >= 0) STUDENTS.splice(i, 1);
+                  showToast('🗑 Ученик удалён');
+                  render();
+                } catch(e){ showToast('⚠ ' + e.message); }
+              }
+            }, '🗑'),
             el('button', { class:'btn-icon', title:'Получить одноразовую ссылку-вход для ученика',
               style:{ background:'#FEF3C7', color:'#92400E' },
               onclick: async () => {
@@ -9046,6 +9066,90 @@ function modalStudentDetail(){
     kpiCard('Заданий охвачено', Object.keys(byTask).length || '—', 'из 26', '📚', 'var(--green-soft)'),
     kpiCard('Слабые темы', weakTopics.length, weakTopics.length ? '< 70% точности' : 'все ровно', '⚠', '#FEF3C7')));
 
+  /* Комментарий учителя — приватные заметки, видны только учителю/куратору */
+  const commentInitial = s.teacher_comment || '';
+  const commentTa = el('textarea', { rows:3,
+    placeholder: 'Заметка учителя (видна только тебе и кураторам): прогресс, особенности, что обсудить с родителями…',
+    style:{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'13px', resize:'vertical', fontFamily:'inherit', boxSizing:'border-box' }
+  });
+  commentTa.value = commentInitial;
+  const commentBtn = el('button', { class:'btn btn-y btn-sm',
+    onclick: async () => {
+      const txt = commentTa.value.trim();
+      if(!/^[0-9a-f-]{36}$/i.test(s.id)){
+        s.teacher_comment = txt;
+        showToast('Сохранено локально');
+        return;
+      }
+      commentBtn.disabled = true;
+      try {
+        await restRequest('PATCH', '/profiles?id=eq.' + s.id,
+          { teacher_comment: txt || null }, { prefer: 'return=minimal' });
+        s.teacher_comment = txt;
+        showToast('💬 Заметка сохранена');
+      } catch(e){ showToast('⚠ ' + e.message); }
+      commentBtn.disabled = false;
+    }
+  }, '💾 Сохранить заметку');
+  const commentCard = el('div', { class:'card', style:{ marginBottom:'14px' }},
+    el('h4', { style:{ marginBottom:'8px' }}, '📝 Заметка учителя'),
+    el('p', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'6px' }},
+      'Приватная — ученик и родители её не видят. Удобно использовать как черновик для отчётов.'),
+    commentTa,
+    el('div', { style:{ marginTop:'8px' }}, commentBtn));
+  body.append(commentCard);
+
+  /* Результаты вариантов-пробников — все попытки этого ученика */
+  if(/^[0-9a-f-]{36}$/i.test(sid)){
+    const variantsCard = el('div', { class:'card', style:{ marginBottom:'14px' }});
+    variantsCard.append(el('h4', { style:{ marginBottom:'8px' }}, '📋 Пробники-варианты'));
+    /* Ленивая загрузка */
+    const vCache = STATE.studentVariantsAttempts || (STATE.studentVariantsAttempts = {});
+    let vList = vCache[sid];
+    if(vList === undefined){
+      vCache[sid] = null;
+      variantsCard.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'8px' }}, '⏳ Загружаю…'));
+      (async () => {
+        try {
+          const atts = await restRequest('GET',
+            '/test_variant_attempts?profile_id=eq.' + sid +
+            '&select=id,total_score,percent_correct,time_spent_seconds,finished_at,parent_attempt_id,variant:test_variants(id,title,questions_count)' +
+            '&order=finished_at.desc.nullslast');
+          vCache[sid] = Array.isArray(atts) ? atts : [];
+          render();
+        } catch(_){ vCache[sid] = []; render(); }
+      })();
+    } else if(!vList || !vList.length){
+      variantsCard.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'8px' }},
+        'Ученик ещё не решал ни одного варианта.'));
+    } else {
+      const tbl = el('table', { class:'table', style:{ fontSize:'12px', width:'100%' }});
+      tbl.append(el('thead', null, el('tr', null,
+        el('th', null, 'Вариант'),
+        el('th', { style:{ textAlign:'center' }}, 'Дата'),
+        el('th', { style:{ textAlign:'center' }}, '%'),
+        el('th', { style:{ textAlign:'center' }}, 'Балл'),
+        el('th', { style:{ textAlign:'center' }}, 'Время'))));
+      const tbody = el('tbody', null);
+      vList.forEach(a => {
+        const v = a.variant || {};
+        const date = a.finished_at ? new Date(a.finished_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) : '—';
+        const pct = a.percent_correct != null ? Math.round(a.percent_correct) + '%' : '—';
+        const pctColor = a.percent_correct == null ? 'var(--ink-3)' : a.percent_correct >= 70 ? 'var(--green)' : a.percent_correct >= 50 ? 'var(--warn)' : 'var(--red)';
+        tbody.append(el('tr', null,
+          el('td', null, v.title || '—',
+            a.parent_attempt_id ? el('span', { style:{ marginLeft:'6px', fontSize:'9px', padding:'1px 5px', borderRadius:'999px', background:'#FEF3C7', color:'#92400E', fontWeight:'700' }}, '🔁 РНО') : null),
+          el('td', { style:{ textAlign:'center', color:'var(--ink-3)' }}, date),
+          el('td', { style:{ textAlign:'center', color:pctColor, fontWeight:'700' }}, pct),
+          el('td', { style:{ textAlign:'center', fontWeight:'700' }}, a.total_score != null ? String(a.total_score) : '—'),
+          el('td', { style:{ textAlign:'center', color:'var(--ink-3)' }}, otpFormatTime(a.time_spent_seconds))));
+      });
+      tbl.append(tbody);
+      variantsCard.append(tbl);
+    }
+    body.append(variantsCard);
+  }
+
   /* Слабые темы */
   if(weakTopics.length){
     const weak = el('div', { class:'card', style:{ marginBottom:'14px', background:'#FFFBEB', border:'1px solid #FDE68A' }});
@@ -9091,7 +9195,8 @@ function modalStudentDetail(){
         '…и ещё ' + (activity.length - 12)));
     }
   }
-  body.append(actCard);
+  /* Порядок: сначала «История по заданиям» (полезнее для учителя), потом «Активность».
+     actCard append'ится после histCard в самом низу. */
 
   /* История попыток по заданиям */
   if(list === null){
@@ -9144,6 +9249,9 @@ function modalStudentDetail(){
     });
     body.append(histCard);
   }
+
+  /* Активность — последним блоком */
+  body.append(actCard);
 
   const foot = el('div', { class:'modal-foot' },
     el('span', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
@@ -9497,15 +9605,23 @@ function modalNewStudent(){
   const close = () => { STATE.newStudentForm = false; render(); };
   const inName = el('input', { placeholder:'Имя и фамилия',
     style:{ padding:'12px 14px', borderRadius:'12px', border:'1px solid var(--border-2)' }});
-  const inEmail = el('input', { type:'email', placeholder:'e-mail',
+  const inEmail = el('input', { type:'email', placeholder:'e-mail (необязательно)',
     style:{ padding:'12px 14px', borderRadius:'12px', border:'1px solid var(--border-2)' }});
   const status = el('div', { style:{ fontSize:'12px', minHeight:'16px' }}, '');
   const saveBtn = el('button', { class:'btn btn-y',
     onclick: async () => {
       const fullName = inName.value.trim();
-      const email = inEmail.value.trim().toLowerCase();
+      let email = inEmail.value.trim().toLowerCase();
       if(!fullName){ status.style.color = 'var(--red)'; status.textContent = 'Нужно имя'; return; }
-      if(!email.includes('@')){ status.style.color = 'var(--red)'; status.textContent = 'Нужен корректный e-mail'; return; }
+      /* Если email пуст — генерируем fake (как при регистрации по коду), чтоб
+         работала уникальность auth.users. Ученик зайдёт через ссылку-вход. */
+      const isFakeEmail = !email;
+      if(isFakeEmail){
+        const uid = crypto.randomUUID();
+        email = 'local-' + uid + '@invite.zebrus.online';
+      } else if(!email.includes('@')){
+        status.style.color = 'var(--red)'; status.textContent = 'Если вводишь — нужен корректный e-mail (с @)'; return;
+      }
       saveBtn.disabled = true;
       status.style.color = 'var(--ink-3)'; status.textContent = '⏳ Создаём профиль…';
       try {
@@ -9514,7 +9630,11 @@ function modalNewStudent(){
         if(r.status === 'error') throw new Error(r.message || 'Не удалось создать');
         await loadStudentsFromDb();
         STATE.newStudentForm = false;
-        showToast('✓ ' + fullName + ' добавлен' + (r.status === 'updated' ? ' (обновлён)' : ''));
+        if(isFakeEmail){
+          showToast('✓ ' + fullName + ' добавлен без e-mail. Дай ему ссылку-вход через 🔗 в строке.');
+        } else {
+          showToast('✓ ' + fullName + ' добавлен' + (r.status === 'updated' ? ' (обновлён)' : ''));
+        }
         render();
       } catch(e){
         status.style.color = 'var(--red)'; status.textContent = '⚠ ' + e.message;
@@ -9532,7 +9652,7 @@ function modalNewStudent(){
         el('button', { class:'x', onclick: close }, '×')),
       el('div', { class:'modal-body' },
         el('p', { style:{ color:'var(--ink-2)', marginBottom:'12px', fontSize:'13px' }},
-          'Введите имя и e-mail. После сохранения ученик сможет зайти на платформу через «Имя + e-mail».'),
+          'Введи имя ученика. E-mail можно оставить пустым — тогда ученик зайдёт через одноразовую ссылку (кнопка 🔗 в строке).'),
         el('div', { style:{ display:'flex', flexDirection:'column', gap:'12px' }},
           inName, inEmail, status)),
       el('div', { class:'modal-foot' },
