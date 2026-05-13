@@ -12683,16 +12683,21 @@ function viewVariantSummary(){
         el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }},
           attempts.length + ' учеников · ' + qCount + ' заданий (1-26) + сочинение К1-К10' +
           (v.source === 'pdf_import' ? ' · 🎯 решаемый' : ''))),
-      /* Кнопка редактирования — только для pdf_import вариантов */
-      v.source === 'pdf_import' ? el('button', { class:'btn btn-secondary',
-        onclick: async () => {
-          STATE.editVariantId = v.id;
-          STATE.editVariantData = null;
-          render();
-          try { await loadVariantForEdit(v.id); } catch(e){ showToast('⚠ ' + e.message); }
-          render();
-        }
-      }, '✏️ Редактировать вопросы') : null));
+      /* Кнопки управления — только для pdf_import вариантов */
+      v.source === 'pdf_import' ? el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }},
+        el('button', { class:'btn btn-secondary btn-sm',
+          onclick: async () => {
+            STATE.editVariantId = v.id;
+            STATE.editVariantData = null;
+            render();
+            try { await loadVariantForEdit(v.id); } catch(e){ showToast('⚠ ' + e.message); }
+            render();
+          }
+        }, '✏️ Редактировать'),
+        el('button', { class:'btn btn-teal btn-sm',
+          title:'Пересчитать баллы всех учеников по текущим правильным ответам',
+          onclick: () => recalculateVariantScores(v.id)
+        }, '🔄 Пересчитать баллы')) : null));
 
   if(!attempts.length){
     wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)' }},
@@ -13108,10 +13113,9 @@ async function savePdfVariantToDb(data){
     const txt = (data.tasks[n] || '').trim();
     const ans = (data.answers[n] || '').trim();
     if(!txt && !ans) continue;
-    /* Максимум баллов: задания 7 и 22 — 2 балла, остальные — 1; 8 — 2; некоторые могут быть 3.
-       На уровне ФИПИ-2026 точная таблица меняется, поэтому ставим 1 по умолчанию.
-       Учитель может потом скорректировать. */
-    let maxPts = 1;
+    /* Максимум баллов по ФИПИ-2026: задания 8 и 22 — 2 балла (за 5 позиций соответствия),
+       остальные 1-26 — 1 балл, №27 — 22 балла за сочинение. */
+    const maxPts = (n === 8 || n === 22) ? 2 : 1;
     questionsBatch.push({
       variant_id: variantId,
       num: n,
@@ -13171,6 +13175,44 @@ function checkUserAnswer(userInput, correctAnswer){
   if(!norm) return false;
   const alts = String(correctAnswer || '').split('/').map(normalizeAnswer).filter(Boolean);
   return alts.length > 0 && alts.includes(norm);
+}
+
+/* Расчёт баллов за один вопрос с учётом max_points и партиальной логики
+   для заданий 8 и 22 (5 цифр-позиций соответствия, max_points=2).
+
+   Логика для 8 и 22:
+   - 5 цифр на своих местах → max_points (2 балла)
+   - 3-4 правильных позиции → 1 балл
+   - 0-2 правильных позиции → 0 баллов
+   Сравниваем с КАЖДЫМ вариантом из веера через /, берём лучший результат.
+
+   Для остальных заданий: full → max_points, иначе 0. */
+function calcQuestionPoints(userInput, correctAnswer, maxPoints, questionNum){
+  const norm = normalizeAnswer(userInput);
+  if(!norm) return 0;
+  const alts = String(correctAnswer || '').split('/').map(normalizeAnswer).filter(Boolean);
+  if(!alts.length) return 0;
+  const isPartialTask = (questionNum === 8 || questionNum === 22) && Number(maxPoints) >= 2;
+  if(isPartialTask){
+    /* Считаем по каждому альтернативу — сколько совпавших позиций;
+       берём максимум. */
+    let bestMatch = 0;
+    for(const a of alts){
+      if(!a) continue;
+      const len = Math.max(a.length, norm.length);
+      let cnt = 0;
+      for(let i = 0; i < Math.min(a.length, norm.length); i++){
+        if(norm[i] === a[i]) cnt++;
+      }
+      /* Если ученик ввёл лишние цифры, штрафуем — но всё же считаем */
+      if(cnt > bestMatch) bestMatch = cnt;
+    }
+    if(bestMatch === 5) return Number(maxPoints);  /* обычно 2 */
+    if(bestMatch >= 3) return 1;
+    return 0;
+  }
+  /* Полная проверка через checkUserAnswer */
+  return alts.includes(norm) ? Number(maxPoints || 1) : 0;
 }
 
 /* Загрузка варианта для решения */
@@ -13253,12 +13295,13 @@ async function finishSolvingAndSave(){
     if(q.num >= 27) return;        // сочинение отдельно
     if(filterNums && !filterNums.includes(q.num)) return;
     const user = STATE.solverAnswers[q.num] || '';
-    const isCorrect = checkUserAnswer(user, q.correct_answer || '');
-    const points = isCorrect ? Number(q.max_points || 1) : 0;
+    const maxP = Number(q.max_points || 1);
+    const points = calcQuestionPoints(user, q.correct_answer || '', maxP, q.num);
+    const isCorrect = points >= maxP && maxP > 0;
     total += points;
-    max += Number(q.max_points || 1);
+    max += maxP;
     if(isCorrect) correctCount++;
-    result.push({ num: q.num, user, isCorrect, points, max: Number(q.max_points || 1),
+    result.push({ num: q.num, user, isCorrect, points, max: maxP,
       correct: q.correct_answer || '' });
   });
 
@@ -13708,12 +13751,14 @@ function modalEditVariant(){
           const txt = (q.question_text || '').trim();
           const ans = q.num === 27 ? null : ((q.correct_answer || '').trim() || null);
           if(!txt && !ans) return;
+          /* Дефолты max_points по ФИПИ-2026: 8 и 22 — 2 балла, 27 — 22 балла, остальные — 1 */
+          const defaultMax = (q.num === 8 || q.num === 22) ? 2 : (q.num === 27 ? 22 : 1);
           qBatch.push({
             variant_id: v.id,
             num: q.num,
             question_text: txt,
             correct_answer: ans,
-            max_points: q.max_points || (q.num === 27 ? 22 : 1),
+            max_points: q.max_points || defaultMax,
             source_kind: (q.num >= 1 && q.num <= 3) ? 'shared_1_3'
                        : (q.num >= 22 && q.num <= 26) ? 'shared_22_26'
                        : 'standalone'
@@ -14150,6 +14195,68 @@ function findEssayForAttempt(attempt){
     const db = Math.abs(new Date(b.submittedAt || 0) - t);
     return da - db;
   })[0];
+}
+
+/* Пересчёт баллов всех попыток по варианту.
+   Используется когда учитель отредактировал правильный ответ задачи
+   и хочет, чтобы итог у уже сдавших учеников обновился. */
+async function recalculateVariantScores(variantId){
+  if(!confirm('Пересчитать баллы для всех учеников по этому варианту?\n\nЭто учтёт текущие правильные ответы (если ты их редактировала). Перезаписывает test_variant_answers и test_variant_attempts.')) return;
+  showToast('⏳ Пересчёт баллов…');
+  /* 1. Вопросы варианта */
+  const qs = await restRequest('GET', '/test_variant_questions?variant_id=eq.' + variantId);
+  const qByNum = {};
+  (qs || []).forEach(q => { qByNum[q.num] = q; });
+  /* 2. Попытки */
+  const attempts = await restRequest('GET', '/test_variant_attempts?variant_id=eq.' + variantId + '&select=id');
+  const attIds = (attempts || []).map(a => a.id);
+  if(!attIds.length){ showToast('Нет попыток для пересчёта'); return; }
+  /* 3. Ответы всех попыток */
+  const answers = await restRequest('GET',
+    '/test_variant_answers?attempt_id=in.(' + attIds.join(',') + ')');
+  const byAttempt = {};
+  (answers || []).forEach(a => { (byAttempt[a.attempt_id] = byAttempt[a.attempt_id] || []).push(a); });
+  /* 4. Перерасчёт по каждой попытке */
+  let touchedAnswers = 0;
+  let touchedAttempts = 0;
+  for(const att of attempts){
+    const ans = byAttempt[att.id] || [];
+    let total = 0, correct = 0, maxSum = 0;
+    for(const a of ans){
+      const q = qByNum[a.question_num];
+      if(!q || a.question_num >= 27) continue;
+      const newMax = Number(q.max_points || 1);
+      const newPts = calcQuestionPoints(a.user_answer || '', q.correct_answer || '', newMax, a.question_num);
+      total += newPts;
+      maxSum += newMax;
+      if(newPts >= newMax && newMax > 0) correct++;
+      /* Обновляем ответ только если что-то изменилось */
+      const oldPts = Number(a.points || 0);
+      const oldMax = Number(a.max_points || 0);
+      if(Math.abs(newPts - oldPts) > 0.001 || Math.abs(newMax - oldMax) > 0.001){
+        try {
+          await restRequest('PATCH', '/test_variant_answers?id=eq.' + a.id,
+            { points: newPts, max_points: newMax }, { prefer: 'return=minimal' });
+          touchedAnswers++;
+        } catch(e){ console.warn('answer patch fail', e.message); }
+      }
+    }
+    const percent = maxSum > 0 ? Math.round(total / maxSum * 1000) / 10 : 0;
+    try {
+      await restRequest('PATCH', '/test_variant_attempts?id=eq.' + att.id, {
+        total_score: Math.floor(total),
+        correct_count: correct,
+        percent_correct: percent
+      }, { prefer: 'return=minimal' });
+      touchedAttempts++;
+    } catch(e){ console.warn('attempt patch fail', e.message); }
+  }
+  showToast('✅ Пересчёт: попыток ' + touchedAttempts + ' · ответов изменено ' + touchedAnswers);
+  /* Перезагрузить сводную */
+  if(STATE.selectedVariantId === variantId){
+    try { await loadVariantFull(variantId); } catch(_){}
+  }
+  render();
 }
 
 /* Полный расчёт строки попытки: тест, сочинение, первичный, тестовый, отметка.
