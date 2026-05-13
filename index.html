@@ -563,6 +563,8 @@ const STATE = {
   myVariantAnswers: {},           // у ученика: ответы по всем своим попыткам {attemptId: {qNum: ans}}
   myVariantAttemptsLoaded: false,
   myExpandedAttemptId: null,      // какую строку «Мои пробники» раскрыл ученик
+  examineQuestion: null,           // { variantId, num, userAnswer, points, max } для модалки
+  examineQuestionData: null,       // загруженный test_variant_questions
   /* Сводная по ученику в кабинете учителя: 'by_variant' | 'by_student' */
   variantsView: 'by_variant',
   selectedStudentForVariants: null,   // профайл-id выбранного ученика
@@ -6256,6 +6258,18 @@ function dayBlock(d){
         el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }}, d.weekday)),
       el('h2', null, 'День ' + d.id + '. ' + d.title),
       el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }}, d.summary)));
+  /* Привязанный вариант-пробник (если учитель прикрепил к этому дню) */
+  const attachedVariant = (STATE.availableVariants || []).find(v => v.day_id === d.id);
+  if(attachedVariant){
+    card.append(el('div', { class:'card', style:{ background:'#F5F3FF', borderColor:'#A78BFA', marginBottom:'14px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px' }},
+      el('div', null,
+        el('div', { style:{ fontSize:'11px', color:'var(--p-deep)', textTransform:'uppercase', letterSpacing:'.06em', fontWeight:'700' }},
+          '📋 Пробник к этому дню'),
+        el('div', { style:{ fontWeight:'700', marginTop:'4px' }}, attachedVariant.title)),
+      el('button', { class:'btn btn-p btn-sm',
+        onclick: () => { startSolvingVariant(attachedVariant.id); }
+      }, '▶ Решить пробник')));
+  }
   const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'10px' }});
   d.tasks.forEach(t => list.append(taskRow(d, t, locked)));
   card.append(list);
@@ -7528,6 +7542,82 @@ function modalVariantBuilder(){
         }, 'Закрыть'))));
 }
 
+/* Модалка просмотра конкретного задания ученика (Drill-down).
+   Открывается из «Мои пробники» при клике на цветную ячейку — показывает
+   формулировку задания, твой ответ, правильный ответ, балл. */
+function modalExamineQuestion(){
+  if(!STATE.examineQuestion) return null;
+  const { variantId, num, userAnswer, points, max } = STATE.examineQuestion;
+  const close = () => { STATE.examineQuestion = null; STATE.examineQuestionData = null; render(); };
+
+  /* Загружаем вопрос если ещё не загружали */
+  if(!STATE.examineQuestionData){
+    (async () => {
+      try {
+        const arr = await restRequest('GET',
+          '/test_variant_questions?variant_id=eq.' + variantId + '&num=eq.' + num + '&limit=1');
+        if(Array.isArray(arr) && arr.length){
+          STATE.examineQuestionData = arr[0];
+        } else {
+          STATE.examineQuestionData = { question_text: '(текст задания не найден в базе)', correct_answer: null };
+        }
+        render();
+      } catch(e){
+        STATE.examineQuestionData = { question_text: '⚠ ' + e.message, correct_answer: null };
+        render();
+      }
+    })();
+  }
+
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        '🔍 Разбор задания'),
+      el('h2', { style:{ marginTop:'4px' }}, 'Задание №' + num)),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const body = el('div', { class:'modal-body' });
+
+  if(!STATE.examineQuestionData){
+    body.append(el('div', { style:{ textAlign:'center', color:'var(--ink-3)', padding:'30px' }}, '⏳ Загружаю задание…'));
+  } else {
+    const q = STATE.examineQuestionData;
+    /* Текст задания (HTML с форматированием) */
+    const textBlock = el('div', { style:{ padding:'12px 14px', background:'#F9FAFB', borderRadius:'10px', marginBottom:'14px', fontSize:'14px', lineHeight:'1.6', whiteSpace:'pre-wrap' }});
+    textBlock.innerHTML = sanitizeQuestionHtml(q.question_text || '(пусто)');
+    body.append(
+      el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }}, '📝 Формулировка'),
+      textBlock);
+
+    /* Твой ответ */
+    const isCorrect = points >= max && max > 0;
+    const isPartial = points > 0 && points < max;
+    const ansColor = isCorrect ? '#065F46' : isPartial ? '#92400E' : '#991B1B';
+    const ansBg = isCorrect ? '#D1FAE5' : isPartial ? '#FEF3C7' : '#FEE2E2';
+    body.append(
+      el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }}, '✍️ Твой ответ'),
+      el('div', { style:{ padding:'10px 14px', background:ansBg, color:ansColor, borderRadius:'10px', fontSize:'16px', fontWeight:'700', marginBottom:'14px' }},
+        userAnswer || '(пусто)',
+        el('span', { style:{ float:'right', fontSize:'12px' }}, 'Балл: ' + points + ' / ' + max)));
+
+    /* Правильный ответ */
+    if(q.correct_answer){
+      body.append(
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }}, '✅ Правильный ответ'),
+        el('div', { style:{ padding:'10px 14px', background:'#D1FAE5', color:'#065F46', borderRadius:'10px', fontSize:'16px', fontWeight:'700' }},
+          q.correct_answer,
+          q.correct_answer.includes('/')
+            ? el('div', { style:{ fontSize:'11px', fontWeight:'400', marginTop:'4px', color:'var(--ink-2)' }},
+                'Принимается любой из вариантов через /')
+            : null));
+    }
+  }
+
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+  }, el('div', { class:'modal' }, head, body));
+}
+
 /* =======================================================================
    УЧЕНИК · МОИ ПРОБНИКИ
    Полная сводная: строки = варианты, колонки = тест, соч, Прв, Тст, ★.
@@ -7570,10 +7660,11 @@ function studentVariantsCard(){
         } else {
           STATE.myVariantAnswers = {};
         }
-        /* Загружаем только опубликованные PDF-варианты — ученик видит то что учитель открыл */
+        /* Загружаем только опубликованные PDF-варианты — ученик видит то что учитель открыл.
+           Также подтягиваем day_id, чтобы показать привязку к дню интенсива. */
         try {
           const pdfVariants = await restRequest('GET',
-            '/test_variants?source=eq.pdf_import&is_published=eq.true&select=id,title,questions_count,created_at&order=created_at.desc');
+            '/test_variants?source=eq.pdf_import&is_published=eq.true&select=id,title,questions_count,created_at,day_id&order=created_at.desc');
           STATE.availableVariants = Array.isArray(pdfVariants) ? pdfVariants : [];
         } catch(_){ STATE.availableVariants = []; }
         STATE.myVariantAttemptsLoaded = true;
@@ -7647,7 +7738,11 @@ function studentVariantsCard(){
     const trMain = el('tr', { style:{ cursor:'pointer', background: isOpen ? '#F9FAFB' : 'transparent' },
       onclick: toggle },
       el('td', { style:{ padding:'8px 10px', fontWeight:'700', borderBottom:'1px solid var(--border)' }},
-        v.title || '—'),
+        v.title || '—',
+        a.parent_attempt_id ? el('span', {
+          style:{ marginLeft:'8px', fontSize:'10px', padding:'1px 6px', borderRadius:'999px',
+                  background:'#FEF3C7', color:'#92400E', fontWeight:'700' }
+        }, '🔁 РНО') : null),
       el('td', { style:{ padding:'8px 6px', textAlign:'center', color:'var(--ink-3)', fontSize:'11px', borderBottom:'1px solid var(--border)' }},
         dateStr),
       el('td', { style:{ padding:'8px 6px', textAlign:'center', background:'#EFF6FF', fontWeight:'700', borderBottom:'1px solid var(--border)' }},
@@ -7675,8 +7770,9 @@ function studentVariantsCard(){
         '⏱ Время прохождения: ' + otpFormatTime(a.time_spent_seconds) +
         (a.percent_correct != null ? ' · ' + Number(a.percent_correct).toFixed(0) + '% правильных' : '')));
 
-      /* Задания 1-26 */
-      cell.append(el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px', marginTop:'6px' }}, 'Задания 1-26'));
+      /* Задания 1-26 — каждая ячейка кликабельна, открывает модалку с текстом */
+      cell.append(el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px', marginTop:'6px' }},
+        'Задания 1-26 ', el('span', { style:{ fontSize:'10px', color:'var(--ink-3)', fontWeight:'400' }}, '(клик по номеру — детали)')));
       const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(48px, 1fr))', gap:'4px' }});
       for(let q = 1; q <= 26; q++){
         const ans = byA[a.id] && byA[a.id][q];
@@ -7687,9 +7783,19 @@ function studentVariantsCard(){
         else if(pts >= max){ bg='#D1FAE5'; color='#065F46'; }
         else if(pts <= 0){ bg='#FEE2E2'; color='#991B1B'; }
         else { bg='#FEF3C7'; color='#92400E'; }
+        const variantId = (a.variant && a.variant.id) || a.variant_id;
         grid.append(el('div', {
-          style:{ padding:'6px 4px', borderRadius:'6px', background:bg, color, textAlign:'center', fontSize:'11px', fontWeight:'700' },
-          title: ans ? ('Твой ответ: ' + (ans.user_answer == null ? '(пусто)' : ans.user_answer) + '\nБалл: ' + pts + ' / ' + max) : 'нет данных'
+          style:{ padding:'6px 4px', borderRadius:'6px', background:bg, color, textAlign:'center', fontSize:'11px', fontWeight:'700', cursor:'pointer' },
+          title: ans ? ('Клик — увидеть текст задания\nТвой ответ: ' + (ans.user_answer == null ? '(пусто)' : ans.user_answer) + '\nБалл: ' + pts + ' / ' + max) : 'нет данных',
+          onclick: (ev) => {
+            ev.stopPropagation();
+            STATE.examineQuestion = {
+              variantId, num: q,
+              userAnswer: ans ? ans.user_answer : null,
+              points: pts, max: max
+            };
+            render();
+          }
         },
           el('div', { style:{ fontSize:'10px', opacity:.7 }}, '№' + q),
           el('div', null, ans && max > 0 ? (pts + '/' + max) : '—')));
@@ -12371,7 +12477,7 @@ function matchOtpToProfile(otpName, students){
 async function loadVariantsList(){
   try {
     const list = await restRequest('GET',
-      '/test_variants?select=id,title,questions_count,total_max_score,created_at,source,is_published&order=created_at.desc');
+      '/test_variants?select=id,title,questions_count,total_max_score,created_at,source,is_published,day_id&order=created_at.desc');
     STATE.variantsList = Array.isArray(list) ? list : [];
     STATE.variantsListLoaded = true;
   } catch(e){
@@ -12683,9 +12789,13 @@ function viewVariantSummary(){
         el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }},
           attempts.length + ' учеников · ' + qCount + ' заданий (1-26) + сочинение К1-К10' +
           (v.source === 'pdf_import' ? ' · 🎯 решаемый' : ''))),
-      /* Кнопки управления — только для pdf_import вариантов */
-      v.source === 'pdf_import' ? el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }},
-        el('button', { class:'btn btn-secondary btn-sm',
+      /* Кнопки управления — экспорт всегда, редактирование и пересчёт только для pdf_import */
+      el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }},
+        el('button', { class:'btn btn-y btn-sm',
+          title:'Скачать Excel-таблицу со всеми ответами и баллами',
+          onclick: () => exportVariantToExcel(v, attempts, byAttempt, qCount)
+        }, '📥 Excel'),
+        v.source === 'pdf_import' ? el('button', { class:'btn btn-secondary btn-sm',
           onclick: async () => {
             STATE.editVariantId = v.id;
             STATE.editVariantData = null;
@@ -12693,11 +12803,11 @@ function viewVariantSummary(){
             try { await loadVariantForEdit(v.id); } catch(e){ showToast('⚠ ' + e.message); }
             render();
           }
-        }, '✏️ Редактировать'),
-        el('button', { class:'btn btn-teal btn-sm',
+        }, '✏️ Редактировать') : null,
+        v.source === 'pdf_import' ? el('button', { class:'btn btn-teal btn-sm',
           title:'Пересчитать баллы всех учеников по текущим правильным ответам',
           onclick: () => recalculateVariantScores(v.id)
-        }, '🔄 Пересчитать баллы')) : null));
+        }, '🔄 Пересчитать баллы') : null)));
 
   if(!attempts.length){
     wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)' }},
@@ -12808,6 +12918,52 @@ function viewVariantSummary(){
   wrap.append(el('div', { style:{ marginTop:'12px', color:'var(--ink-3)', fontSize:'12px', padding:'8px 12px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px' }},
     '💡 К1-К10 автоматически берутся из ближайшего по дате проверенного сочинения ученика. Если попадает не то — кликни по любой К-ячейке: откроется выбор сочинения этого ученика.'));
   return wrap;
+}
+
+/* Экспорт сводной по варианту в Excel.
+   Колонки: # | Ученик | Время | задания 1-N | К1..К10 | тест | соч | Прв | Тст | ★ */
+function exportVariantToExcel(variant, attempts, byAttempt, qCount){
+  if(typeof XLSX === 'undefined'){ showToast('⚠ XLSX не загрузился'); return; }
+  const header = ['#', 'Ученик', 'Время'];
+  for(let q = 1; q <= qCount; q++) header.push('№' + q);
+  Object.keys(K_LIMITS).forEach(k => header.push(k.toUpperCase()));
+  header.push('тест', 'соч', 'Прв', 'Тст', '★');
+  const rows = [header];
+  attempts.forEach((a, idx) => {
+    const name = (a.profile && a.profile.full_name) || a.otp_full_name || a.otp_user || '?';
+    const ansForA = byAttempt[a.id] ? Object.values(byAttempt[a.id]) : [];
+    const row = computeAttemptRow(a, ansForA);
+    const line = [idx + 1, name, otpFormatTime(a.time_spent_seconds)];
+    for(let q = 1; q <= qCount; q++){
+      const an = byAttempt[a.id] && byAttempt[a.id][q];
+      line.push(an ? Number(an.points || 0) : '');
+    }
+    const review = row.essay && row.essay.review;
+    Object.keys(K_LIMITS).forEach(k => {
+      line.push(review && review[k] != null ? Number(review[k]) : '');
+    });
+    line.push(
+      row.testSum != null ? row.testSum : '',
+      row.essaySum != null ? row.essaySum : '',
+      row.primary != null ? row.primary : '',
+      row.testScore != null ? row.testScore : '',
+      row.grade != null ? row.grade : ''
+    );
+    rows.push(line);
+  });
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  /* Ширина колонок */
+  ws['!cols'] = [
+    { wch: 4 }, { wch: 24 }, { wch: 8 },
+    ...Array(qCount).fill({ wch: 4 }),
+    ...Object.keys(K_LIMITS).map(() => ({ wch: 4 })),
+    { wch: 6 }, { wch: 6 }, { wch: 6 }, { wch: 6 }, { wch: 4 }
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Сводная');
+  const safeName = (variant.title || 'вариант').replace(/[\\\/\?\*\[\]:]/g, '_').slice(0, 50);
+  XLSX.writeFile(wb, safeName + '.xlsx');
+  showToast('📥 Файл скачан');
 }
 
 function variantCell(ans){
@@ -14464,6 +14620,9 @@ function viewTeacherDays(){
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'20px' }},
       'Управление расписанием, заданиями и материалами по дням.'));
 
+  /* Догружаем список вариантов если ещё не было — нужны для dropdown'а */
+  if(!STATE.variantsListLoaded) loadVariantsList().then(() => render());
+
   DAYS.filter(d => d.kind === 'work').forEach(d => {
     const det = el('details', { class:'card', style:{ marginBottom:'12px' }});
     det.append(
@@ -14475,6 +14634,45 @@ function viewTeacherDays(){
               d.date + ' · ' + d.weekday)),
           el('h3', null, d.title)),
         el('span', { style:{ color:'var(--ink-3)', fontSize:'13px' }}, d.tasks.length + ' заданий ▾')));
+    /* Блок выбора варианта для этого дня */
+    const pdfVariants = (STATE.variantsList || []).filter(v => v.source === 'pdf_import');
+    const attached = pdfVariants.find(v => v.day_id === d.id);
+    const variantSelect = el('select', {
+      style:{ padding:'6px 10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'13px', flex:1, minWidth:'200px' }
+    });
+    variantSelect.append(el('option', { value:'' }, '— не привязан —'));
+    pdfVariants.forEach(v => {
+      const opt = el('option', { value: String(v.id) }, v.title + (v.day_id && v.day_id !== d.id ? ' (привязан к дню ' + v.day_id + ')' : ''));
+      if(attached && attached.id === v.id) opt.selected = true;
+      variantSelect.append(opt);
+    });
+    variantSelect.onchange = async () => {
+      const newId = variantSelect.value ? parseInt(variantSelect.value, 10) : null;
+      /* Если был старый — отвязываем */
+      if(attached && attached.id !== newId){
+        try {
+          await restRequest('PATCH', '/test_variants?id=eq.' + attached.id,
+            { day_id: null }, { prefer: 'return=minimal' });
+          attached.day_id = null;
+        } catch(e){ showToast('⚠ ' + e.message); return; }
+      }
+      /* Привязываем новый (или ничего если выбран «не привязан») */
+      if(newId){
+        try {
+          await restRequest('PATCH', '/test_variants?id=eq.' + newId,
+            { day_id: d.id }, { prefer: 'return=minimal' });
+          const v = pdfVariants.find(x => x.id === newId);
+          if(v) v.day_id = d.id;
+          showToast('✓ Вариант привязан к дню ' + d.id);
+        } catch(e){ showToast('⚠ ' + e.message); return; }
+      } else {
+        showToast('✓ Вариант отвязан');
+      }
+      render();
+    };
+    det.append(el('div', { style:{ marginTop:'10px', padding:'10px 12px', background:'#F5F3FF', border:'1px solid #A78BFA', borderRadius:'10px', display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }},
+      el('span', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--p-deep)' }}, '📋 Вариант-пробник для дня:'),
+      variantSelect));
     const inner = el('div', { style:{ marginTop:'14px', display:'flex', flexDirection:'column', gap:'8px' }});
     d.tasks.forEach(t => {
       const actMats = MATERIALS.filter(m => m.activityId === t.id);
@@ -15322,6 +15520,7 @@ function _renderNow(){
   if(STATE.essayImportOpen) root.append(modalEssayImport());
   if(STATE.pdfImportOpen) root.append(modalPdfImport());
   if(STATE.editVariantId) root.append(modalEditVariant());
+  if(STATE.examineQuestion) root.append(modalExamineQuestion());
   if(STATE.linkAttempt) root.append(modalLinkStudent());
   if(STATE.linkEssay) root.append(modalLinkEssay());
   if(STATE.studentEssayResultOpen != null) root.append(modalEssayResult(STATE.studentEssayResultOpen));
