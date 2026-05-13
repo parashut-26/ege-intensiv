@@ -11917,14 +11917,8 @@ async function parseVariantPdf(arrayBuffer){
    Поддерживаются варианты заголовков: «Вариант 1.», «Вариант 1:», «Вариант 1»,
    «ВАРИАНТ 1», «Вариант №1». Заголовки заданий аналогично. */
 function parseVariantTextCommon(full, fromDocx){
-  /* Диагностика: первые 3000 символов полного текста — увидим как Word
-     был сконвертирован и где могут теряться задания. */
-  console.log('[variant parser] полный текст (' + full.length + ' симв), первые 3000:');
-  console.log(full.slice(0, 3000));
-  console.log('---');
   /* Разделяем по заголовкам «Вариант N» (любой формат) */
   const sections = full.split(/\n(?=Вариант\s*№?\s*\d+\b)/i);
-  console.log('[variant parser] секций по «Вариант N»: ' + sections.length);
   /* Если split дал одну секцию и она не начинается с «Вариант» — обрабатываем как
      один безымянный вариант. */
   const variants = [];
@@ -11949,8 +11943,6 @@ function parseVariantTextCommon(full, fromDocx){
     const src22Match =
       body.match(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s*22\s*[−–\-]\s*26\s*[\.\:]?\s+([\s\S]+?)(?=Задание\s*№?\s*22\b)/i)
       || body.match(/Прочитайте\s+текст\s+и\s+выполните\s+задания\s*23\s*[−–\-]\s*26\s*[\.\:]?\s+([\s\S]+?)(?=Задание\s*№?\s*23\b)/i);
-    console.log('[variant parser] вариант ' + num + ': src13=' + (src13Match ? 'найден ' + src13Match[1].length + ' симв' : 'НЕ НАЙДЕН') +
-                ', src22=' + (src22Match ? 'найден ' + src22Match[1].length + ' симв' : 'НЕ НАЙДЕН'));
     const tasks = {};
     /* Гибкий заголовок задания: «Задание 1.», «Задание 1:», «Задание №1.», «Задание 1» */
     /* Простой split по заголовкам заданий. Делим на части,
