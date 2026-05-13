@@ -1303,7 +1303,7 @@ async function restoreSession(){
         _AUTH_BOOTSTRAP_RUNNING = false;
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizSeedFile()]).then(() => {
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizSeedFile().then(() => loadQuizOverridesFromDb())]).then(() => {
           render();
           /* После основных загрузок — стартуем фоновый чат-poll */
           startUnreadBgPoll();
@@ -1366,7 +1366,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizSeedFile()]).then(() => {
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizSeedFile().then(() => loadQuizOverridesFromDb())]).then(() => {
           render();
           /* После основных загрузок — стартуем фоновый чат-poll */
           startUnreadBgPoll();
@@ -3006,6 +3006,46 @@ async function loadQuizSeedFile(){
                 ', задание 6 +' + ((seed['6']||[]).length));
   } catch(e){
     console.warn('[seed] не удалось подгрузить seed_quiz_5_6.json:', e.message);
+  }
+}
+
+/* Загружаем сохранённые в БД override'ы и заменяем ими QUIZ_BANK[task_n].
+   Это позволяет учителю удалять/редактировать/добавлять вопросы и менять
+   состав банка ПЕРМАНЕНТНО, а не только в текущей сессии. */
+async function loadQuizOverridesFromDb(){
+  if(!sb) return;
+  try {
+    const arr = await restRequest('GET', '/quiz_bank_overrides?select=task_n,questions');
+    if(!Array.isArray(arr) || !arr.length) return;
+    arr.forEach(row => {
+      const n = row.task_n;
+      if(n >= 1 && n <= 26 && Array.isArray(row.questions)){
+        QUIZ_BANK[n] = row.questions;
+      }
+    });
+    console.log('[quiz override] загружено override-ов: ' + arr.length);
+  } catch(e){
+    console.warn('[quiz override] не удалось загрузить:', e.message);
+  }
+}
+
+/* Сохраняет текущее состояние QUIZ_BANK[taskN] в БД (UPSERT по task_n).
+   Вызывается после удаления / редактирования / добавления вопроса. */
+async function persistTaskBank(taskN){
+  if(!sb || !MY_PROFILE){ showToast('⚠ Изменения не сохранятся — не авторизованы'); return false; }
+  const questions = QUIZ_BANK[taskN] || [];
+  try {
+    await restRequest('POST', '/quiz_bank_overrides?on_conflict=task_n', [{
+      task_n: taskN,
+      questions: questions,
+      updated_at: new Date().toISOString(),
+      updated_by: MY_PROFILE.id
+    }], { prefer: 'resolution=merge-duplicates,return=minimal' });
+    return true;
+  } catch(e){
+    console.warn('persistTaskBank fail:', e.message);
+    showToast('⚠ Не удалось сохранить в БД: ' + e.message);
+    return false;
   }
 }
 
@@ -11233,10 +11273,10 @@ function questionPreview(q, idx, taskN){
       el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, '#' + (idx+1))),
     el('div', { style:{ display:'flex', gap:'4px' }},
       el('button', { class:'btn-icon', title:'Редактировать вопрос',
-        onclick: () => {
+        onclick: async () => {
           /* Базовое редактирование: меняем текст вопроса и/или правильный ответ.
-             Полноценный редактор всех типов вопросов (с опциями, предложениями и т.д.) —
-             это отдельный экран, пока что только самое нужное. */
+             После — сохраняем в БД через persistTaskBank, чтобы переживало
+             перезагрузку и было видно всем. */
           const newQ = prompt('Текст вопроса:', q.q || '');
           if(newQ === null) return;
           q.q = newQ.trim() || q.q;
@@ -11255,19 +11295,22 @@ function questionPreview(q, idx, taskN){
             const newA = prompt('Номер правильного ответа (1, 2, 3…):', String(q.a + 1));
             if(newA !== null && /^\d+$/.test(newA.trim())) q.a = parseInt(newA.trim()) - 1;
           }
-          showToast('✏️ Изменения внесены в текущей сессии. Постоянное хранение вопросов в БД — отдельная задача.');
+          const ok = await persistTaskBank(taskN);
+          if(ok) showToast('✏️ Изменения сохранены в БД');
           render();
         }
       }, '✏️'),
       el('button', { class:'btn-icon', style:{ color:'var(--red)' }, title:'Удалить вопрос',
-        onclick: () => {
-          if(!confirm('Удалить этот вопрос из банка? (только в текущей сессии)')) return;
+        onclick: async () => {
+          if(!confirm('Удалить этот вопрос из банка? Действие сохранится в БД.')) return;
           const taskBank = QUIZ_BANK[taskN];
           if(taskBank){
             const i = taskBank.indexOf(q);
             if(i >= 0) taskBank.splice(i, 1);
           }
-          showToast('Удалено из текущей сессии. Постоянное удаление — отдельная задача.');
+          const ok = await persistTaskBank(taskN);
+          if(ok) showToast('🗑 Вопрос удалён');
+          else showToast('Удалено локально, но в БД не сохранилось');
           render();
         }
       }, '🗑'))));
