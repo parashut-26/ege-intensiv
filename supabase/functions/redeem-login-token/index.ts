@@ -39,10 +39,11 @@ serve(async (req) => {
 
     const sb = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-    // 1. Найти токен
+    // 1. Найти токен (без embedded select — у login_tokens две FK к profiles,
+    //    PostgREST не может выбрать сам). Загрузим профиль отдельным запросом.
     const { data: tok, error: tErr } = await sb
       .from('login_tokens')
-      .select('*, profile:profiles(id, email, full_name, role)')
+      .select('*')
       .eq('token', token)
       .maybeSingle();
     if (tErr) throw tErr;
@@ -51,7 +52,12 @@ serve(async (req) => {
     if (tok.expires_at && new Date(tok.expires_at) < new Date()) {
       return json({ error: 'Срок ссылки истёк. Попроси учителя новую.' }, 403);
     }
-    const profile = (tok as any).profile;
+    const { data: profile, error: pErr } = await sb
+      .from('profiles')
+      .select('id, email, full_name, role')
+      .eq('id', tok.profile_id)
+      .maybeSingle();
+    if (pErr) throw pErr;
     if (!profile) return json({ error: 'Ученик удалён' }, 404);
 
     // 2. Помечаем как использованный
