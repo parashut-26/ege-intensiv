@@ -565,6 +565,10 @@ const STATE = {
   myExpandedAttemptId: null,      // какую строку «Мои пробники» раскрыл ученик
   examineQuestion: null,           // { variantId, num, userAnswer, points, max } для модалки
   examineQuestionData: null,       // загруженный test_variant_questions
+  /* Регистрация по коду / ссылке */
+  authInviteCode: '',              // поле ввода кода на login
+  inviteCodesList: [],             // загруженные коды у учителя
+  inviteCodesLoaded: false,
   /* Сводная по ученику в кабинете учителя: 'by_variant' | 'by_student' */
   variantsView: 'by_variant',
   selectedStudentForVariants: null,   // профайл-id выбранного ученика
@@ -735,6 +739,61 @@ async function authRequestCode(email){
     throw new Error(msg);
   }
   return await resp.json();
+}
+
+/* Вход по коду-приглашению. Edge Function redeem-invite-code создаёт профиль
+   (или находит существующий с таким же именем) и возвращает JWT. */
+async function authRedeemInviteCode(fullName, code){
+  const url = SUPABASE_URL + '/functions/v1/redeem-invite-code';
+  const resp = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ full_name: fullName, code })
+  });
+  if(!resp.ok){
+    const txt = await resp.text();
+    let msg = txt;
+    try { msg = JSON.parse(txt).error || txt; } catch(e){}
+    throw new Error(msg);
+  }
+  const data = await resp.json();
+  saveAuthToken(data);
+  return data;
+}
+
+/* Вход по одноразовому токену из URL `?login=<uuid>`.
+   Edge Function redeem-login-token валидирует и возвращает JWT существующего профиля. */
+async function authRedeemLoginToken(token){
+  const url = SUPABASE_URL + '/functions/v1/redeem-login-token';
+  const resp = await fetchWithRetry(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token })
+  });
+  if(!resp.ok){
+    const txt = await resp.text();
+    let msg = txt;
+    try { msg = JSON.parse(txt).error || txt; } catch(e){}
+    throw new Error(msg);
+  }
+  const data = await resp.json();
+  saveAuthToken(data);
+  return data;
+}
+
+/* Универсальное сохранение access_token в localStorage в формате supabase-js v2 */
+function saveAuthToken(data){
+  const projectRef = SUPABASE_URL.replace('https://', '').split('.')[0];
+  const tokenObj = {
+    access_token: data.access_token,
+    refresh_token: data.access_token,
+    token_type: 'bearer',
+    expires_at: Math.floor(Date.now() / 1000) + (data.expires_in || 60 * 60 * 24 * 7),
+    expires_in: data.expires_in || 60 * 60 * 24 * 7,
+    user: data.user
+  };
+  try { localStorage.setItem('sb-' + projectRef + '-auth-token', JSON.stringify(tokenObj)); }
+  catch(e){ console.warn('Не удалось записать токен:', e); }
 }
 
 /* Простой вход по имени+email (для интенсива). Звон Edge Function login-by-name-email. */
@@ -1246,6 +1305,28 @@ async function restoreSession(){
   _AUTH_BOOTSTRAP_RUNNING = true;
   STATE.authLoading = true;
   render();   /* Показать «Загрузка…» сразу, до сетевых вызовов */
+
+  /* Автологин по URL `?login=<uuid>` (одноразовая ссылка-вход).
+     Если получили валидную ссылку — redeem и перезагружаем без неё. */
+  try {
+    const urlParams = new URLSearchParams(window.location.search);
+    const loginToken = urlParams.get('login');
+    if(loginToken && /^[0-9a-f-]{36}$/i.test(loginToken)){
+      console.log('[auth] обнаружен login-token в URL, redeem…');
+      try {
+        await authRedeemLoginToken(loginToken);
+        /* Убираем токен из URL и перезагружаем — теперь авторизованы */
+        urlParams.delete('login');
+        const newUrl = window.location.pathname + (urlParams.toString() ? '?' + urlParams.toString() : '') + window.location.hash;
+        window.history.replaceState({}, '', newUrl);
+        location.reload();
+        return;
+      } catch(e){
+        console.warn('[auth] login-token redeem fail:', e.message);
+        /* Не валидно — продолжаем обычный flow */
+      }
+    }
+  } catch(e){ /* ignore */ }
 
   /* Если URL содержит ошибку от Supabase — сразу показываем её, не ждём сети */
   const urlErr = checkAuthErrorInUrl();
@@ -5417,8 +5498,64 @@ function viewLogin(){
         style:{ flex:1, fontSize:'12px' },
         onclick: () => { STATE.authMethod = m; STATE.authError = null; render(); }
       }, label);
-      tabs.append(mkTab('name', '👤 Имя + e-mail'), mkTab('code', '✉️ Код на почту'));
+      tabs.append(mkTab('name', '👤 Имя + e-mail'), mkTab('code', '✉️ Код на почту'), mkTab('invite', '🔑 Код-приглашение'));
       card.append(tabs);
+    }
+
+    /* === Вход по коду-приглашению === */
+    if(STATE.authMethod === 'invite' && STATE.authStage !== 'sent' && STATE.authStage !== 'verifying'){
+      card.append(
+        el('label', { style:{ display:'block', fontSize:'12px', color:'var(--ink-2)', fontWeight:'700', marginBottom:'6px', marginTop:'4px' }}, 'Имя и Фамилия:'),
+        el('input', { type:'text', placeholder:'Анна Соколова', value: STATE.authFullName,
+          style:{ width:'100%', padding:'12px 14px', borderRadius:'12px', border:'1px solid var(--border-2)', fontSize:'14px', marginBottom:'10px' },
+          oninput: ev => { STATE.authFullName = ev.target.value; }
+        }),
+        el('label', { style:{ display:'block', fontSize:'12px', color:'var(--ink-2)', fontWeight:'700', marginBottom:'6px' }}, 'Код приглашения от учителя:'),
+        el('input', { type:'text', placeholder:'KRASH2026',
+          value: STATE.authInviteCode || '',
+          style:{ width:'100%', padding:'12px 14px', borderRadius:'12px', border:'1px solid var(--border-2)', fontSize:'16px', fontWeight:'700', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'10px' },
+          oninput: ev => { STATE.authInviteCode = ev.target.value.toUpperCase(); }
+        }));
+      if(STATE.authError){
+        card.append(el('div', { style:{ color:'var(--red)', fontSize:'12px', marginBottom:'8px' }}, '⚠ ' + STATE.authError));
+      }
+      /* Тот же чекбокс согласия */
+      const consentBox = el('div', { style:{ display:'flex', gap:'8px', alignItems:'flex-start', marginBottom:'10px', padding:'10px', background:'var(--surface-soft)', borderRadius:'10px' }},
+        el('input', { type:'checkbox', id:'auth-consent-inv', checked: STATE.authConsent || undefined,
+          style:{ marginTop:'3px', flexShrink:'0' },
+          onchange: ev => { STATE.authConsent = ev.target.checked; }
+        }),
+        el('label', { for:'auth-consent-inv', style:{ fontSize:'11px', lineHeight:'1.4', color:'var(--ink-2)', cursor:'pointer' }},
+          'Я согласен(на) с ',
+          el('a', { href:'https://zebrus.tb.ru/page2', target:'_blank', rel:'noopener', style:{ color:'var(--p)' }}, 'политикой'),
+          ' и ',
+          el('a', { href:'https://zebrus.tb.ru/page4', target:'_blank', rel:'noopener', style:{ color:'var(--p)' }}, 'офертой'),
+          '.'));
+      card.append(consentBox);
+      card.append(el('button', { class:'login-btn btn-y',
+        disabled: STATE.authStage === 'sending' || undefined,
+        onclick: async () => {
+          const fullName = (STATE.authFullName || '').trim();
+          const code = (STATE.authInviteCode || '').trim().toUpperCase();
+          if(!fullName){ STATE.authError = 'Введи имя'; render(); return; }
+          if(!code){ STATE.authError = 'Введи код приглашения'; render(); return; }
+          if(!STATE.authConsent){ STATE.authError = 'Нужно согласие'; render(); return; }
+          STATE.authStage = 'sending'; STATE.authError = null; render();
+          try {
+            await authRedeemInviteCode(fullName, code);
+            location.reload();
+          } catch(e){
+            STATE.authStage = 'idle';
+            STATE.authError = e.message || 'Не удалось войти';
+            render();
+          }
+        }
+      }, STATE.authStage === 'sending' ? '⏳ Входим…' : '🔑 Войти по коду'),
+      el('p', { class:'foot-note', style:{ marginTop:'14px' }},
+        'Код выдаёт учитель в Telegram или на лендинге.'));
+    }
+    else if(STATE.authMethod === 'invite'){
+      /* placeholder когда отправляется — пока ничего */
     }
 
     if(STATE.authMethod === 'name' && STATE.authStage !== 'sent' && STATE.authStage !== 'verifying'){
@@ -8418,6 +8555,84 @@ function viewTeacherStudents(){
           onclick: () => { STATE.newStudentForm = true; render(); }
         }, '＋ Добавить ученика'))));
 
+  /* Коды-приглашения — для саморегистрации учеников */
+  const inviteBox = el('div', { class:'card', style:{ marginBottom:'18px', background:'#FFF7E6', border:'1px solid #FACC15' }});
+  inviteBox.append(
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px', flexWrap:'wrap', gap:'8px' }},
+      el('div', null,
+        el('h3', null, '🔑 Коды-приглашения'),
+        el('div', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
+          'Ученики саморегистрируются по коду. Без email — только имя.')),
+      el('button', { class:'btn btn-y btn-sm',
+        onclick: async () => {
+          const title = prompt('Название кода (для тебя — не видно ученикам):', 'Краш-тест 2026');
+          if(title === null) return;
+          let code = prompt('Сам код (заглавные буквы, без пробелов):', 'KRASH2026');
+          if(!code) return;
+          code = code.trim().toUpperCase();
+          const maxStr = prompt('Лимит регистраций (или Enter без значения для безлимита):', '30');
+          const max_uses = maxStr && /^\d+$/.test(maxStr.trim()) ? parseInt(maxStr.trim(), 10) : null;
+          try {
+            await restRequest('POST', '/invite_codes', {
+              code, title: title.trim() || null,
+              max_uses,
+              created_by: MY_PROFILE && MY_PROFILE.id || null
+            }, { prefer: 'return=minimal' });
+            showToast('✓ Код «' + code + '» создан');
+            STATE.inviteCodesLoaded = false;
+            render();
+          } catch(e){ showToast('⚠ ' + e.message); }
+        }
+      }, '＋ Создать код')));
+
+  /* Загружаем список кодов */
+  if(!STATE.inviteCodesLoaded){
+    inviteBox.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'8px 0' }}, '⏳ Загружаю коды…'));
+    (async () => {
+      try {
+        const arr = await restRequest('GET', '/invite_codes?order=created_at.desc');
+        STATE.inviteCodesList = Array.isArray(arr) ? arr : [];
+        STATE.inviteCodesLoaded = true;
+        render();
+      } catch(e){
+        STATE.inviteCodesList = [];
+        STATE.inviteCodesLoaded = true;
+        console.warn('invite_codes load:', e.message);
+      }
+    })();
+  } else if(!STATE.inviteCodesList.length){
+    inviteBox.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'4px 0' }}, 'Пока нет кодов. Создай первый — ученики смогут саморегистрироваться.'));
+  } else {
+    STATE.inviteCodesList.forEach(ic => {
+      const row = el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', padding:'8px 10px', background:'#fff', borderRadius:'8px', marginTop:'6px', gap:'8px', flexWrap:'wrap' }},
+        el('div', null,
+          el('div', { style:{ fontSize:'15px', fontWeight:'800', fontFamily:'monospace', letterSpacing:'1px' }}, ic.code),
+          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }},
+            (ic.title ? ic.title + ' · ' : '') +
+            'Регистраций: ' + (ic.used_count || 0) + (ic.max_uses ? ' / ' + ic.max_uses : '') +
+            (ic.is_active ? '' : ' · ОТОЗВАН'))),
+        el('div', { style:{ display:'flex', gap:'6px' }},
+          el('button', { class:'btn-icon', title:'Копировать код',
+            onclick: async () => {
+              try { await navigator.clipboard.writeText(ic.code); showToast('📋 ' + ic.code + ' скопирован'); }
+              catch(_){ prompt('Код:', ic.code); }
+            }}, '📋'),
+          el('button', { class:'btn-icon', title: ic.is_active ? 'Отозвать' : 'Возобновить',
+            style:{ color: ic.is_active ? 'var(--red)' : 'var(--green)' },
+            onclick: async () => {
+              try {
+                await restRequest('PATCH', '/invite_codes?id=eq.' + ic.id,
+                  { is_active: !ic.is_active }, { prefer: 'return=minimal' });
+                ic.is_active = !ic.is_active;
+                showToast(ic.is_active ? '✓ Код активен' : '🚫 Код отозван');
+                render();
+              } catch(e){ showToast('⚠ ' + e.message); }
+            }}, ic.is_active ? '🚫' : '✓')));
+      inviteBox.append(row);
+    });
+  }
+  wrap.append(inviteBox);
+
   /* Кураторы — в отдельной карточке */
   const curBox = el('div', { class:'card', style:{ marginBottom:'18px', background:'var(--teal-soft)', border:'1px solid #5EEAD4' }});
   curBox.append(
@@ -8689,7 +8904,6 @@ function studentRow(s){
                 if(!trimmed){ showToast('Имя не может быть пустым'); return; }
                 if(trimmed === s.name) return;
                 if(!/^[0-9a-f-]{36}$/i.test(s.id)){
-                  /* Локальный мок — не сохраняется в БД */
                   s.name = trimmed;
                   showToast('Имя обновлено (только локально)');
                   render();
@@ -8704,6 +8918,30 @@ function studentRow(s){
                 } catch(e){ showToast('⚠ ' + e.message); }
               }
             }, '✏️'),
+            el('button', { class:'btn-icon', title:'Получить одноразовую ссылку-вход для ученика',
+              style:{ background:'#FEF3C7', color:'#92400E' },
+              onclick: async () => {
+                if(!/^[0-9a-f-]{36}$/i.test(s.id)){
+                  showToast('Этот ученик ещё не зарегистрирован в БД');
+                  return;
+                }
+                try {
+                  const created = await restRequest('POST', '/login_tokens', {
+                    profile_id: s.id,
+                    created_by: MY_PROFILE && MY_PROFILE.id || null
+                  }, { prefer: 'return=representation' });
+                  const tok = Array.isArray(created) ? created[0] : created;
+                  const url = window.location.origin + '/?login=' + encodeURIComponent(tok.token);
+                  /* Копируем в буфер */
+                  try {
+                    await navigator.clipboard.writeText(url);
+                    showToast('🔗 Ссылка скопирована в буфер. Срок 14 дней.');
+                  } catch(_){
+                    prompt('Скопируй ссылку и отправь ученику:', url);
+                  }
+                } catch(e){ showToast('⚠ ' + e.message); }
+              }
+            }, '🔗'),
             el('button', { class:'btn-icon', title:'Сделать куратором',
               style:{ background:'var(--teal-soft)', color:'var(--teal)' },
               onclick: async () => {
