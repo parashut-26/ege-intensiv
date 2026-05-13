@@ -1303,7 +1303,7 @@ async function restoreSession(){
         _AUTH_BOOTSTRAP_RUNNING = false;
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance())]).then(() => {
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizSeedFile()]).then(() => {
           render();
           /* После основных загрузок — стартуем фоновый чат-poll */
           startUnreadBgPoll();
@@ -1366,7 +1366,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance())]).then(() => {
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizSeedFile()]).then(() => {
           render();
           /* После основных загрузок — стартуем фоновый чат-poll */
           startUnreadBgPoll();
@@ -2987,6 +2987,27 @@ async function loadStudentsFromDb(){
 let DB_ESSAYS = [];
 /* Отдельный кэш замечаний — по essay_id. Не теряется при перезагрузке DB_ESSAYS. */
 const ESSAY_COMMENTS_CACHE = {};
+
+/* Подгружаем дополнительные вопросы для заданий 5 и 6 из seed_quiz_5_6.json.
+   Файл сделан из ФИПИ-сборников «Задание N в формате ЕГЭ» — это докинули в
+   QUIZ_BANK, потому что у части старых вопросов отсутствовал sentences/context. */
+async function loadQuizSeedFile(){
+  try {
+    const r = await fetch('./seed_quiz_5_6.json?ts=' + Date.now());
+    if(!r.ok) return;
+    const seed = await r.json();
+    if(seed && seed['5'] && Array.isArray(seed['5'])){
+      QUIZ_BANK[5] = (QUIZ_BANK[5] || []).concat(seed['5']);
+    }
+    if(seed && seed['6'] && Array.isArray(seed['6'])){
+      QUIZ_BANK[6] = (QUIZ_BANK[6] || []).concat(seed['6']);
+    }
+    console.log('[seed] подгружены доп. вопросы: задание 5 +' + ((seed['5']||[]).length) +
+                ', задание 6 +' + ((seed['6']||[]).length));
+  } catch(e){
+    console.warn('[seed] не удалось подгрузить seed_quiz_5_6.json:', e.message);
+  }
+}
 
 async function loadEssaysFromDb(){
   if(!sb) return;
