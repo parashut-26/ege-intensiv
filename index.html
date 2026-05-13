@@ -550,7 +550,7 @@ let MY_PROFILE = null;
    ======================================================================= */
 const STATE = {
   view: 'login',           // login | student | curator | teacher
-  studentTab: 'home',      // home | days | theory | achievements | profile
+  studentTab: 'home',      // home | days | theory | variants | achievements | profile
   curatorTab: 'students',  // students | essays | chat
   teacherTab: 'overview',  // overview | students | attendance | payments | essays | analytics | variants | content | days
   contentTab: 'theory',    // theory | tests | materials | samples
@@ -7741,6 +7741,23 @@ function studentVariantsCard(){
 /* =======================================================================
    УЧЕНИК · ДОСТИЖЕНИЯ
    ======================================================================= */
+/* =======================================================================
+   УЧЕНИК · ПРОБНИКИ — отдельная вкладка
+   Использует ту же карточку что и в Профиле, но в полном размере как страница.
+   ======================================================================= */
+function viewStudentVariants(){
+  const wrap = el('div', { class:'fade-in' });
+  wrap.append(
+    el('h1', null, '📋 Мои пробники'),
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'20px' }},
+      'Решай тренировочные варианты ЕГЭ и смотри свои результаты — текущие и предыдущие.'));
+  const card = studentVariantsCard();
+  if(card) wrap.append(card);
+  else wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)', padding:'30px' }},
+    'Загружаю…'));
+  return wrap;
+}
+
 function viewStudentAchievements(){
   const wrap = el('div', { class:'fade-in' });
   const unlockedCount = ACHIEVEMENTS.filter(a => a.unlocked).length;
@@ -7827,10 +7844,6 @@ function viewStudentProfile(){
       }
     }, '🐝 Показать вступление снова'));
   wrap.append(main);
-
-  /* Мои пробники-варианты — если у ученика есть результаты, рисуем карточку */
-  const variantsBlock = studentVariantsCard();
-  if(variantsBlock) wrap.append(variantsBlock);
 
   /* Что я могу получить — сворачиваем все достижения */
   const ach = el('div', { class:'card' });
@@ -15027,6 +15040,7 @@ function _renderNow(){
       { key:'home', label:'Главная', ic:'🏠' },
       { key:'days', label:'Дни интенсива', ic:'📅' },
       { key:'theory', label:'Теория', ic:'📚' },
+      { key:'variants', label:'Пробники', ic:'📋' },
       { key:'achievements', label:'Достижения', ic:'🏆' },
       { key:'profile', label:'Профиль', ic:'👤' },
     ];
@@ -15034,6 +15048,7 @@ function _renderNow(){
       home: viewStudentHome,
       days: viewStudentDays,
       theory: viewStudentTheory,
+      variants: viewStudentVariants,
       achievements: viewStudentAchievements,
       profile: viewStudentProfile,
     };
