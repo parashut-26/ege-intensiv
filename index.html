@@ -10936,6 +10936,7 @@ function modalAttemptDetail(){
             el('div', { style:{ fontSize:'10px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Почему так?'),
             el('div', { html: typeof formatExplanation === 'function' ? formatExplanation(item.expl) : String(item.expl) })));
         }
+        body.append(card);  /* не забыть добавить карточку в body! */
         return;  /* для letterGap дальше «варианты ответа» не показываем */
       }
 
