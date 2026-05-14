@@ -621,6 +621,10 @@ const STATE = {
   essayDraftText: '',      // черновик текста
   essayDraftMode: 'typed', // 'typed' | 'photo'
   essayDraftPhotos: [],    // [{ url, name }] — уже залитые в Storage
+  essayDraftSourceMode: 'none', // 'none' | 'variant' | 'custom' — откуда исходный текст
+  essayDraftSourceVariantId: null,  // если 'variant' — id опубликованного варианта
+  essayDraftSourceText: '',         // если 'custom' — текст исходника
+  essayDraftSourceProblem: '',      // указанная учеником проблема (необязательно)
   newStudentForm: false,
   curatorPermsFor: null,   // id куратора — открыта модалка прав
   variantMode: false,      // сборка случайного варианта
@@ -2589,6 +2593,10 @@ async function submitEssay(opts){
   } else if(opts.format === 'photo'){
     payload.photo_urls = opts.photoUrls || [];
   }
+  /* Исходный текст и проблема (для AI-проверки К1/К2) — могут быть пустые */
+  if(opts.source_text)       payload.source_text       = opts.source_text;
+  if(opts.source_problem)    payload.source_problem    = opts.source_problem;
+  if(opts.source_variant_id) payload.source_variant_id = opts.source_variant_id;
   const inserted = await restRequest('POST', '/essays', payload, { prefer: 'return=representation' });
   /* Достижение «✍️ Сочинение сдано» (a5) — за сам факт сдачи, до проверки */
   awardAchievement('a5').catch(() => {});
@@ -9711,11 +9719,87 @@ function modalEssayDraft(){
     photoStatus,
     photoList);
 
+  /* Блок «Исходный текст» — что было дано (вариант пробника / свой текст / нет). */
+  const sourceBlock = (() => {
+    const wrap = el('div', { class:'card', style:{ background:'#FFFDF7', border:'1px solid #FACC15', marginBottom:'14px' }});
+    wrap.append(
+      el('h4', null, '📖 Исходный текст (с которым работаешь)'),
+      el('p', { style:{ color:'var(--ink-2)', fontSize:'12px', marginTop:'4px', marginBottom:'8px' }},
+        'Указывай, если это домашнее/школьное сочинение по чужому тексту — иначе AI-проверка по К1/К2 будет приблизительной.'));
+    /* Радио */
+    const modes = [
+      { key:'none',    label:'⛔ Не указывать (свободная тема)' },
+      { key:'variant', label:'🎯 Из вариантов пробников' },
+      { key:'custom',  label:'✏️ Вписать свой текст' },
+    ];
+    const radioRow = el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'10px' }});
+    modes.forEach(m => {
+      const isActive = STATE.essayDraftSourceMode === m.key;
+      radioRow.append(el('button', {
+        class: 'btn btn-sm' + (isActive ? ' btn-p' : ' btn-secondary'),
+        style:{ flex:'1 0 auto' },
+        onclick: () => { STATE.essayDraftSourceMode = m.key; render(); }
+      }, m.label));
+    });
+    wrap.append(radioRow);
+
+    /* Содержимое в зависимости от выбранного режима */
+    if(STATE.essayDraftSourceMode === 'variant'){
+      const select = el('select', {
+        style:{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'13px', marginBottom:'8px' },
+        onchange: ev => { STATE.essayDraftSourceVariantId = ev.target.value || null; }
+      });
+      select.append(el('option', { value:'' }, '— выбери вариант —'));
+      const list = Array.isArray(STATE.variantsList) ? STATE.variantsList : [];
+      const published = list.filter(v => v.is_published);
+      if(!published.length){
+        select.append(el('option', { value:'', disabled:'disabled' }, '(нет опубликованных вариантов)'));
+      } else {
+        published.forEach(v => {
+          const opt = el('option', { value: v.id }, v.title);
+          if(STATE.essayDraftSourceVariantId === v.id) opt.selected = true;
+          select.append(opt);
+        });
+      }
+      wrap.append(select);
+      if(!STATE.variantsList || !STATE.variantsList.length){
+        loadVariantsList().then(() => render()).catch(() => {});
+      }
+    } else if(STATE.essayDraftSourceMode === 'custom'){
+      const srcTa = el('textarea', {
+        placeholder:'Вставь сюда исходный текст, по которому пишешь сочинение.',
+        style:{ width:'100%', minHeight:'120px', padding:'10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'13px', lineHeight:'1.5', fontFamily:'inherit', resize:'vertical', marginBottom:'8px' }
+      });
+      srcTa.value = STATE.essayDraftSourceText || '';
+      srcTa.oninput = () => { STATE.essayDraftSourceText = srcTa.value; };
+      wrap.append(srcTa);
+    }
+
+    /* Проблема — отдельным полем для любого режима кроме «none» */
+    if(STATE.essayDraftSourceMode !== 'none'){
+      const probInp = el('input', { type:'text',
+        placeholder:'(Необязательно) Проблема, которую формулируешь — одной строкой',
+        style:{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'13px', fontFamily:'inherit', boxSizing:'border-box' }
+      });
+      probInp.value = STATE.essayDraftSourceProblem || '';
+      probInp.oninput = () => { STATE.essayDraftSourceProblem = probInp.value; };
+      wrap.append(probInp);
+    }
+    return wrap;
+  })();
+
   const submitBtn = el('button', { class:'btn btn-p',
     onclick: async () => {
       submitBtn.disabled = true;
       submitBtn.textContent = '⏳ Сдаём…';
       try {
+        /* Собираем source-поля независимо от формата (typed/photo) */
+        const srcMode = STATE.essayDraftSourceMode;
+        const sourcePayload = {
+          source_text:       srcMode === 'custom'  ? (STATE.essayDraftSourceText  || '').trim() : '',
+          source_problem:    srcMode !== 'none'    ? (STATE.essayDraftSourceProblem || '').trim() : '',
+          source_variant_id: srcMode === 'variant' ? (STATE.essayDraftSourceVariantId || null) : null,
+        };
         if(STATE.essayDraftMode === 'typed'){
           const text = textArea.value.trim();
           if(text.length < 50){ showToast('Текст слишком короткий'); throw new Error(); }
@@ -9723,11 +9807,11 @@ function modalEssayDraft(){
           if(wc < 150){
             if(!confirm('У тебя ' + wc + ' слов из 150 — по правилам ФИПИ работа за < 150 слов не оценивается. Всё равно сдать?')){ throw new Error(); }
           }
-          await submitEssay({ format:'typed', text });
+          await submitEssay(Object.assign({ format:'typed', text }, sourcePayload));
           showToast('✓ Сочинение сдано · ' + wc + ' слов');
         } else {
           if(!STATE.essayDraftPhotos.length){ showToast('Загрузите хотя бы одно фото'); throw new Error(); }
-          await submitEssay({ format:'photo', photoUrls: STATE.essayDraftPhotos.map(p => p.url) });
+          await submitEssay(Object.assign({ format:'photo', photoUrls: STATE.essayDraftPhotos.map(p => p.url) }, sourcePayload));
           showToast('✓ Сдано · ' + STATE.essayDraftPhotos.length + ' фото');
         }
         await loadEssaysFromDb();
@@ -9735,6 +9819,10 @@ function modalEssayDraft(){
         STATE.essayDraftText = '';
         STATE.essayDraftPhotos = [];
         STATE.essayDraftMode = 'typed';
+        STATE.essayDraftSourceMode = 'none';
+        STATE.essayDraftSourceVariantId = null;
+        STATE.essayDraftSourceText = '';
+        STATE.essayDraftSourceProblem = '';
         render();
       } catch(e){
         if(e && e.message) console.error('submitEssay упал:', e);
@@ -9757,6 +9845,7 @@ function modalEssayDraft(){
       el('h4', null, '📝 Что нужно сделать'),
       el('p', { style:{ color:'var(--ink-2)', marginTop:'6px', fontSize:'13px', lineHeight:'1.5' }},
         'Сформулируй проблему текста, прокомментируй её двумя примерами с пояснением, укажи позицию автора, выскажи своё отношение и обоснуй пример-аргумент. Минимум 150 слов.')),
+    sourceBlock,
     formatToggle,
     STATE.essayDraftMode === 'typed'
       ? el('div', null,
@@ -10761,22 +10850,33 @@ function modalEssayReview(essayId){
               const origText = btn.textContent;
               btn.textContent = '⏳ Проверяю…';
               try {
-                /* Подтянем исходный текст из варианта, если сочинение связано с вариантом */
-                let srcText = '';
-                let vid = essay.variant_id;
-                if(!vid){
-                  const dbE = DB_ESSAYS.find(e => e.id === essay.id);
-                  if(dbE) vid = dbE.variant_id;
+                /* Приоритет источника:
+                   1) essay.source_text — ученик вписал свой текст при сдаче
+                   2) essay.source_variant_id — ученик выбрал вариант
+                   3) essay.variant_id — старая привязка к решённому пробнику */
+                let srcText = (essay.source_text || '').trim();
+                if(!srcText){
+                  let vid = essay.source_variant_id || essay.variant_id;
+                  if(!vid){
+                    const dbE = DB_ESSAYS.find(e => e.id === essay.id);
+                    if(dbE) vid = dbE.source_variant_id || dbE.variant_id;
+                  }
+                  if(vid){
+                    try {
+                      const arr = await restRequest('GET',
+                        '/test_variant_source_texts?variant_id=eq.' + vid +
+                        '&kind=in.(text_22_26,shared_22_26)&select=body&limit=1');
+                      if(Array.isArray(arr) && arr.length) srcText = String(arr[0].body || '');
+                    } catch(_){}
+                  }
                 }
-                if(vid){
-                  try {
-                    const arr = await restRequest('GET',
-                      '/test_variant_source_texts?variant_id=eq.' + vid +
-                      '&kind=in.(text_22_26,shared_22_26)&select=body&limit=1');
-                    if(Array.isArray(arr) && arr.length) srcText = String(arr[0].body || '');
-                  } catch(_){}
+                /* Если ученик указал проблему — добавим как подсказку для AI */
+                const problem = (essay.source_problem || '').trim();
+                let essayForAi = essayText;
+                if(problem){
+                  essayForAi = '(Ученик заявил проблему: ' + problem + ')\n\n' + essayText;
                 }
-                const res = await callCheckEssay(essayText, srcText, essay.studentName || '');
+                const res = await callCheckEssay(essayForAi, srcText, essay.studentName || '');
                 /* Подставляем в STATE.scoresK — там ключи UPPERCASE (K1..K10) */
                 if(!STATE.scoresK) STATE.scoresK = {};
                 Object.keys(res.scores).forEach(k => {
@@ -10791,7 +10891,47 @@ function modalEssayReview(essayId){
                   .join('\n');
                 if(detail) parts.push('Разбор по критериям:\n' + detail);
                 STATE.essayComment = parts.join('\n\n');
-                showToast('✓ AI-черновик готов · ' + res.total + ' / ' + res.max + ' баллов');
+
+                /* Подсветка ошибок в тексте — для каждой mark ищем фрагмент,
+                   создаём замечание и кладём в кэш, чтобы появилось на экране.
+                   Только для текстовых сочинений (для фото пин-координат нет). */
+                let marksApplied = 0, marksFailed = 0;
+                if(Array.isArray(res.marks) && res.marks.length && !isPhotoEssay && typeof essay.id === 'number'){
+                  const existing = ESSAY_COMMENTS_CACHE[essay.id] || essay.comments || [];
+                  const newComments = existing.slice();
+                  for(const m of res.marks){
+                    if(!m || !m.fragment) continue;
+                    const idx = essayText.indexOf(m.fragment);
+                    if(idx < 0){ marksFailed++; continue; }
+                    try {
+                      const saved = await saveEssayComment(essay.id, {
+                        kind: m.kind,
+                        comment: '🤖 ' + (m.comment || ''),
+                        fragment: m.fragment,
+                        start_pos: idx,
+                        end_pos: idx + m.fragment.length,
+                      });
+                      if(saved){
+                        newComments.push(saved);
+                        marksApplied++;
+                      }
+                    } catch(e){
+                      console.warn('[ai-mark] save fail:', e.message);
+                      marksFailed++;
+                    }
+                  }
+                  if(marksApplied > 0){
+                    ESSAY_COMMENTS_CACHE[essay.id] = newComments;
+                    essay.comments = newComments;
+                    /* AI уже выставила К1-К10 — НЕ перезатираем их через recomputeErrorsFromComments.
+                       Если учитель захочет считать «по числу замечаний», он удалит баллы вручную. */
+                  }
+                }
+
+                const toastTail = marksApplied
+                  ? ' · подсвечено ' + marksApplied + ' ошибок'
+                  : (marksFailed ? ' · ' + marksFailed + ' замечаний не нашли цитат' : '');
+                showToast('✓ AI-черновик готов · ' + res.total + ' / ' + res.max + ' баллов' + toastTail);
                 render();
               } catch(e){
                 showToast('⚠ ' + (e && e.message || 'ошибка AI-проверки'));
