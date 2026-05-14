@@ -643,6 +643,8 @@ const STATE = {
   testChecked: false,
   testInstant: false,           // ⚡ показывать ответ сразу после ответа на вопрос
   testInstantSubmitted: {},     // { i: true } — для каких вопросов в instant ученик нажал «Ответить»
+  mistakeTrainerOpen: false,    // 🧳 открыта модалка тренажёра по чемодану ошибок
+  mistakeBankShuffled: null,    // кэш перемешанного банка ошибок на одну сессию повторения
   testShuffle: null,    // если задано — открыт тренажёр случайных пар (число вопросов)
   testLimit: null,      // если задано — выбрана подборка из N случайных вопросов из QUIZ_BANK
   shuffledBank: null,   // кэш перемешанной подборки на время теста
@@ -3143,6 +3145,29 @@ async function loadQuizSeedFile(){
   } catch(e){
     console.warn('[seed] не удалось подгрузить seed_quiz_5_6.json:', e.message);
   }
+  /* Большой словник из 941 слова для задания 9 — letterGap-формат.
+     Файл seed_quiz_task9.json в корне. Загрузка отдельная, чтобы не блокировать
+     основной seed-файл (он у нас уже работает с 5/6). */
+  try {
+    const r = await fetch('./seed_quiz_task9.json?ts=' + Date.now());
+    if(!r.ok) return;
+    const seed9 = await r.json();
+    if(Array.isArray(seed9)){
+      /* Нормализуем структуру к виду letterGap-вопроса и проставляем формулировку */
+      const items = seed9.map(it => ({
+        letterGap: true,
+        q: 'Вставь пропущенную букву',
+        word: String(it.word || ''),
+        correct: String(it.correct || '').toLowerCase(),
+        expl: it.expl || undefined,
+        src: 'Большой словник',
+      })).filter(it => it.word && it.correct && it.word.includes('_'));
+      QUIZ_BANK[9] = (QUIZ_BANK[9] || []).concat(items);
+      console.log('[seed] подгружен словник задания 9: +' + items.length + ' слов');
+    }
+  } catch(e){
+    console.warn('[seed] не удалось подгрузить seed_quiz_task9.json:', e.message);
+  }
 }
 
 /* Загружаем сохранённые в БД override'ы и заменяем ими QUIZ_BANK[task_n].
@@ -4661,6 +4686,110 @@ function notifyViaPush(userId, title, body, link){
     body: JSON.stringify({ user_id: userId, title, body, url: link || null })
   }).then(r => r.text().then(t => console.log('[PUSH] ответ', r.status, t)))
     .catch(e => console.warn('[PUSH] fetch упал:', e.message));
+}
+
+/* =======================================================================
+   ЧЕМОДАН БЕЗ РУЧКИ — личный банк ошибок ученика по letterGap.
+   Накапливаются слова, на которых ученик ошибается. После 1 правильного
+   ответа в режиме повторения слово помечается mastered и уходит из чемодана.
+   ======================================================================= */
+const MISTAKE_BANK_CACHE = { items: null, loadedAt: 0 };
+
+async function loadMistakeBank(force){
+  if(!sb || !MY_PROFILE) return [];
+  /* Кэш на 30 секунд, чтобы не дёргать БД на каждый render */
+  if(!force && MISTAKE_BANK_CACHE.items && Date.now() - MISTAKE_BANK_CACHE.loadedAt < 30000){
+    return MISTAKE_BANK_CACHE.items;
+  }
+  try {
+    const arr = await restRequest('GET',
+      '/student_mistake_bank?student_id=eq.' + MY_PROFILE.id +
+      '&is_mastered=eq.false&order=last_seen_at.desc');
+    MISTAKE_BANK_CACHE.items = Array.isArray(arr) ? arr : [];
+    MISTAKE_BANK_CACHE.loadedAt = Date.now();
+    return MISTAKE_BANK_CACHE.items;
+  } catch(e){
+    console.warn('[mistake-bank] load fail:', e.message);
+    return [];
+  }
+}
+
+/* Записать ошибку. UPSERT через on_conflict по составному уникальному индексу. */
+async function recordMistakeForBank(opts){
+  if(!sb || !MY_PROFILE) return;
+  const word = String(opts.word || '').trim();
+  const correct = String(opts.correct || '').trim();
+  if(!correct) return;
+  try {
+    /* Сначала ищем — есть ли уже */
+    const wf = word ? '&word=eq.' + encodeURIComponent(word) : '&word=is.null';
+    const found = await restRequest('GET',
+      '/student_mistake_bank?student_id=eq.' + MY_PROFILE.id +
+      '&task_n=eq.' + opts.taskN +
+      wf +
+      '&correct_answer=eq.' + encodeURIComponent(correct) +
+      '&select=id,mistakes_count,is_mastered&limit=1');
+    if(Array.isArray(found) && found.length){
+      const row = found[0];
+      await restRequest('PATCH', '/student_mistake_bank?id=eq.' + row.id,
+        {
+          mistakes_count: (row.mistakes_count || 0) + 1,
+          correct_streak: 0,
+          is_mastered: false,
+          mastered_at: null,
+          last_seen_at: new Date().toISOString(),
+        },
+        { prefer: 'return=minimal' });
+    } else {
+      await restRequest('POST', '/student_mistake_bank',
+        {
+          student_id: MY_PROFILE.id,
+          task_n: opts.taskN,
+          kind: opts.kind || 'letterGap',
+          question_text: opts.question_text || null,
+          word: word || null,
+          correct_answer: correct,
+          explanation: opts.explanation || null,
+        },
+        { prefer: 'return=minimal' });
+    }
+    MISTAKE_BANK_CACHE.items = null;  /* инвалидировать */
+  } catch(e){
+    console.warn('[mistake-bank] record fail:', e.message);
+  }
+}
+
+/* Отметить правильный ответ. Если строка есть — увеличиваем streak; при streak>=1 → mastered. */
+async function recordCorrectForBank(opts){
+  if(!sb || !MY_PROFILE) return;
+  const word = String(opts.word || '').trim();
+  const correct = String(opts.correct || '').trim();
+  if(!correct) return;
+  try {
+    const wf = word ? '&word=eq.' + encodeURIComponent(word) : '&word=is.null';
+    const found = await restRequest('GET',
+      '/student_mistake_bank?student_id=eq.' + MY_PROFILE.id +
+      '&task_n=eq.' + opts.taskN +
+      wf +
+      '&correct_answer=eq.' + encodeURIComponent(correct) +
+      '&select=id,correct_streak,is_mastered&limit=1');
+    if(!Array.isArray(found) || !found.length) return;
+    const row = found[0];
+    if(row.is_mastered) return;
+    const newStreak = (row.correct_streak || 0) + 1;
+    const mastered = newStreak >= 1;  /* 1 правильный → освоено. Можно поднять до 2-3 позже. */
+    await restRequest('PATCH', '/student_mistake_bank?id=eq.' + row.id,
+      {
+        correct_streak: newStreak,
+        is_mastered: mastered,
+        mastered_at: mastered ? new Date().toISOString() : null,
+        last_seen_at: new Date().toISOString(),
+      },
+      { prefer: 'return=minimal' });
+    MISTAKE_BANK_CACHE.items = null;
+  } catch(e){
+    console.warn('[mistake-bank] correct fail:', e.message);
+  }
 }
 
 /* AI-проверка сочинения через Edge Function check-essay → YandexGPT 5.1 Pro.
@@ -6557,6 +6686,7 @@ function viewStudentHome(){
       'Сегодня Краш-тест в самом разгаре. Поехали 🐝'),
     hero, el('div', { style:{ height:'16px' }}),
     freeEssayCard,
+    mistakeBankCard(), el('div', { style:{ height:'16px' }}),
     kpi, el('div', { style:{ height:'16px' }}),
     map, el('div', { style:{ height:'16px' }}));
   /* Личная сводная по 26 заданиям ЕГЭ — между картой и достижениями */
@@ -7408,7 +7538,14 @@ function modalTheory(n){
               }, '🎲 10 случайных пар') : null,
               n === 5 ? el('button', { class:'btn btn-secondary',
                 onclick: () => { STATE.testOpen = 5; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = 5; STATE.testLimit = null; STATE.shuffledBank = null; STATE.theoryOpen = null; render(); }
-              }, '🎲 Быстрые 5 пар') : null));
+              }, '🎲 Быстрые 5 пар') : null,
+              /* Большой словник для задания 9 — отдельные кнопки случайной подборки */
+              n === 9 ? el('button', { class:'btn btn-p',
+                onclick: () => { STATE.testOpen = 9; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = 20; STATE.testLimit = null; STATE.shuffledBank = null; STATE.theoryOpen = null; render(); }
+              }, '🎲 20 случайных слов') : null,
+              n === 9 ? el('button', { class:'btn btn-secondary',
+                onclick: () => { STATE.testOpen = 9; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = 10; STATE.testLimit = null; STATE.shuffledBank = null; STATE.theoryOpen = null; render(); }
+              }, '🎲 Быстрые 10 слов') : null));
         })() : null,
 
         /* Если на вкладке Практика, но банка ещё нет — пояснение */
@@ -8006,6 +8143,26 @@ function modalTest(taskN){
                       limit: STATE.testLimit, shuffled: STATE.testShuffle
                     });
                   } catch(e){ console.warn(e); }
+                  /* 🧳 Чемодан без ручки: для каждого letterGap-вопроса записываем
+                     ошибку или подтверждаем правильный ответ (если был в чемодане). */
+                  try {
+                    for(let i = 0; i < bank.length; i++){
+                      const q = bank[i];
+                      if(!q || !q.letterGap) continue;
+                      const right = isCorrect(q, i);
+                      const word = String(q.word || '').trim();
+                      const corr = String(q.correct || '').trim();
+                      if(!corr) continue;
+                      const payload = {
+                        taskN, kind: 'letterGap',
+                        question_text: q.q || null,
+                        word, correct: corr,
+                        explanation: q.expl || null,
+                      };
+                      if(right) await recordCorrectForBank(payload);
+                      else      await recordMistakeForBank(payload);
+                    }
+                  } catch(e){ console.warn('[bank] flush fail:', e.message); }
                   /* Сбрасываем кэш истории попыток, чтобы при след. открытии перечитать.
                      Именно delete (а не = null), иначе условие подгрузки `list === undefined`
                      не сработает и блок «Мои попытки» зависнет на «Загружаем…». */
@@ -8413,6 +8570,202 @@ function viewStudentVariants(){
   const eCard = studentEssaysCard();
   if(eCard) wrap.append(eCard);
   return wrap;
+}
+
+/* Карточка «🧳 Чемодан без ручки» — личные ошибки ученика на letterGap.
+   Показывает число неосвоенных слов и кнопку «Отработать», которая открывает
+   тренажёр только из них. После 1 правильного ответа слово уходит из чемодана. */
+function mistakeBankCard(){
+  if(!MY_PROFILE || !MY_PROFILE.id) return el('div');
+  const card = el('div', { class:'card', style:{ marginBottom:'16px', background:'#FFF7E6', border:'1px solid #FACC15' }});
+  const head = el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }},
+    el('div', { style:{ fontSize:'36px', flexShrink:0 }}, '🧳'),
+    el('div', { style:{ flex:1, minWidth:'200px' }},
+      el('h3', { style:{ marginBottom:'4px' }}, 'Чемодан без ручки'),
+      el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', lineHeight:'1.5', margin:0 }},
+        'Слова, в которых ты ошиблась в тренажёре. Будем повторять их, пока не запомнишь — потом они уйдут из чемодана.')));
+  card.append(head);
+
+  const body = el('div', { style:{ marginTop:'12px' }});
+  card.append(body);
+  body.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px' }}, '⏳ Загружаю…'));
+
+  loadMistakeBank().then(items => {
+    body.innerHTML = '';
+    if(!items.length){
+      body.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px' }},
+        '🎉 Пока чисто! Ошибёшься — слова появятся здесь.'));
+      return;
+    }
+    /* Группируем по task_n */
+    const byTask = {};
+    items.forEach(it => {
+      const k = it.task_n;
+      if(!byTask[k]) byTask[k] = [];
+      byTask[k].push(it);
+    });
+    const total = items.length;
+    body.append(
+      el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px' }},
+        el('div', null,
+          el('div', { style:{ fontSize:'26px', fontWeight:'800', color:'#92400E' }}, total + ' слов'),
+          el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginTop:'2px' }},
+            'по ' + Object.keys(byTask).length + ' заданиям')),
+        el('button', { class:'btn btn-y',
+          onclick: () => {
+            STATE.mistakeTrainerOpen = true;
+            STATE.testAnswers = {};
+            STATE.testChecked = false;
+            STATE.testInstantSubmitted = {};
+            render();
+          }
+        }, '🏋️ Отработать')));
+    /* Список заданий с числом ошибок */
+    const tasksList = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'6px', marginTop:'10px' }});
+    Object.keys(byTask).sort((a,b) => +a - +b).forEach(k => {
+      const list = byTask[k];
+      tasksList.append(el('span', {
+        style:{ padding:'4px 10px', borderRadius:'999px', background:'#FFE2A8', color:'#92400E', fontSize:'12px', fontWeight:'700' }
+      }, '№' + k + ': ' + list.length));
+    });
+    body.append(tasksList);
+  });
+
+  return card;
+}
+
+/* Модалка тренажёра по чемодану ошибок. Использует ту же логику letterGap,
+   но bank = items из student_mistake_bank, и при правильном ответе сразу
+   помечаем слово mastered (оно уйдёт из чемодана при следующем рендере). */
+function modalMistakeTrainer(){
+  if(!STATE.mistakeTrainerOpen) return null;
+  const close = () => {
+    STATE.mistakeTrainerOpen = false;
+    STATE.testAnswers = {};
+    STATE.testChecked = false;
+    STATE.testInstantSubmitted = {};
+    /* Инвалидируем кэш чемодана — может число изменилось */
+    if(typeof MISTAKE_BANK_CACHE !== 'undefined') MISTAKE_BANK_CACHE.items = null;
+    render();
+  };
+  const items = MISTAKE_BANK_CACHE.items || [];
+  if(!items.length){
+    return el('div', { class:'modal-bg',
+      onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+    }, el('div', { class:'modal' },
+      el('div', { class:'modal-head' },
+        el('h3', null, '🧳 Чемодан пуст'),
+        el('button', { class:'x', onclick: close }, '×')),
+      el('div', { class:'modal-body' },
+        el('p', null, 'Здесь пока нет слов для повторения. Сначала пройди тренажёр — и слова, в которых ошибёшься, попадут сюда.')),
+      el('div', { class:'modal-foot' },
+        el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть'))));
+  }
+  /* Перемешиваем при первом открытии */
+  if(!STATE.mistakeBankShuffled || STATE.mistakeBankShuffled.length !== items.length){
+    const shuffled = items.slice();
+    for(let i = shuffled.length - 1; i > 0; i--){
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    STATE.mistakeBankShuffled = shuffled;
+  }
+  const bank = STATE.mistakeBankShuffled;
+
+  const body = el('div', { class:'modal-body' });
+  let correct = 0;
+  bank.forEach((it, i) => {
+    /* Сводим item к виду letterGap-вопроса */
+    const q = {
+      letterGap: true,
+      q: it.question_text || 'Вставь пропущенную букву',
+      word: it.word || '',
+      correct: it.correct_answer || '',
+      expl: it.explanation || null,
+      src: 'Чемодан без ручки · задание №' + it.task_n,
+    };
+    const ans = String(STATE.testAnswers[i] || '');
+    const answered = ans.length > 0;
+    const isRight = ans.trim().toLowerCase() === String(q.correct).toLowerCase();
+    const showResult = STATE.testChecked || (STATE.testInstant && answered);
+    if(showResult && isRight) correct++;
+
+    const block = el('div', { style:{ marginBottom:'14px', padding:'14px', border:'1px solid var(--border)', borderRadius:'12px', background:'var(--surface-soft)' }});
+    block.append(el('div', { style:{ fontWeight:'700', marginBottom:'6px', fontSize:'13px' }},
+      (i+1) + '. ' + q.q,
+      el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'8px' }}, '№' + it.task_n)));
+
+    const idx = q.word.indexOf('_');
+    const before = idx >= 0 ? q.word.slice(0, idx) : q.word;
+    const after  = idx >= 0 ? q.word.slice(idx + 1) : '';
+    const inpBg = !showResult ? '#fff' : (isRight ? '#D1FAE5' : '#FECACA');
+    const inpBorder = !showResult ? 'var(--border-2)' : (isRight ? 'var(--green)' : 'var(--red)');
+    const inpColor = !showResult ? '#0F766E' : (isRight ? '#065F46' : '#991B1B');
+    const inp = el('input', {
+      type:'text', maxlength:'1',
+      style:{ width:'42px', textAlign:'center', fontSize:'24px', fontWeight:'700',
+              padding:'4px 6px', borderRadius:'8px', boxSizing:'border-box',
+              border:'2px solid ' + inpBorder, background:inpBg, color:inpColor,
+              margin:'0 2px', textTransform:'lowercase' }
+    });
+    inp.value = ans;
+    if(showResult) inp.disabled = true;
+    inp.oninput = async (ev) => {
+      const v = String(ev.target.value || '').slice(0, 1).toLowerCase();
+      ev.target.value = v;
+      STATE.testAnswers[i] = v;
+      if(v){
+        /* Сразу проверяем и записываем результат */
+        const ok = v === String(q.correct).toLowerCase();
+        if(ok){
+          await recordCorrectForBank({
+            taskN: it.task_n, word: q.word, correct: q.correct,
+          });
+        } else {
+          await recordMistakeForBank({
+            taskN: it.task_n, kind:'letterGap', word: q.word, correct: q.correct,
+            question_text: q.q, explanation: q.expl,
+          });
+        }
+        render();
+      }
+    };
+    block.append(
+      el('div', { style:{ padding:'14px', background:'#FFFCF2', borderRadius:'10px', textAlign:'center' }},
+        el('div', { style:{ fontSize:'24px', fontWeight:'700' }},
+          before, inp, after),
+        showResult && !isRight
+          ? el('div', { style:{ marginTop:'6px', fontSize:'13px', color:'var(--green)' }},
+              'Правильно: ', el('b', null, q.correct))
+          : null,
+        showResult && isRight
+          ? el('div', { style:{ marginTop:'6px', fontSize:'12px', color:'var(--green)' }},
+              '✓ Освоено! Слово уйдёт из чемодана.')
+          : null));
+    /* Пояснение */
+    if(showResult && q.expl){
+      block.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px', fontSize:'12px' }},
+        el('div', { style:{ fontSize:'10px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Почему так?'),
+        el('div', { html: formatExplanation(q.expl) })));
+    }
+    body.append(block);
+  });
+
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+  },
+    el('div', { class:'modal', style:{ maxWidth:'640px' }},
+      el('div', { class:'modal-head' },
+        el('div', null,
+          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+            '🧳 Чемодан без ручки · ' + bank.length + ' слов'),
+          el('h2', { style:{ marginTop:'4px' }}, 'Повторение ошибок')),
+        el('button', { class:'x', onclick: close }, '×')),
+      body,
+      el('div', { class:'modal-foot' },
+        el('span', { style:{ fontSize:'13px', color:'var(--ink-2)' }},
+          'Правильно: ' + correct + ' / ' + bank.length + ' · отработанные уйдут из чемодана'),
+        el('button', { class:'btn btn-y', onclick: close }, '✓ Закрыть и обновить'))));
 }
 
 /* Карточка «Мои сочинения» — все работы ученика. Клик — открывает modalEssayResult,
@@ -16834,6 +17187,7 @@ function _renderNow(){
   if(STATE.examineQuestion) root.append(modalExamineQuestion());
   if(STATE.linkAttempt) root.append(modalLinkStudent());
   if(STATE.showPushHelp) root.append(modalPushHelp());
+  if(STATE.mistakeTrainerOpen) root.append(modalMistakeTrainer());
   if(STATE.linkEssay) root.append(modalLinkEssay());
   if(STATE.studentEssayResultOpen != null) root.append(modalEssayResult(STATE.studentEssayResultOpen));
   if(STATE.sampleOpen != null) root.append(modalEssaySample(STATE.sampleOpen));
