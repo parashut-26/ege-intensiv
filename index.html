@@ -8413,7 +8413,7 @@ function modalVariantBuilder(){
    формулировку задания, твой ответ, правильный ответ, балл. */
 function modalExamineQuestion(){
   if(!STATE.examineQuestion) return null;
-  const { variantId, num, userAnswer, points, max } = STATE.examineQuestion;
+  const { variantId, num, userAnswer, points, max, studentNote } = STATE.examineQuestion;
   const close = () => { STATE.examineQuestion = null; STATE.examineQuestionData = null; render(); };
 
   /* Загружаем вопрос если ещё не загружали */
@@ -8484,6 +8484,14 @@ function modalExamineQuestion(){
       body.append(
         el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E', marginBottom:'6px' }}, '💡 Пояснение'),
         el('div', { html: formatExplanation(expl), style:{ padding:'10px 14px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'10px', fontSize:'14px', lineHeight:'1.6', wordBreak:'break-word', color:'var(--ink)' }}));
+    }
+
+    /* РНО ученика — если заполнил поле «Работа над ошибкой» */
+    const note = (studentNote || '').trim();
+    if(note){
+      body.append(
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF', marginTop:'14px', marginBottom:'6px' }}, '✍️ Работа над ошибкой ученика'),
+        el('div', { style:{ padding:'10px 14px', background:'#EFF6FF', border:'1px solid #93C5FD', borderRadius:'10px', fontSize:'14px', lineHeight:'1.6', whiteSpace:'pre-wrap', color:'var(--ink)' }}, note));
     }
   }
 
@@ -14368,7 +14376,7 @@ async function loadVariantFull(variantId){
   if(attemptIds.length){
     answers = await restRequest('GET',
       '/test_variant_answers?attempt_id=in.(' + attemptIds.join(',') + ')' +
-      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct');
+      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note');
   }
   const byAttempt = {};
   (answers || []).forEach(a => {
@@ -14880,7 +14888,8 @@ function variantCell(ans, opts){
       ev.stopPropagation();
       STATE.examineQuestion = {
         variantId: opts.variantId, num: opts.num,
-        userAnswer: ans.user_answer, points, max
+        userAnswer: ans.user_answer, points, max,
+        studentNote: ans.student_note || null
       };
       render();
     };
@@ -15667,9 +15676,45 @@ function viewSolverResult(){
   if(wrong.length){
     wrap.append(el('h3', { style:{ marginTop:'18px', marginBottom:'8px' }},
       '⚠ Ошибки (' + wrong.length + ')'));
+    /* attemptId — для PATCH student_note */
+    const attemptId = STATE.solverResultAttemptId;
     wrong.forEach(r => {
       const q = qByNum[r.num];
       const expl = q && q.explanation ? String(q.explanation).trim() : '';
+      /* Поле РНО: ученик пишет, почему правильно так. Debounced PATCH в БД. */
+      const noteTa = el('textarea', {
+        placeholder:'Напиши, почему правильный ответ именно такой. Учитель увидит твоё пояснение.',
+        rows: 3,
+        style:{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1px solid var(--border-2)',
+                fontSize:'13px', lineHeight:'1.4', boxSizing:'border-box', resize:'vertical',
+                fontFamily:'inherit', marginTop:'4px' }
+      });
+      noteTa.value = r.student_note || '';
+      const status = el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'8px' }}, '');
+      let noteTimer = null;
+      noteTa.oninput = () => {
+        r.student_note = noteTa.value;
+        if(!attemptId){
+          status.textContent = '— нужна авторизация';
+          return;
+        }
+        status.textContent = '⏳';
+        clearTimeout(noteTimer);
+        noteTimer = setTimeout(async () => {
+          try {
+            await restRequest('PATCH',
+              '/test_variant_answers?attempt_id=eq.' + attemptId +
+              '&question_num=eq.' + r.num,
+              { student_note: noteTa.value || null },
+              { prefer: 'return=minimal' });
+            status.textContent = '✓ сохранено';
+            setTimeout(() => { status.textContent = ''; }, 1500);
+          } catch(e){
+            console.warn('[note] save fail:', e.message);
+            status.textContent = '⚠ не сохранилось';
+          }
+        }, 800);
+      };
       wrap.append(el('div', { class:'card', style:{ marginBottom:'8px', background:'#FEF2F2', borderColor:'#FCA5A5' }},
         el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--red)', marginBottom:'4px' }}, 'Задание №' + r.num),
         el('div', { style:{ fontSize:'13px', marginBottom:'2px' }},
@@ -15679,7 +15724,15 @@ function viewSolverResult(){
         expl ? el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px' }},
           el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Почему так?'),
           el('div', { html: formatExplanation(expl), style:{ fontSize:'13px', color:'var(--ink)', lineHeight:'1.5', wordBreak:'break-word' }})
-        ) : null));
+        ) : null,
+        /* Блок РНО — пояснение ученика */
+        el('div', { style:{ marginTop:'10px', padding:'8px 10px', background:'#EFF6FF', border:'1px solid #93C5FD', borderRadius:'6px' }},
+          el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between' }},
+            el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#1E40AF' }}, '✍️ Работа над ошибкой'),
+            status),
+          el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px' }},
+            'Напиши своими словами, почему правильно — учитель увидит.'),
+          noteTa)));
     });
   }
 
