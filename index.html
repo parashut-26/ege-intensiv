@@ -627,6 +627,7 @@ const STATE = {
   toast: null,
   showOnboarding: false,
   onboardingStep: 1,              // 1..ONBOARDING_STEPS.length — текущий слайд тура
+  showPushHelp: false,            // модалка-инструкция «Как включить уведомления»
   theoryOpen: null,        // номер задания
   taskTab: 'theory',       // 'theory' | 'practice' — какая вкладка открыта в карточке задания
   attendanceOpen: false,   // открыта модалка посещаемости
@@ -4659,6 +4660,12 @@ function webPushCard(){
     el('span', { style:{ fontSize:'28px' }}, '🔔'),
     statusBlock);
   card.append(row);
+  /* Кнопка-инструкция «Как включить» — всегда видна, чтобы любой ученик мог разобраться */
+  card.append(
+    el('div', { style:{ marginTop:'8px' }},
+      el('button', { class:'btn btn-secondary btn-sm',
+        onclick: () => { STATE.showPushHelp = true; render(); }
+      }, '📲 Как включить уведомления')));
   /* Сразу рисуем "не включено" — это безопасный дефолт */
   renderState(false);
   /* Асинхронно проверим — если уже есть активная подписка, обновим */
@@ -4666,6 +4673,104 @@ function webPushCard(){
     if(sub && Notification.permission === 'granted') renderState(true);
   }).catch(() => {});
   return card;
+}
+
+/* Модалка «Как включить уведомления» — пошаговая инструкция по платформам.
+   Открывается из webPushCard и из чек-листа учителя. */
+function modalPushHelp(){
+  const close = () => { STATE.showPushHelp = false; render(); };
+  const sectionTitle = (emoji, t) => el('h4', {
+    style:{ margin:'18px 0 8px 0', fontSize:'15px', display:'flex', alignItems:'center', gap:'6px' }
+  }, el('span', { style:{ fontSize:'18px' }}, emoji), t);
+  const step = (n, body) => el('li', {
+    style:{ marginBottom:'8px', fontSize:'13px', lineHeight:'1.5' }
+  }, body);
+  const block = (bg) => ({ background: bg, padding:'12px 14px', borderRadius:'10px', marginBottom:'4px' });
+
+  /* Определяем платформу пользователя — чтобы поднять её секцию наверх */
+  const ua = (navigator.userAgent || '').toLowerCase();
+  const isIOS = /iphone|ipad|ipod/.test(ua);
+  const isAndroid = /android/.test(ua);
+
+  const iosBlock = el('div', { style: block('#FFF7E6') },
+    sectionTitle('📱', 'iPhone / iPad — через Safari'),
+    el('div', { style:{ fontSize:'12px', color:'#92400E', marginBottom:'8px' }},
+      '⚠️ Apple даёт пуши только из приложения, добавленного на главный экран. ' +
+      'Через обычный Safari не работает.'),
+    el('ol', { style:{ margin:'0 0 0 18px', padding:0 }},
+      step(1, ['Открой ZebRus в ', el('b', null, 'Safari'), ' (не в Chrome и не в Яндексе — у них на iOS нет пушей).']),
+      step(2, ['Внизу нажми кнопку ', el('b', null, 'Поделиться'), ' — квадрат со стрелкой вверх.']),
+      step(3, ['Пролистай меню вниз → ', el('b', null, '«На экран „Домой"»'), ' → Добавить.']),
+      step(4, ['Закрой Safari. Запусти ZebRus ', el('b', null, 'с иконки на главном экране'), ' (как обычное приложение).']),
+      step(5, ['Зайди в Профиль → нажми ', el('b', null, '🔔 Включить'), '. Разреши уведомления — готово.'])));
+
+  const androidBlock = el('div', { style: block('#ECFDF5') },
+    sectionTitle('🤖', 'Android — через Chrome'),
+    el('ol', { style:{ margin:'0 0 0 18px', padding:0 }},
+      step(1, ['Открой ZebRus в ', el('b', null, 'Chrome'), '.']),
+      step(2, ['Зайди в ', el('b', null, 'Профиль'), '.']),
+      step(3, ['Нажми ', el('b', null, '🔔 Включить'), ' в карточке «Push-уведомления».']),
+      step(4, ['Подтверди ', el('b', null, '«Разрешить»'), ' в диалоге браузера.']),
+      step(5, ['(По желанию) Меню Chrome ⋮ → ', el('b', null, '«Добавить на главный экран»'), ' — будет как приложение.'])),
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'6px' }},
+      'В Яндекс.Браузере и Mi Browser тоже работает — там аналогичные пункты.'));
+
+  const desktopBlock = el('div', { style: block('#EFF6FF') },
+    sectionTitle('💻', 'Компьютер — Chrome / Edge / Yandex / Firefox'),
+    el('ol', { style:{ margin:'0 0 0 18px', padding:0 }},
+      step(1, ['Открой ZebRus в браузере.']),
+      step(2, ['Зайди в ', el('b', null, 'Профиль'), '.']),
+      step(3, ['Нажми ', el('b', null, '🔔 Включить'), ' в карточке «Push-уведомления».']),
+      step(4, ['В диалоге браузера (обычно вверху слева) выбери ', el('b', null, '«Разрешить»'), '.']),
+      step(5, ['Готово — пуши будут приходить, пока браузер открыт (или в фоне на маке).'])),
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'6px' }},
+      'Safari на маке тоже работает — но только если ZebRus открыт хотя бы в одной вкладке.'));
+
+  const macSafariBlock = el('div', { style: block('#F1F5F9') },
+    sectionTitle('🍏', 'Mac · Safari'),
+    el('ol', { style:{ margin:'0 0 0 18px', padding:0 }},
+      step(1, ['Safari → меню ', el('b', null, 'Файл'), ' → ', el('b', null, '«Добавить в Dock»'), ' (Sequoia/Sonoma).']),
+      step(2, ['Запусти ZebRus из Dock — он откроется как отдельное приложение.']),
+      step(3, ['Зайди в Профиль → ', el('b', null, '🔔 Включить'), '.']),
+      step(4, ['Готово — пуши будут приходить даже если приложение закрыто.'])));
+
+  const troubleBlock = el('div', { style: block('#FEF3C7') },
+    sectionTitle('❓', 'Если не работает'),
+    el('ul', { style:{ margin:'0 0 0 18px', padding:0 }},
+      el('li', { style:{ marginBottom:'6px', fontSize:'13px' }},
+        el('b', null, 'iPhone:'), ' проверь что открыл с иконки на рабочем столе, а не из Safari.'),
+      el('li', { style:{ marginBottom:'6px', fontSize:'13px' }},
+        el('b', null, 'Уведомления выключены в системе:'), ' Настройки телефона → Уведомления → найди ZebRus → разреши.'),
+      el('li', { style:{ marginBottom:'6px', fontSize:'13px' }},
+        el('b', null, 'Режим «Не беспокоить» / фокус:'), ' пуши приходят, но в шторку молча, без звука.'),
+      el('li', { style:{ marginBottom:'6px', fontSize:'13px' }},
+        el('b', null, 'Браузер раньше отказал:'), ' зайди в настройки сайта (значок «🔒» рядом с адресом) и разреши уведомления вручную.')));
+
+  const blocks = [];
+  /* На iOS — iOS наверху, потом desktop, потом android (он не нужен) */
+  if(isIOS){
+    blocks.push(iosBlock, troubleBlock, androidBlock, desktopBlock, macSafariBlock);
+  } else if(isAndroid){
+    blocks.push(androidBlock, troubleBlock, iosBlock, desktopBlock, macSafariBlock);
+  } else {
+    blocks.push(desktopBlock, macSafariBlock, troubleBlock, iosBlock, androidBlock);
+  }
+
+  return el('div', { class:'modal-backdrop', onclick: (e) => { if(e.target === e.currentTarget) close(); }},
+    el('div', { class:'modal', style:{ maxWidth:'620px', maxHeight:'90vh', overflow:'auto' }},
+      el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px' }},
+        el('h3', { style:{ margin:0 }}, '📲 Как включить уведомления'),
+        el('button', { class:'btn-icon', onclick: close, title:'Закрыть' }, '✕')),
+      el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'14px' }},
+        'Пуши приходят на телефон и в браузер. ' +
+        'Они напомнят, когда учитель открыл день, проверил твоё сочинение или написал в чате.'),
+      ...blocks,
+      el('div', { style:{ marginTop:'14px', padding:'10px 12px', background:'var(--bg)', borderRadius:'8px', fontSize:'12px', color:'var(--ink-3)' }},
+        '💡 Не получается? Можно подключить Telegram-бота вместо браузерных пушей — кнопка ',
+        el('b', null, '«🤖 Привязать Telegram»'),
+        ' в Профиле. Он работает на всех устройствах одинаково.'),
+      el('div', { style:{ display:'flex', justifyContent:'flex-end', marginTop:'14px' }},
+        el('button', { class:'btn btn-y', onclick: close }, 'Понятно'))));
 }
 
 /* =======================================================================
@@ -4810,12 +4915,26 @@ async function loadReadinessCheck(){
   };
   const tgArr   = await safeGet('/profiles?role=eq.student&telegram_id=not.is.null&select=id', []);
   const walkArr = await safeGet('/walk_materials?select=id', []);
+  /* Считаем уникальных учеников, подписанных на Web Push.
+     PostgREST не умеет DISTINCT — берём все строки и считаем уникальные user_id.
+     RLS: для учителя должен быть SELECT на push_subscriptions (см. sql/add_push_subscriptions_teacher_select.sql). */
+  const pushRaw = await safeGet('/push_subscriptions?select=user_id', []);
+  let pushCount = null;
+  if(Array.isArray(pushRaw)){
+    const studentIds = new Set(STUDENTS.map(s => s.id));
+    const uniq = new Set();
+    for(const r of pushRaw){
+      if(r && r.user_id && studentIds.has(r.user_id)) uniq.add(r.user_id);
+    }
+    pushCount = uniq.size;
+  }
   /* Вебинары уже загружены в WEBINARS — не дёргаем прокси ещё раз
      (он капризничал именно на /day_activities). */
   const webCountLocal = Array.isArray(WEBINARS) ? WEBINARS.length : null;
   STATE.readiness = {
     students:  STUDENTS.length,
     tgCount:   tgArr   === null ? null : tgArr.length,
+    pushCount: pushCount,
     webCount:  webCountLocal,
     walkCount: walkArr === null ? null : walkArr.length,
   };
@@ -4856,6 +4975,17 @@ function readinessCard(){
           : null)
     },
     {
+      label: 'Подписаны на пуш в браузере',
+      value: r.pushCount == null ? '?' : (r.pushCount + ' из ' + r.students),
+      ok:   r.pushCount != null && r.students > 0 && r.pushCount >= Math.ceil(r.students * 0.7),
+      warn: r.pushCount != null && r.pushCount > 0 && r.pushCount < r.students,
+      tip:  r.pushCount == null
+        ? 'Не удалось посчитать — возможно, ещё не накатил RLS-политику (sql/add_push_subscriptions_teacher_select.sql)'
+        : (r.pushCount < r.students
+          ? 'Покажи инструкцию по подключению уведомлений в Профиле ученика — кнопка «📲 Как включить уведомления»'
+          : null)
+    },
+    {
       label: 'Вебинары настроены',
       value: r.webCount == null ? '?' : (r.webCount + ' из 6'),
       ok:   r.webCount != null && r.webCount >= 6,
@@ -4889,12 +5019,21 @@ function readinessCard(){
   items.forEach(it => {
     const icon = it.ok ? '✅' : it.warn ? '⚠️' : '⏳';
     const valColor = it.ok ? 'var(--green)' : it.warn ? 'var(--warn)' : 'var(--ink-2)';
-    card.append(el('div', {
-      style:{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 0', borderTop:'1px solid rgba(0,0,0,.05)' }
-    },
+    const isPushRow = it.label === 'Подписаны на пуш в браузере';
+    const rowProps = {
+      style:{ display:'flex', alignItems:'center', gap:'10px', padding:'8px 0', borderTop:'1px solid rgba(0,0,0,.05)',
+              cursor: isPushRow ? 'pointer' : 'default' }
+    };
+    if(isPushRow){
+      rowProps.title = 'Открыть инструкцию по подключению уведомлений';
+      rowProps.onclick = () => { STATE.showPushHelp = true; render(); };
+    }
+    card.append(el('div', rowProps,
       el('span', { style:{ fontSize:'18px', width:'24px' }}, icon),
       el('div', { style:{ flex:1 }},
-        el('div', { style:{ fontWeight:'700', fontSize:'14px' }}, it.label),
+        el('div', { style:{ fontWeight:'700', fontSize:'14px' }},
+          it.label,
+          isPushRow ? el('span', { style:{ fontSize:'11px', color:'var(--p)', marginLeft:'6px' }}, '📲 инструкция') : null),
         it.tip ? el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'2px' }}, it.tip) : null),
       el('div', { style:{ fontWeight:'800', fontSize:'15px', color: valColor }}, it.value)));
   });
@@ -12898,6 +13037,27 @@ async function loadVariantFull(variantId){
   STATE.currentVariantData = { variant, attempts: attempts || [], answersByAttempt: byAttempt };
 }
 
+/* --- Удалить попытку варианта (только учитель/куратор). Удаляем сначала
+   ответы (test_variant_answers), потом саму попытку (test_variant_attempts).
+   После DELETE — перезагружаем data сводной и перерендериваем. */
+async function deleteAttempt(variantId, attemptId, studentName){
+  const ok = confirm('Удалить попытку «' + studentName + '»?\n\n' +
+    'Все ответы будут удалены навсегда. Ученик сможет пройти вариант заново.');
+  if(!ok) return;
+  try {
+    await restRequest('DELETE', '/test_variant_answers?attempt_id=eq.' + attemptId);
+    await restRequest('DELETE', '/test_variant_attempts?id=eq.' + attemptId);
+    showToast('✓ Попытка удалена');
+    /* Перезагрузим сводную */
+    STATE.currentVariantData = null;
+    render();
+    try { await loadVariantFull(variantId); } catch(e){ showToast('⚠ ' + e.message); }
+    render();
+  } catch(e){
+    showToast('⚠ Не удалось удалить: ' + (e.message || e));
+  }
+}
+
 /* --- Импорт: создать вариант + попытки + ответы -- */
 async function importOtpFile(file, title){
   if(!file || !title) return;
@@ -13217,7 +13377,8 @@ function viewVariantSummary(){
     el('th', { style:{ background:'#FEF3C7' }, title:'Сумма К1-К10' }, 'соч'),
     el('th', { style:{ background:'#DBEAFE' }, title:'Первичный = тест + сочинение' }, 'Прв'),
     el('th', { style:{ background:'#D1FAE5' }, title:'Тестовый по шкале ФИПИ 2026' }, 'Тст'),
-    el('th', { style:{ background:'#FFEDD5' }, title:'Школьная отметка по тестовому баллу' }, '★'));
+    el('th', { style:{ background:'#FFEDD5' }, title:'Школьная отметка по тестовому баллу' }, '★'),
+    el('th', { style:{ background:'#FEE2E2' }, title:'Удалить попытку этого ученика' }, '✕'));
   thead.append(trHead);
   table.append(thead);
 
@@ -13292,7 +13453,14 @@ function viewVariantSummary(){
       cellNum(row.testScore, '#D1FAE5'),
       el('td', { style:{ background:'#FFEDD5', fontWeight:'700', textAlign:'center', fontSize:'14px',
         color: row.grade === 5 ? '#065F46' : row.grade === 4 ? '#92400E' : row.grade === 3 ? '#9A3412' : '#991B1B' }},
-        row.grade == null ? '—' : String(row.grade)));
+        row.grade == null ? '—' : String(row.grade)),
+      /* Удалить попытку (учитель/куратор) */
+      el('td', { style:{ background:'#FEE2E2', textAlign:'center', padding:'2px' }},
+        el('button', {
+          style:{ padding:'2px 6px', fontSize:'14px', color:'#991B1B', background:'transparent', border:'none', cursor:'pointer' },
+          title:'Удалить попытку «' + profileName + '» и все её ответы',
+          onclick: (ev) => { ev.stopPropagation(); deleteAttempt(v.id, a.id, profileName); }
+        }, '🗑')));
     tbody.append(tr);
   });
   table.append(tbody);
@@ -15925,6 +16093,7 @@ function _renderNow(){
   if(STATE.editVariantId) root.append(modalEditVariant());
   if(STATE.examineQuestion) root.append(modalExamineQuestion());
   if(STATE.linkAttempt) root.append(modalLinkStudent());
+  if(STATE.showPushHelp) root.append(modalPushHelp());
   if(STATE.linkEssay) root.append(modalLinkEssay());
   if(STATE.studentEssayResultOpen != null) root.append(modalEssayResult(STATE.studentEssayResultOpen));
   if(STATE.sampleOpen != null) root.append(modalEssaySample(STATE.sampleOpen));
