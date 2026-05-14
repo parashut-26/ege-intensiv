@@ -237,17 +237,21 @@ serve(async (req) => {
 
     /* Нормализуем marks (массив ошибок в тексте) */
     const ALLOWED_KINDS = new Set(['orf','pun','gram','rech','fact','log','eth']);
-    const marks: Array<{kind:string; fragment:string; comment:string}> = [];
+    const marks: Array<{kind:string; severity:string; title:string; fragment:string; comment:string; correction:string}> = [];
     if(Array.isArray(parsed.marks)){
       for(const m of parsed.marks){
         if(!m || typeof m !== 'object') continue;
         const kind = String(m.kind || '').trim().toLowerCase();
         const fragment = String(m.fragment || '').trim();
         const comment = String(m.comment || '').trim();
+        const title = String(m.title || '').trim();
+        const correction = String(m.correction || '').trim();
+        let severity = String(m.severity || 'error').trim().toLowerCase();
+        if(severity !== 'warn') severity = 'error';
         if(!ALLOWED_KINDS.has(kind)) continue;
         if(!fragment || fragment.length < 2) continue;
-        if(fragment.length > 200) continue;  /* подозрительно длинно — игнорируем */
-        marks.push({ kind, fragment, comment });
+        if(fragment.length > 300) continue;
+        marks.push({ kind, severity, title, fragment, comment, correction });
       }
     }
 

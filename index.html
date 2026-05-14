@@ -10903,10 +10903,20 @@ function modalEssayReview(essayId){
                     if(!m || !m.fragment) continue;
                     const idx = essayText.indexOf(m.fragment);
                     if(idx < 0){ marksFailed++; continue; }
+                    /* Собираем красивый комментарий в стиле Афины:
+                       🤖 [ОШИБКА/НЕДОЧЁТ] Заголовок
+                       Подробный разбор
+                       Правильно: правильный вариант */
+                    const sevLabel = m.severity === 'warn' ? '⚠ НЕДОЧЁТ' : '❌ ОШИБКА';
+                    const parts = ['🤖 ' + sevLabel];
+                    if(m.title) parts[0] += ' · ' + m.title;
+                    if(m.comment) parts.push(m.comment);
+                    if(m.correction) parts.push('Правильно: ' + m.correction);
+                    const commentText = parts.join('\n\n');
                     try {
                       const saved = await saveEssayComment(essay.id, {
                         kind: m.kind,
-                        comment: '🤖 ' + (m.comment || ''),
+                        comment: commentText,
                         fragment: m.fragment,
                         start_pos: idx,
                         end_pos: idx + m.fragment.length,
