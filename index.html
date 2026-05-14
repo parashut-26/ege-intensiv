@@ -4899,7 +4899,10 @@ async function recordMistakeForBank(opts){
   }
 }
 
-/* Отметить правильный ответ. Если строка есть — увеличиваем streak; при streak>=1 → mastered. */
+/* Сколько правильных подряд нужно для освобождения слова из чемодана */
+const MISTAKE_BANK_MASTER_STREAK = 3;
+
+/* Отметить правильный ответ. Если строка есть — увеличиваем streak; при streak>=MASTER_STREAK → mastered. */
 async function recordCorrectForBank(opts){
   if(!sb || !MY_PROFILE) return;
   const word = String(opts.word || '').trim();
@@ -4917,7 +4920,7 @@ async function recordCorrectForBank(opts){
     const row = found[0];
     if(row.is_mastered) return;
     const newStreak = (row.correct_streak || 0) + 1;
-    const mastered = newStreak >= 1;  /* 1 правильный → освоено. Можно поднять до 2-3 позже. */
+    const mastered = newStreak >= MISTAKE_BANK_MASTER_STREAK;  /* нужно 3 правильных подряд */
     await restRequest('PATCH', '/student_mistake_bank?id=eq.' + row.id,
       {
         correct_streak: newStreak,
@@ -7971,6 +7974,8 @@ function modalTest(taskN){
         : (isRight ? '#065F46' : '#991B1B');
       const inp = el('input', {
         type:'text', maxlength:'1',
+        'data-letter-i': String(i),
+        autocapitalize:'off', autocomplete:'off', autocorrect:'off', spellcheck:'false',
         style:{ width:'42px', textAlign:'center', fontSize:'24px', fontWeight:'700',
                 padding:'4px 6px', borderRadius:'8px', boxSizing:'border-box',
                 border:'2px solid ' + inpBorder, background:inpBg, color:inpColor,
@@ -7982,8 +7987,17 @@ function modalTest(taskN){
         const v = String(ev.target.value || '').slice(0, 1).toLowerCase();
         ev.target.value = v;
         STATE.testAnswers[i] = v;
-        /* Если режим instant и буква введена — рендерим, чтобы появилась подсветка */
-        if(instantMode && v) render();
+        /* Если режим instant и буква введена — рендерим, чтобы появилась подсветка,
+           и СРАЗУ переводим фокус на следующий input — иначе клавиатура схлопнется. */
+        if(instantMode && v){
+          const nextI = i + 1;
+          render();
+          /* requestAnimationFrame — после того, как DOM пересобран */
+          requestAnimationFrame(() => {
+            const next = document.querySelector('input[data-letter-i="' + nextI + '"]:not([disabled])');
+            if(next) next.focus();
+          });
+        }
       };
       const row = el('div', { style:{ padding:'18px 16px', background:'#FFFCF2', borderRadius:'10px', textAlign:'center', border:'1px solid var(--border)' }},
         el('div', { style:{ fontSize:'10px', color:'#854D0E', textTransform:'uppercase', fontWeight:'700', letterSpacing:'.08em', marginBottom:'12px' }},
@@ -8293,6 +8307,8 @@ function modalTest(taskN){
                   } catch(e){ console.warn(e); }
                   /* 🧳 Чемодан без ручки: для каждого letterGap-вопроса записываем
                      ошибку или подтверждаем правильный ответ (если был в чемодане).
+                     ВАЖНО: пустые ответы (ученик пропустил) НЕ считаем ошибкой —
+                     просто игнорируем, чтобы чемодан не засорялся пропусками.
                      Все запросы параллельно через Promise.allSettled — не блокирует UI. */
                   try {
                     const promises = bank.map((q, i) => {
@@ -8300,6 +8316,10 @@ function modalTest(taskN){
                       const word = String(q.word || '').trim();
                       const corr = String(q.correct || '').trim();
                       if(!corr) return null;
+                      /* Пропуск (пустой ответ) — не считаем как ошибку */
+                      const ans = STATE.testAnswers[i];
+                      const ansStr = ans == null ? '' : String(ans).trim();
+                      if(!ansStr) return null;
                       const right = isCorrect(q, i);
                       const payload = {
                         taskN, kind: 'letterGap',
@@ -8758,16 +8778,34 @@ function mistakeBankCard(){
         el('div', null,
           el('div', { style:{ fontSize:'26px', fontWeight:'800', color:'#92400E' }}, total + ' слов'),
           el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginTop:'2px' }},
-            'по ' + Object.keys(byTask).length + ' заданиям')),
-        el('button', { class:'btn btn-y',
-          onclick: () => {
-            STATE.mistakeTrainerOpen = true;
-            STATE.testAnswers = {};
-            STATE.testChecked = false;
-            STATE.testInstantSubmitted = {};
-            render();
-          }
-        }, '🏋️ Отработать')));
+            'по ' + Object.keys(byTask).length + ' заданиям · уходят после ' + MISTAKE_BANK_MASTER_STREAK + ' правильных подряд')),
+        el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }},
+          el('button', { class:'btn btn-y',
+            onclick: () => {
+              STATE.mistakeTrainerOpen = true;
+              STATE.testAnswers = {};
+              STATE.testChecked = false;
+              STATE.testInstantSubmitted = {};
+              STATE.mistakeBankShuffled = null;
+              render();
+            }
+          }, '🏋️ Отработать'),
+          el('button', { class:'btn btn-secondary btn-sm',
+            title:'Удалить все слова из чемодана (например, если накопились лишние из-за пропусков)',
+            onclick: async () => {
+              if(!confirm('Очистить чемодан полностью (' + total + ' слов)? Это нельзя отменить.')) return;
+              try {
+                await restRequest('DELETE',
+                  '/student_mistake_bank?student_id=eq.' + MY_PROFILE.id,
+                  null, { prefer: 'return=minimal' });
+                MISTAKE_BANK_CACHE.items = null;
+                showToast('✓ Чемодан очищен');
+                render();
+              } catch(e){
+                showToast('⚠ Не удалось очистить: ' + (e.message || e));
+              }
+            }
+          }, '🗑 Очистить'))));
     /* Список заданий с числом ошибок */
     const tasksList = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'6px', marginTop:'10px' }});
     Object.keys(byTask).sort((a,b) => +a - +b).forEach(k => {
@@ -8853,6 +8891,8 @@ function modalMistakeTrainer(){
     const inpColor = !showResult ? '#0F766E' : (isRight ? '#065F46' : '#991B1B');
     const inp = el('input', {
       type:'text', maxlength:'1',
+      'data-bank-i': String(i),
+      autocapitalize:'off', autocomplete:'off', autocorrect:'off', spellcheck:'false',
       style:{ width:'42px', textAlign:'center', fontSize:'24px', fontWeight:'700',
               padding:'4px 6px', borderRadius:'8px', boxSizing:'border-box',
               border:'2px solid ' + inpBorder, background:inpBg, color:inpColor,
@@ -8867,17 +8907,25 @@ function modalMistakeTrainer(){
       if(v){
         /* Сразу проверяем и записываем результат (Ё/Е равны) */
         const ok = normEY(v) === normEY(q.correct);
+        const nextI = i + 1;
+        /* Сразу переводим фокус на следующий input, чтобы клавиатура не закрылась */
+        const tryFocusNext = () => {
+          const next = document.querySelector('input[data-bank-i="' + nextI + '"]:not([disabled])');
+          if(next) next.focus();
+        };
         if(ok){
-          await recordCorrectForBank({
+          /* Не блокируем UI — пушим в БД параллельно, рендер сразу */
+          recordCorrectForBank({
             taskN: it.task_n, word: q.word, correct: q.correct,
-          });
+          }).catch(() => {});
         } else {
-          await recordMistakeForBank({
+          recordMistakeForBank({
             taskN: it.task_n, kind:'letterGap', word: q.word, correct: q.correct,
             question_text: q.q, explanation: q.expl,
-          });
+          }).catch(() => {});
         }
         render();
+        requestAnimationFrame(tryFocusNext);
       }
     };
     block.append(
@@ -8889,8 +8937,15 @@ function modalMistakeTrainer(){
               'Правильно: ', el('b', null, q.correct))
           : null,
         showResult && isRight
-          ? el('div', { style:{ marginTop:'6px', fontSize:'12px', color:'var(--green)' }},
-              '✓ Освоено! Слово уйдёт из чемодана.')
+          ? (() => {
+              /* Новый streak = старый + 1 (после recordCorrectForBank). */
+              const newStreak = (it.correct_streak || 0) + 1;
+              const remaining = MISTAKE_BANK_MASTER_STREAK - newStreak;
+              const text = remaining <= 0
+                ? '✓ Освоено! Слово уйдёт из чемодана.'
+                : '✓ Правильно! Ещё ' + remaining + ' ' + (remaining === 1 ? 'раз' : 'раза') + ' — и слово уйдёт.';
+              return el('div', { style:{ marginTop:'6px', fontSize:'12px', color:'var(--green)' }}, text);
+            })()
           : null));
     /* Пояснение */
     if(showResult && q.expl){
