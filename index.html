@@ -7858,8 +7858,9 @@ function modalTest(taskN){
       return seq === q.a;
     }
     if(q.letterGap){
-      const norm = String(ans || '').trim().toLowerCase();
-      return norm === String(q.correct || '').toLowerCase();
+      /* Ё и Е считаем взаимозаменяемыми (как в школьных текстах часто) */
+      const normEY = s => String(s || '').trim().toLowerCase().replace(/ё/g, 'е');
+      return normEY(ans) === normEY(q.correct);
     }
     if(q.text){
       const accept = Array.isArray(q.a) ? q.a : [q.a];
@@ -7948,7 +7949,9 @@ function modalTest(taskN){
     if(q.letterGap && typeof q.word === 'string'){
       const sel = STATE.testAnswers[i] || '';
       const showResult = all;
-      const isRight = String(sel || '').toLowerCase() === String(q.correct || '').toLowerCase();
+      /* Ё/Е считаем равными — частая ситуация в текстах */
+      const normEY = s => String(s || '').toLowerCase().replace(/ё/g, 'е');
+      const isRight = normEY(sel) === normEY(q.correct);
       const idx = q.word.indexOf('_');
       const before = idx >= 0 ? q.word.slice(0, idx) : q.word;
       const after  = idx >= 0 ? q.word.slice(idx + 1) : '';
@@ -8823,7 +8826,9 @@ function modalMistakeTrainer(){
     };
     const ans = String(STATE.testAnswers[i] || '');
     const answered = ans.length > 0;
-    const isRight = ans.trim().toLowerCase() === String(q.correct).toLowerCase();
+    /* Ё/Е считаем равными — частая ситуация в текстах */
+    const normEY = s => String(s || '').toLowerCase().replace(/ё/g, 'е');
+    const isRight = normEY(ans.trim()) === normEY(q.correct);
     const showResult = STATE.testChecked || (STATE.testInstant && answered);
     if(showResult && isRight) correct++;
 
@@ -8852,8 +8857,8 @@ function modalMistakeTrainer(){
       ev.target.value = v;
       STATE.testAnswers[i] = v;
       if(v){
-        /* Сразу проверяем и записываем результат */
-        const ok = v === String(q.correct).toLowerCase();
+        /* Сразу проверяем и записываем результат (Ё/Е равны) */
+        const ok = normEY(v) === normEY(q.correct);
         if(ok){
           await recordCorrectForBank({
             taskN: it.task_n, word: q.word, correct: q.correct,
