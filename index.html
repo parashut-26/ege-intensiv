@@ -643,6 +643,7 @@ const STATE = {
   testChecked: false,
   testInstant: false,           // ⚡ показывать ответ сразу после ответа на вопрос
   testInstantSubmitted: {},     // { i: true } — для каких вопросов в instant ученик нажал «Ответить»
+  testCollection: null,         // фильтр shuffle по имени коллекции
   mistakeTrainerOpen: false,    // 🧳 открыта модалка тренажёра по чемодану ошибок
   mistakeBankShuffled: null,    // кэш перемешанного банка ошибок на одну сессию повторения
   testShuffle: null,    // если задано — открыт тренажёр случайных пар (число вопросов)
@@ -3200,6 +3201,103 @@ async function loadQuizOverridesFromDb(){
 
 /* Сохраняет текущее состояние QUIZ_BANK[taskN] в БД (UPSERT по task_n).
    Вызывается после удаления / редактирования / добавления вопроса. */
+/* Импорт Excel-словника в банк задания N как новой коллекции.
+   Ожидаемый формат (как у «Большой словник для задания 9.xlsx»):
+   - Колонка A: слово с двумя точками на месте пропуска (например, «(в) см..тении»)
+   - Колонка B: пояснение (например, «проверочное: смятка»)
+   - Колонка C: правильное написание с заглавной буквой на месте пропуска. */
+function triggerLetterGapImport(taskN){
+  if(typeof XLSX === 'undefined'){
+    showToast('⚠ XLSX-парсер не загрузился. Обнови страницу.');
+    return;
+  }
+  const collectionName = prompt(
+    'Имя коллекции (это название увидят ученики и учитель):\n' +
+    'Пример: «Корни с чередованием», «Орфоэпика», «Н/НН в прилагательных».');
+  if(!collectionName || !collectionName.trim()) return;
+  const name = collectionName.trim();
+
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = '.xlsx,.xls';
+  inp.style.display = 'none';
+  document.body.appendChild(inp);
+  inp.onchange = async () => {
+    const file = inp.files && inp.files[0];
+    if(!file){ document.body.removeChild(inp); return; }
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(new Uint8Array(buf), { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
+      if(!Array.isArray(aoa) || aoa.length < 2){
+        showToast('⚠ Файл пустой или нет данных');
+        return;
+      }
+      /* Пропускаем заголовок если он есть (когда A1 содержит слово «слово»/«word» и т.п.) */
+      let startRow = 0;
+      const h0 = String((aoa[0] && aoa[0][0]) || '').toLowerCase();
+      if(/слово|word|задание|пропуск/.test(h0)) startRow = 1;
+
+      const items = [];
+      let skipped = 0;
+      for(let i = startRow; i < aoa.length; i++){
+        const row = aoa[i];
+        if(!row) continue;
+        const a = String(row[0] || '').trim();
+        const b = String(row[1] || '').trim();
+        const c = String(row[2] || '').trim();
+        if(!a || !c){ skipped++; continue; }
+        const m = a.match(/\.{2,}/);
+        if(!m){ skipped++; continue; }
+        const startA = m.index, endA = startA + m[0].length;
+        const before = a.slice(0, startA);
+        const after = a.slice(endA);
+        const actualLetters = c.length - (before.length + after.length);
+        if(actualLetters < 1 || actualLetters > 3){ skipped++; continue; }
+        const correct = c.slice(startA, startA + actualLetters).toLowerCase();
+        const word = before + '_'.repeat(actualLetters) + after;
+        items.push({
+          letterGap: true,
+          q: 'Вставь пропущенную букву',
+          word: word,
+          correct: correct,
+          expl: b || undefined,
+          collection: name,
+          src: name,
+        });
+      }
+      if(!items.length){
+        showToast('⚠ Не удалось распознать ни одной строки. Проверь формат: A=слово с ".." B=пояснение C=правильно');
+        return;
+      }
+      /* Дедуп по word внутри новой коллекции (на случай дублей в файле) */
+      const seen = new Set();
+      const unique = items.filter(it => {
+        if(seen.has(it.word)) return false;
+        seen.add(it.word);
+        return true;
+      });
+      if(!QUIZ_BANK[taskN]) QUIZ_BANK[taskN] = [];
+      QUIZ_BANK[taskN] = QUIZ_BANK[taskN].concat(unique);
+      const ok = await persistTaskBank(taskN);
+      if(ok){
+        showToast('✓ Коллекция «' + name + '»: +' + unique.length + ' вопр.' +
+                  (skipped ? ' · пропущено ' + skipped : ''));
+      } else {
+        showToast('⚠ Добавлено локально, но в БД не сохранилось');
+      }
+      render();
+    } catch(e){
+      console.error('[letterGap import] fail:', e);
+      showToast('⚠ Ошибка импорта: ' + (e.message || e));
+    } finally {
+      document.body.removeChild(inp);
+    }
+  };
+  inp.click();
+}
+
 async function persistTaskBank(taskN){
   if(!sb || !MY_PROFILE){ showToast('⚠ Изменения не сохранятся — не авторизованы'); return false; }
   const questions = QUIZ_BANK[taskN] || [];
@@ -7692,14 +7790,11 @@ function modalTest(taskN){
   let bank;
   if(STATE.testShuffle){
     if(!STATE.shuffledBank){
-      /* Для задания 5 — пары паронимов; для 9 — letterGap из большого словника;
-         для остальных — общий шафл по любому таcкN (letterGap или нет). */
-      if(taskN === 5){
+      /* Задание 5 — пары паронимов; остальные — letterGap (с опц. фильтром по коллекции). */
+      if(taskN === 5 && !STATE.testCollection){
         STATE.shuffledBank = buildShuffledParonymBank(STATE.testShuffle);
-      } else if(taskN === 9){
-        STATE.shuffledBank = buildShuffledLetterGapBank(taskN, STATE.testShuffle);
       } else {
-        STATE.shuffledBank = buildShuffledLetterGapBank(taskN, STATE.testShuffle);
+        STATE.shuffledBank = buildShuffledLetterGapBank(taskN, STATE.testShuffle, STATE.testCollection || null);
       }
     }
     bank = STATE.shuffledBank;
@@ -13261,6 +13356,54 @@ function modalEditTheory(n){
           return card;
         })(),
 
+        /* Коллекции — блок управления группами вопросов */
+        (function(){
+          const collections = listCollectionsForTask(n);
+          if(!collections.length) return null;
+          const card = el('div', { class:'card', style:{ background:'#FFFDF7', border:'1px solid #FACC15', marginBottom:'14px' }});
+          card.append(el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'10px', flexWrap:'wrap', gap:'6px' }},
+            el('h4', { style:{ margin:0 }}, '📚 Коллекции (' + collections.length + ')'),
+            el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }},
+              el('button', { class:'btn btn-y btn-sm',
+                title:'Загрузить Excel-словник (3 колонки: слово с .. / пояснение / правильный вариант)',
+                onclick: () => triggerLetterGapImport(n)
+              }, '📥 Импорт Excel'))));
+          card.append(el('p', { style:{ fontSize:'12px', color:'var(--ink-2)', marginTop:'-4px', marginBottom:'8px' }},
+            'Коллекции — это группы вопросов из одного источника (например, «Большой словник»). Можно запустить тренажёр по одной коллекции или удалить её целиком.'));
+
+          collections.forEach(col => {
+            const row = el('div', { style:{ display:'flex', alignItems:'center', gap:'8px', padding:'8px 10px', background:'#fff', borderRadius:'8px', marginBottom:'6px', border:'1px solid var(--border)' }});
+            row.append(
+              el('div', { style:{ flex:1, minWidth:0 }},
+                el('div', { style:{ fontWeight:'700', fontSize:'13px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}, col.name),
+                el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }}, col.count + ' вопр.')),
+              /* Случайные 20 / Быстрые 10 / Все */
+              el('button', { class:'btn btn-p btn-sm', title:'Тренажёр случайных 20 слов из этой коллекции',
+                onclick: () => {
+                  STATE.contentEditTaskN = null;
+                  STATE.testOpen = n; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {};
+                  STATE.testShuffle = 20; STATE.testLimit = null; STATE.shuffledBank = null;
+                  STATE.testCollection = col.name;
+                  STATE.theoryOpen = null;
+                  render();
+                }
+              }, '🎯 20 случ.'),
+              col.name !== '— без коллекции —'
+                ? el('button', { class:'btn-icon', title:'Удалить всю коллекцию из банка',
+                    style:{ color:'var(--red)' },
+                    onclick: async () => {
+                      if(!confirm('Удалить ВСЮ коллекцию «' + col.name + '» (' + col.count + ' вопр.) из задания №' + n + '? Это нельзя отменить.')) return;
+                      QUIZ_BANK[n] = (QUIZ_BANK[n] || []).filter(q => (q.collection || q.src) !== col.name);
+                      const ok = await persistTaskBank(n);
+                      showToast(ok ? '✓ Коллекция удалена' : 'Удалено локально, но в БД не сохранилось');
+                      render();
+                    }
+                  }, '🗑') : null);
+            card.append(row);
+          });
+          return card;
+        })(),
+
         /* Банк тестов */
         el('div', { class:'card', style:{ background:'var(--y-soft)', border:'1px solid var(--y-2)' }},
           el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px', flexWrap:'wrap', gap:'6px' }},
@@ -13273,6 +13416,7 @@ function modalEditTheory(n){
                   STATE.contentEditTaskN = null;
                   STATE.testOpen = n; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {};
                   STATE.testShuffle = null; STATE.testLimit = null; STATE.shuffledBank = null;
+                  STATE.testCollection = null;
                   STATE.theoryOpen = null;
                   render();
                 }
