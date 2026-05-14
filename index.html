@@ -3263,6 +3263,20 @@ function errKindMeta(id){ return ERR_KINDS.find(k => k.id === id) || ERR_KINDS[E
 
 function escHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 
+/* Форматирование пояснения от YandexGPT для отображения ученику:
+   - **буква** или **слово** → жирный <b>
+   - *слово* → курсив <i>
+   - переносы строк → <br>
+   - всё остальное экранируем как HTML.
+   Возвращает строку HTML — передавать в { html: ... } или innerHTML. */
+function formatExplanation(text){
+  if(!text) return '';
+  return escHtml(String(text))
+    .replace(/\*\*([^*\n]+?)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[^\*])\*([^*\s][^*\n]*?[^*\s]|[^*\s])\*(?!\*)/g, '$1<i>$2</i>')
+    .replace(/\n/g, '<br>');
+}
+
 /* Рендерит текст сочинения с подсветкой фрагментов из comments[].
    comments: [{ id, start_pos, end_pos, kind, comment, fragment }]
    opts.readonly: если true — клики только показывают тултип; иначе можно удалять */
@@ -7787,11 +7801,12 @@ function modalTest(taskN){
       block.append(opts);
     }
 
-    /* Пояснение — показываем только после нажатия «Проверить», если в банке есть expl */
+    /* Пояснение — показываем только после нажатия «Проверить», если в банке есть expl.
+       Обрабатываем **markdown** для жирных букв/слов от YandexGPT. */
     if(all && q.expl){
-      block.append(el('div', { style:{ marginTop:'10px', padding:'10px 12px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px', fontSize:'13px', color:'var(--ink)', whiteSpace:'pre-wrap', lineHeight:'1.5' }},
+      block.append(el('div', { style:{ marginTop:'10px', padding:'10px 12px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px', fontSize:'13px', color:'var(--ink)', lineHeight:'1.5', wordBreak:'break-word' }},
         el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Почему так?'),
-        q.expl));
+        el('div', { html: formatExplanation(q.expl) })));
     }
 
     if(q.src){
@@ -8020,8 +8035,7 @@ function modalExamineQuestion(){
     if(expl){
       body.append(
         el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E', marginBottom:'6px' }}, '💡 Пояснение'),
-        el('div', { style:{ padding:'10px 14px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'10px', fontSize:'14px', lineHeight:'1.6', whiteSpace:'pre-wrap', color:'var(--ink)' }},
-          expl));
+        el('div', { html: formatExplanation(expl), style:{ padding:'10px 14px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'10px', fontSize:'14px', lineHeight:'1.6', wordBreak:'break-word', color:'var(--ink)' }}));
     }
   }
 
@@ -14544,7 +14558,7 @@ function viewSolverResult(){
           'Правильный: ', el('b', null, r.correct)),
         expl ? el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px' }},
           el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Почему так?'),
-          el('div', { style:{ fontSize:'13px', color:'var(--ink)', lineHeight:'1.5', whiteSpace:'pre-wrap' }}, expl)
+          el('div', { html: formatExplanation(expl), style:{ fontSize:'13px', color:'var(--ink)', lineHeight:'1.5', wordBreak:'break-word' }})
         ) : null));
     });
   }
@@ -14564,8 +14578,7 @@ function viewSolverResult(){
           'Ответ: ', el('b', null, r.correct)),
         el('div', { style:{ marginTop:'6px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px' }},
           el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Почему так?'),
-          el('div', { style:{ fontSize:'13px', color:'var(--ink)', lineHeight:'1.5', whiteSpace:'pre-wrap' }},
-            String(q.explanation).trim()))));
+          el('div', { html: formatExplanation(String(q.explanation).trim()), style:{ fontSize:'13px', color:'var(--ink)', lineHeight:'1.5', wordBreak:'break-word' }}))));
     });
     wrap.append(sectionWrap);
   }
