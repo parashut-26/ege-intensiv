@@ -12045,6 +12045,64 @@ function questionPreview(q, idx, taskN){
           render();
         }
       }, '✏️'),
+      el('button', { class:'btn-icon', title:'🤖 Сгенерировать пояснение через YandexGPT',
+        style:{ color:'#92400E' },
+        onclick: async (ev) => {
+          /* Собираем для модели максимум контекста: текст вопроса +
+             правильный ответ в человеческом виде + опции/предложения. */
+          const parts = [];
+          if(q.sourceText) parts.push('Исходный текст:\n' + q.sourceText);
+          if(q.context)    parts.push('Контекст:\n' + q.context);
+          parts.push('Вопрос:\n' + (q.q || ''));
+          if(q.sentences && q.sentences.length){
+            parts.push('Варианты:\n' + q.sentences.map((s,i)=>(i+1)+') '+s).join('\n'));
+          }
+          if(q.opts && q.opts.length){
+            parts.push('Варианты ответа:\n' + q.opts.map((o,i)=>(i+1)+') '+o).join('\n'));
+          }
+          if(q.errors && q.errors.length){
+            parts.push('Ошибки (А-Д):\n' + q.errors.map((s,i)=>String.fromCharCode(1040+i)+') '+s).join('\n'));
+          }
+          if(q.fillNn && q.text){
+            parts.push('Текст с пропусками:\n' + q.text);
+          }
+          const questionText = parts.join('\n\n');
+          /* Правильный ответ в человеческом виде */
+          let correctText = '';
+          if(q.match){
+            correctText = String(q.a);  /* строка цифр типа 81963 */
+          } else if(q.fillNn){
+            correctText = q.correct.map((c,k)=>(k+1)+') '+c).join(', ');
+          } else if(q.text){
+            const arr = Array.isArray(q.a) ? q.a : [q.a];
+            correctText = arr.join(' / ');
+          } else if(q.multi){
+            correctText = (q.a || []).map(i => (i+1)+') '+(q.opts ? q.opts[i] : '?')).join('; ');
+          } else if(typeof q.a === 'number' && q.opts){
+            correctText = (q.a+1) + ') ' + q.opts[q.a];
+          } else {
+            correctText = String(q.a || '');
+          }
+          if(!correctText.trim()){ showToast('⚠ В вопросе нет правильного ответа'); return; }
+          const btn = ev.currentTarget;
+          btn.disabled = true;
+          const origIcon = btn.textContent;
+          btn.textContent = '⏳';
+          try {
+            const res = await callGenerateExplanation(questionText, correctText, taskN);
+            q.expl = res;
+            const ok = await persistTaskBank(taskN);
+            if(ok) showToast('✓ Пояснение сгенерировано и сохранено');
+            else showToast('Сохранено локально, но в БД не сохранилось');
+            render();
+          } catch(e){
+            showToast('⚠ ' + (e && e.message || 'ошибка генерации'));
+          } finally {
+            btn.disabled = false;
+            btn.textContent = origIcon;
+          }
+        }
+      }, '🤖'),
       el('button', { class:'btn-icon', style:{ color:'var(--red)' }, title:'Удалить вопрос',
         onclick: async () => {
           if(!confirm('Удалить этот вопрос из банка? Действие сохранится в БД.')) return;
