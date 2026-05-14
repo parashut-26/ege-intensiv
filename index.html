@@ -7741,6 +7741,13 @@ function modalTest(taskN){
       block.append(opts);
     }
 
+    /* Пояснение — показываем только после нажатия «Проверить», если в банке есть expl */
+    if(all && q.expl){
+      block.append(el('div', { style:{ marginTop:'10px', padding:'10px 12px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px', fontSize:'13px', color:'var(--ink)', whiteSpace:'pre-wrap', lineHeight:'1.5' }},
+        el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Почему так?'),
+        q.expl));
+    }
+
     if(q.src){
       block.append(el('div', { style:{ marginTop:'8px', fontSize:'10px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.06em', fontWeight:'700' }},
         '📚 ' + q.src));
@@ -7932,12 +7939,21 @@ function modalExamineQuestion(){
     if(q.correct_answer){
       body.append(
         el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }}, '✅ Правильный ответ'),
-        el('div', { style:{ padding:'10px 14px', background:'#D1FAE5', color:'#065F46', borderRadius:'10px', fontSize:'16px', fontWeight:'700' }},
+        el('div', { style:{ padding:'10px 14px', background:'#D1FAE5', color:'#065F46', borderRadius:'10px', fontSize:'16px', fontWeight:'700', marginBottom:'14px' }},
           q.correct_answer,
           q.correct_answer.includes('/')
             ? el('div', { style:{ fontSize:'11px', fontWeight:'400', marginTop:'4px', color:'var(--ink-2)' }},
                 'Принимается любой из вариантов через /')
             : null));
+    }
+
+    /* Пояснение — если есть */
+    const expl = (q.explanation || '').trim();
+    if(expl){
+      body.append(
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E', marginBottom:'6px' }}, '💡 Пояснение'),
+        el('div', { style:{ padding:'10px 14px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'10px', fontSize:'14px', lineHeight:'1.6', whiteSpace:'pre-wrap', color:'var(--ink)' }},
+          expl));
     }
   }
 
@@ -11987,6 +12003,11 @@ function questionPreview(q, idx, taskN){
             const newA = prompt('Номер правильного ответа (1, 2, 3…):', String(q.a + 1));
             if(newA !== null && /^\d+$/.test(newA.trim())) q.a = parseInt(newA.trim()) - 1;
           }
+          /* Пояснение — ученик увидит после проверки */
+          const newExpl = prompt('💡 Пояснение (почему такой ответ). Ученик увидит после проверки. Пусто = убрать:', q.expl || '');
+          if(newExpl !== null){
+            q.expl = newExpl.trim() || undefined;
+          }
           const ok = await persistTaskBank(taskN);
           if(ok) showToast('✏️ Изменения сохранены в БД');
           render();
@@ -12113,6 +12134,13 @@ function questionPreview(q, idx, taskN){
   if(q.hint){
     block.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'var(--p-soft)', borderRadius:'8px', fontSize:'12px', color:'var(--p-deep)' }},
       '💡 ' + q.hint));
+  }
+
+  /* Пояснение (видит учитель в превью; ученик увидит после проверки в тренажёре) */
+  if(q.expl){
+    block.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px', fontSize:'12px', color:'var(--ink)', whiteSpace:'pre-wrap', lineHeight:'1.5' }},
+      el('div', { style:{ fontSize:'10px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Пояснение для ученика'),
+      q.expl));
   }
 
   if(q.src){
@@ -14370,19 +14398,50 @@ function viewSolverResult(){
   });
   wrap.append(grid);
 
+  /* Соответствие num → объект вопроса (нужен для пояснений) */
+  const qByNum = {};
+  (data.questions || []).forEach(q => { qByNum[q.num] = q; });
+
   /* Подробный список ошибок */
   const wrong = result.filter(r => !r.isCorrect);
   if(wrong.length){
     wrap.append(el('h3', { style:{ marginTop:'18px', marginBottom:'8px' }},
       '⚠ Ошибки (' + wrong.length + ')'));
     wrong.forEach(r => {
+      const q = qByNum[r.num];
+      const expl = q && q.explanation ? String(q.explanation).trim() : '';
       wrap.append(el('div', { class:'card', style:{ marginBottom:'8px', background:'#FEF2F2', borderColor:'#FCA5A5' }},
         el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--red)', marginBottom:'4px' }}, 'Задание №' + r.num),
         el('div', { style:{ fontSize:'13px', marginBottom:'2px' }},
           'Твой ответ: ', el('b', null, r.user || '(пусто)')),
         el('div', { style:{ fontSize:'13px', color:'var(--green)' }},
-          'Правильный: ', el('b', null, r.correct))));
+          'Правильный: ', el('b', null, r.correct)),
+        expl ? el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px' }},
+          el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Почему так?'),
+          el('div', { style:{ fontSize:'13px', color:'var(--ink)', lineHeight:'1.5', whiteSpace:'pre-wrap' }}, expl)
+        ) : null));
     });
+  }
+
+  /* Раздел «Разбор правильно решённых» — для тех, у кого есть пояснение,
+     чтобы ученик мог проверить, что решил по правилу, а не угадал. */
+  const correctWithExpl = result.filter(r => r.isCorrect && qByNum[r.num] && (qByNum[r.num].explanation || '').trim());
+  if(correctWithExpl.length){
+    const sectionWrap = el('details', { style:{ marginTop:'18px' }},
+      el('summary', { style:{ cursor:'pointer', fontWeight:'700', fontSize:'15px', padding:'8px 0' }},
+        '💡 Разбор правильных ответов (' + correctWithExpl.length + ')'));
+    correctWithExpl.forEach(r => {
+      const q = qByNum[r.num];
+      sectionWrap.append(el('div', { class:'card', style:{ marginBottom:'8px', background:'#F0FDF4', borderColor:'#86EFAC' }},
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#065F46', marginBottom:'4px' }}, '✓ Задание №' + r.num),
+        el('div', { style:{ fontSize:'13px', marginBottom:'2px' }},
+          'Ответ: ', el('b', null, r.correct)),
+        el('div', { style:{ marginTop:'6px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px' }},
+          el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Почему так?'),
+          el('div', { style:{ fontSize:'13px', color:'var(--ink)', lineHeight:'1.5', whiteSpace:'pre-wrap' }},
+            String(q.explanation).trim()))));
+    });
+    wrap.append(sectionWrap);
   }
 
   /* Напоминание про сочинение №27 — если у варианта есть текст */
@@ -14527,6 +14586,13 @@ function modalEditVariant(){
       style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'13px', fontWeight:'700', boxSizing:'border-box', marginTop:'4px' }
     });
     ansInp.oninput = () => { q.correct_answer = ansInp.value; };
+    /* Пояснение — почему правильный ответ именно такой. Ученик увидит после сдачи. */
+    const explInp = el('textarea', {
+      placeholder:'Почему именно так? (правило, разбор). Ученик увидит после сдачи.',
+      style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'12px', boxSizing:'border-box', marginTop:'4px', minHeight:'42px', resize:'vertical', fontFamily:'inherit' }
+    });
+    explInp.value = q.explanation || '';
+    explInp.oninput = () => { q.explanation = explInp.value; };
     taskInputs[n] = taskEd;
     ansInputs[n] = ansInp;
     block.append(
@@ -14535,7 +14601,10 @@ function modalEditVariant(){
       taskEd,
       el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginTop:'4px', marginBottom:'2px' }},
         'Правильный ответ ученика (если есть альтернативы — через /, ученик пишет один любой допустимый)'),
-      ansInp);
+      ansInp,
+      el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginTop:'4px', marginBottom:'2px', display:'flex', alignItems:'center', gap:'4px' }},
+        el('span', null, '💡 Пояснение (необязательно)')),
+      explInp);
     body.append(block);
   }
 
@@ -14588,6 +14657,7 @@ function modalEditVariant(){
             num: q.num,
             question_text: txt,
             correct_answer: ans,
+            explanation: (q.explanation || '').trim() || null,
             max_points: q.max_points || defaultMax,
             source_kind: (q.num >= 1 && q.num <= 3) ? 'shared_1_3'
                        : (q.num >= 22 && q.num <= 26) ? 'shared_22_26'
