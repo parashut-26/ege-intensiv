@@ -10763,15 +10763,17 @@ function modalEssayReview(essayId){
               try {
                 /* Подтянем исходный текст из варианта, если сочинение связано с вариантом */
                 let srcText = '';
-                if(essay.variant_id || (essay.attemptId && DB_ESSAYS.find(e => e.id === essay.id)?.variant_id)){
+                let vid = essay.variant_id;
+                if(!vid){
+                  const dbE = DB_ESSAYS.find(e => e.id === essay.id);
+                  if(dbE) vid = dbE.variant_id;
+                }
+                if(vid){
                   try {
-                    const vid = essay.variant_id || DB_ESSAYS.find(e => e.id === essay.id)?.variant_id;
-                    if(vid){
-                      const arr = await restRequest('GET',
-                        '/test_variant_source_texts?variant_id=eq.' + vid +
-                        '&kind=in.(text_22_26,shared_22_26)&select=body&limit=1');
-                      if(Array.isArray(arr) && arr.length) srcText = String(arr[0].body || '');
-                    }
+                    const arr = await restRequest('GET',
+                      '/test_variant_source_texts?variant_id=eq.' + vid +
+                      '&kind=in.(text_22_26,shared_22_26)&select=body&limit=1');
+                    if(Array.isArray(arr) && arr.length) srcText = String(arr[0].body || '');
                   } catch(_){}
                 }
                 const res = await callCheckEssay(essayText, srcText, essay.studentName || '');
@@ -10798,7 +10800,7 @@ function modalEssayReview(essayId){
                 btn.textContent = origText;
               }
             }
-          }, '🤖 Сгенерировать')));
+          }, '🤖 Сгенерировать'))));
   }
 
   rightCol.append(
