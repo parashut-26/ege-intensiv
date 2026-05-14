@@ -8284,24 +8284,24 @@ function modalTest(taskN){
                     });
                   } catch(e){ console.warn(e); }
                   /* 🧳 Чемодан без ручки: для каждого letterGap-вопроса записываем
-                     ошибку или подтверждаем правильный ответ (если был в чемодане). */
+                     ошибку или подтверждаем правильный ответ (если был в чемодане).
+                     Все запросы параллельно через Promise.allSettled — не блокирует UI. */
                   try {
-                    for(let i = 0; i < bank.length; i++){
-                      const q = bank[i];
-                      if(!q || !q.letterGap) continue;
-                      const right = isCorrect(q, i);
+                    const promises = bank.map((q, i) => {
+                      if(!q || !q.letterGap) return null;
                       const word = String(q.word || '').trim();
                       const corr = String(q.correct || '').trim();
-                      if(!corr) continue;
+                      if(!corr) return null;
+                      const right = isCorrect(q, i);
                       const payload = {
                         taskN, kind: 'letterGap',
                         question_text: q.q || null,
                         word, correct: corr,
                         explanation: q.expl || null,
                       };
-                      if(right) await recordCorrectForBank(payload);
-                      else      await recordMistakeForBank(payload);
-                    }
+                      return right ? recordCorrectForBank(payload) : recordMistakeForBank(payload);
+                    }).filter(Boolean);
+                    if(promises.length) await Promise.allSettled(promises);
                   } catch(e){ console.warn('[bank] flush fail:', e.message); }
                   /* Сбрасываем кэш истории попыток, чтобы при след. открытии перечитать.
                      Именно delete (а не = null), иначе условие подгрузки `list === undefined`
