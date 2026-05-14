@@ -637,6 +637,7 @@ const STATE = {
   sampleEditOpen: null,  // 'new' | id — открыта форма добавления/редактирования образца
   testAnswers: {},
   testChecked: false,
+  testInstant: false,           // ⚡ показывать ответ сразу после ответа на вопрос
   testShuffle: null,    // если задано — открыт тренажёр случайных пар (число вопросов)
   testLimit: null,      // если задано — выбрана подборка из N случайных вопросов из QUIZ_BANK
   shuffledBank: null,   // кэш перемешанной подборки на время теста
@@ -7491,8 +7492,18 @@ function modalTest(taskN){
     return ans != null;
   };
   const allAnswered = bank.every(isAnswered);
-  /* Показываем результат только после нажатия «Проверить» */
-  const all = STATE.testChecked;
+  /* Показываем результат либо после нажатия «Проверить», либо сразу — если
+     включён режим «⚡ Мгновенная проверка» и на этот вопрос уже дан ответ. */
+  const instantMode = !!STATE.testInstant;
+  const isCheckedFor = (q, i) => {
+    if(STATE.testChecked) return true;
+    if(!instantMode) return false;
+    return isAnswered(q, i);
+  };
+  /* Глобальный флаг — нужен для счётчика «правильно X / N» и для футера.
+     Учитываем оба сценария: либо нажали «Проверить», либо в instant-режиме
+     все вопросы уже отвечены. */
+  const all = STATE.testChecked || (instantMode && allAnswered);
 
   /* Правильно ли отвечено? */
   const isCorrect = (q, i) => {
@@ -7539,6 +7550,9 @@ function modalTest(taskN){
 
   const body = el('div', { class:'modal-body' });
   bank.forEach((q, i) => {
+    /* Локальное `all` — для этого конкретного вопроса. Перекрывает внешнее.
+       В instant-режиме каждый вопрос «проверен» как только на него ответили. */
+    const all = isCheckedFor(q, i);
     const block = el('div', { 'data-q-i': String(i), style:{ marginBottom:'18px', padding:'16px', border:'1px solid var(--border)', borderRadius:'14px', background:'var(--surface-soft)' }});
     block.append(el('div', { style:{ fontWeight:'700', marginBottom:'10px' }}, (i+1) + '. ' + q.q));
 
@@ -7798,6 +7812,24 @@ function modalTest(taskN){
             (STATE.testLimit != null ? ' · ' + bank.length + ' вопр.' : '')),
           el('h2', { style:{ marginTop:'4px' }},
             (EGE_TASKS.find(t => t.n === taskN) || {}).topic || 'Разминка')),
+        /* Чекбокс «Мгновенная проверка» — показывает результат сразу после ответа */
+        el('label', {
+          style:{ display:'flex', alignItems:'center', gap:'6px', cursor:'pointer', fontSize:'12px', color:'var(--ink-2)', marginRight:'10px', userSelect:'none', whiteSpace:'nowrap' },
+          title:'Показывать правильный ответ и пояснение сразу после клика, не дожидаясь конца теста'
+        },
+          (() => {
+            const cb = el('input', { type:'checkbox' });
+            cb.checked = !!STATE.testInstant;
+            cb.onchange = () => {
+              STATE.testInstant = cb.checked;
+              /* Когда выключаем — сбрасываем общую проверку, чтобы UI не залип
+                 в «всё проверено». Когда включаем — оставляем как есть. */
+              if(!cb.checked) STATE.testChecked = false;
+              render();
+            };
+            return cb;
+          })(),
+          '⚡ Мгновенная проверка'),
         el('button', { class:'x',
           onclick: () => { STATE.testOpen = null; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testShuffle = null; STATE.testLimit = null; STATE.shuffledBank = null; render(); }
         }, '×')),
@@ -7806,7 +7838,11 @@ function modalTest(taskN){
         el('span', { style:{ fontSize:'13px', color:'var(--ink-2)' }},
           STATE.testChecked
             ? '🎉 Готово · ' + correct + ' из ' + bank.length + ' · попытка записана'
-            : (allAnswered ? '✓ Все ответы заполнены — нажмите «Проверить»' : 'Заполните все вопросы')),
+            : (instantMode
+                ? (allAnswered
+                    ? '⚡ Все ответы заполнены · ' + correct + ' из ' + bank.length + ' · «Завершить» чтобы сохранить'
+                    : '⚡ Отвечайте — увидите разбор сразу под каждым вопросом')
+                : (allAnswered ? '✓ Все ответы заполнены — нажмите «Проверить»' : 'Заполните все вопросы'))),
         el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' }},
           STATE.testChecked
             ? el('button', { class:'btn btn-secondary',
@@ -7873,7 +7909,7 @@ function modalTest(taskN){
                     }
                   });
                 }
-              }, '✓ Проверить')))));
+              }, instantMode ? '✓ Завершить' : '✓ Проверить')))));
 }
 
 /* =======================================================================
