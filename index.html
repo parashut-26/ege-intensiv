@@ -8351,14 +8351,99 @@ function studentVariantsCard(){
 function viewStudentVariants(){
   const wrap = el('div', { class:'fade-in' });
   wrap.append(
-    el('h1', null, '📋 Мои пробники'),
+    el('h1', null, '📋 Мои пробники и сочинения'),
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'20px' }},
-      'Решай тренировочные варианты ЕГЭ и смотри свои результаты — текущие и предыдущие.'));
-  const card = studentVariantsCard();
-  if(card) wrap.append(card);
+      'Решай тренировочные варианты ЕГЭ, сдавай сочинения и смотри свои результаты — текущие и предыдущие.'));
+  const vCard = studentVariantsCard();
+  if(vCard) wrap.append(vCard);
   else wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)', padding:'30px' }},
     'Загружаю…'));
+  const eCard = studentEssaysCard();
+  if(eCard) wrap.append(eCard);
   return wrap;
+}
+
+/* Карточка «Мои сочинения» — все работы ученика. Клик — открывает modalEssayResult,
+   где видны баллы К1-К10, замечания и комментарий учителя. */
+function studentEssaysCard(){
+  if(!MY_PROFILE || !MY_PROFILE.id) return null;
+  const myEssays = (DB_ESSAYS || []).filter(e => e.studentId === MY_PROFILE.id);
+  const card = el('div', { class:'card', style:{ marginBottom:'16px' }});
+  card.append(
+    el('h3', { style:{ marginBottom:'4px' }}, '✍️ Мои сочинения'),
+    el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'12px' }},
+      'Все твои сданные работы. По проверенным — клик откроет баллы К1-К10, замечания учителя и комментарий.'));
+
+  if(!ESSAYS_LOADED){
+    card.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'10px 0' }}, '⏳ Загружаю работы…'));
+    return card;
+  }
+  if(!myEssays.length){
+    card.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'10px 0' }},
+      'Ты ещё не сдавала сочинения. Можешь сдать через карточку дня или из карточки задания 27.'));
+    return card;
+  }
+
+  /* Сортируем: сначала проверенные, потом по дате */
+  const sorted = myEssays.slice().sort((a, b) => {
+    const ta = new Date(a.submittedAt || 0).getTime() || 0;
+    const tb = new Date(b.submittedAt || 0).getTime() || 0;
+    return tb - ta;
+  });
+
+  const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'8px' }});
+  sorted.forEach(e => {
+    const when = e.submittedAt
+      ? new Date(e.submittedAt).toLocaleDateString('ru-RU', { day:'2-digit', month:'short' })
+      : '—';
+    const status = e.status === 'done'
+      ? { label: '✅ Проверено', color:'var(--green)', bg:'var(--green-soft)' }
+      : e.status === 'pre_checked'
+      ? { label: '🤝 Куратор проверил', color:'#0F766E', bg:'#CCFBF1' }
+      : e.status === 'in_progress'
+      ? { label: '📝 Учитель проверяет', color:'#92400E', bg:'#FEF3C7' }
+      : { label: '⏳ На проверке', color:'var(--p-deep)', bg:'var(--p-soft)' };
+
+    const preview = e.format === 'photo'
+      ? '📸 ' + ((e.photoUrls || []).length) + ' стр.'
+      : (e.text || '').slice(0, 60).replace(/\s+/g, ' ').trim() + ((e.text || '').length > 60 ? '…' : '');
+    const finalScore = e.finalScore != null ? e.finalScore : (e.review && e.review.total);
+
+    const row = el('div', {
+      style:{ padding:'10px 12px', background:'var(--bg)', borderRadius:'10px', cursor: e.status === 'done' ? 'pointer' : 'default', border:'1px solid var(--border)' },
+      onclick: async () => {
+        if(e.status !== 'done') return;
+        /* Подтянем комментарии, чтобы в модалке сразу была подсветка ошибок */
+        if(typeof e.id === 'number' && sb && !ESSAY_COMMENTS_CACHE[e.id]){
+          try {
+            const arr = await loadEssayComments(e.id);
+            e.comments = arr;
+            ESSAY_COMMENTS_CACHE[e.id] = arr;
+          } catch(_){ e.comments = []; }
+        }
+        STATE.studentEssayResultOpen = e.id;
+        render();
+      }
+    },
+      el('div', { style:{ display:'flex', alignItems:'center', gap:'8px', marginBottom:'4px', flexWrap:'wrap' }},
+        el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, when),
+        el('span', {
+          style:{ fontSize:'11px', fontWeight:'700', padding:'2px 8px', borderRadius:'999px',
+                  color: status.color, background: status.bg }
+        }, status.label),
+        finalScore != null
+          ? el('span', { style:{ fontSize:'12px', fontWeight:'700', marginLeft:'auto', color:'var(--ink)' }},
+              '🐝 ' + finalScore + ' / 22')
+          : null),
+      el('div', { style:{ fontSize:'13px', color:'var(--ink)', lineHeight:'1.4' }}, preview),
+      e.status === 'done'
+        ? el('div', { style:{ fontSize:'11px', color:'var(--p)', marginTop:'4px' }}, '👁 Кликни — посмотреть проверку')
+        : null);
+
+    list.append(row);
+  });
+  card.append(list);
+  return card;
 }
 
 function viewStudentAchievements(){
