@@ -3159,31 +3159,35 @@ async function loadQuizSeedFile(){
   } catch(e){
     console.warn('[seed] не удалось подгрузить seed_quiz_5_6.json:', e.message);
   }
-  /* Большой словник для задания 9. Дедупликация по word — чтобы при override
-     с одним letterGap-вопросом seed-941 НЕ затирался, а только дополнял. */
-  try {
-    const r = await fetch('./seed_quiz_task9.json?ts=' + Date.now());
-    if(!r.ok) return;
-    const seed9 = await r.json();
-    if(Array.isArray(seed9)){
-      const COLLECTION_NAME_9 = 'Большой словник';
-      const items = seed9.map(it => ({
+  /* Универсальный загрузчик seed-словников letterGap. Каждый файл —
+     отдельная коллекция (имя видно ученику и учителю в редакторе банка). */
+  const seedDicts = [
+    { task: 9,  file: 'seed_quiz_task9.json',  name: 'Большой словник' },
+    { task: 10, file: 'seed_quiz_task10.json', name: 'Приставки' },
+  ];
+  for(const s of seedDicts){
+    try {
+      const r = await fetch('./' + s.file + '?ts=' + Date.now());
+      if(!r.ok) continue;
+      const data = await r.json();
+      if(!Array.isArray(data)) continue;
+      const items = data.map(it => ({
         letterGap: true,
         q: 'Вставь пропущенную букву',
         word: String(it.word || ''),
         correct: String(it.correct || '').toLowerCase(),
         expl: it.expl || undefined,
-        src: COLLECTION_NAME_9,
-        collection: COLLECTION_NAME_9,
+        src: s.name,
+        collection: s.name,
       })).filter(it => it.word && it.correct && it.word.includes('_'));
-      /* Дедуп: в банке уже могут быть слова из override */
-      const have = new Set((QUIZ_BANK[9] || []).filter(q => q && q.letterGap).map(q => q.word));
+      /* Дедуп по word внутри банка задания */
+      const have = new Set((QUIZ_BANK[s.task] || []).filter(q => q && q.letterGap).map(q => q.word));
       const fresh = items.filter(it => !have.has(it.word));
-      QUIZ_BANK[9] = (QUIZ_BANK[9] || []).concat(fresh);
-      console.log('[seed] словник 9: всего ' + items.length + ', добавлено новых ' + fresh.length);
+      QUIZ_BANK[s.task] = (QUIZ_BANK[s.task] || []).concat(fresh);
+      console.log('[seed] коллекция «' + s.name + '» (задание ' + s.task + '): всего ' + items.length + ', добавлено ' + fresh.length);
+    } catch(e){
+      console.warn('[seed] не удалось подгрузить ' + s.file + ':', e.message);
     }
-  } catch(e){
-    console.warn('[seed] не удалось подгрузить seed_quiz_task9.json:', e.message);
   }
 }
 
