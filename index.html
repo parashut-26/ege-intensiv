@@ -1395,7 +1395,7 @@ async function restoreSession(){
         _AUTH_BOOTSTRAP_RUNNING = false;
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizSeedFile().then(() => loadQuizOverridesFromDb())]).then(() => {
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile())]).then(() => {
           render();
           /* После основных загрузок — стартуем фоновый чат-poll */
           startUnreadBgPoll();
@@ -1458,7 +1458,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizSeedFile().then(() => loadQuizOverridesFromDb())]).then(() => {
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile())]).then(() => {
           render();
           /* После основных загрузок — стартуем фоновый чат-poll */
           startUnreadBgPoll();
@@ -3130,30 +3130,33 @@ const ESSAY_COMMENTS_CACHE = {};
    Файл сделан из ФИПИ-сборников «Задание N в формате ЕГЭ» — это докинули в
    QUIZ_BANK, потому что у части старых вопросов отсутствовал sentences/context. */
 async function loadQuizSeedFile(){
+  /* Загружается ПОСЛЕ override-ов из БД. Это значит: override (правки учителя)
+     уже на месте, а seed добавляется поверх, не затирая. Дедупликация по ключу
+     вопроса нужна, чтобы при повторных правках не было дубликатов. */
   try {
     const r = await fetch('./seed_quiz_5_6.json?ts=' + Date.now());
-    if(!r.ok) return;
-    const seed = await r.json();
-    if(seed && seed['5'] && Array.isArray(seed['5'])){
-      QUIZ_BANK[5] = (QUIZ_BANK[5] || []).concat(seed['5']);
+    if(r.ok){
+      const seed = await r.json();
+      /* Дедуп для 5/6: по тексту вопроса + первому слову sentences */
+      const keyOf = (q) => (q && (q.q + '|' + (q.sentences || []).slice(0,1).join('') + '|' + (q.context || ''))) || '';
+      for(const k of ['5','6']){
+        if(!(seed && Array.isArray(seed[k]))) continue;
+        const have = new Set((QUIZ_BANK[+k] || []).map(keyOf));
+        const fresh = seed[k].filter(q => !have.has(keyOf(q)));
+        QUIZ_BANK[+k] = (QUIZ_BANK[+k] || []).concat(fresh);
+      }
+      console.log('[seed] 5/6 ok');
     }
-    if(seed && seed['6'] && Array.isArray(seed['6'])){
-      QUIZ_BANK[6] = (QUIZ_BANK[6] || []).concat(seed['6']);
-    }
-    console.log('[seed] подгружены доп. вопросы: задание 5 +' + ((seed['5']||[]).length) +
-                ', задание 6 +' + ((seed['6']||[]).length));
   } catch(e){
     console.warn('[seed] не удалось подгрузить seed_quiz_5_6.json:', e.message);
   }
-  /* Большой словник из 941 слова для задания 9 — letterGap-формат.
-     Файл seed_quiz_task9.json в корне. Загрузка отдельная, чтобы не блокировать
-     основной seed-файл (он у нас уже работает с 5/6). */
+  /* Большой словник для задания 9. Дедупликация по word — чтобы при override
+     с одним letterGap-вопросом seed-941 НЕ затирался, а только дополнял. */
   try {
     const r = await fetch('./seed_quiz_task9.json?ts=' + Date.now());
     if(!r.ok) return;
     const seed9 = await r.json();
     if(Array.isArray(seed9)){
-      /* Нормализуем структуру к виду letterGap-вопроса и проставляем коллекцию */
       const COLLECTION_NAME_9 = 'Большой словник';
       const items = seed9.map(it => ({
         letterGap: true,
@@ -3162,10 +3165,13 @@ async function loadQuizSeedFile(){
         correct: String(it.correct || '').toLowerCase(),
         expl: it.expl || undefined,
         src: COLLECTION_NAME_9,
-        collection: COLLECTION_NAME_9,  /* для группировки в редакторе */
+        collection: COLLECTION_NAME_9,
       })).filter(it => it.word && it.correct && it.word.includes('_'));
-      QUIZ_BANK[9] = (QUIZ_BANK[9] || []).concat(items);
-      console.log('[seed] подгружен словник задания 9: +' + items.length + ' слов');
+      /* Дедуп: в банке уже могут быть слова из override */
+      const have = new Set((QUIZ_BANK[9] || []).filter(q => q && q.letterGap).map(q => q.word));
+      const fresh = items.filter(it => !have.has(it.word));
+      QUIZ_BANK[9] = (QUIZ_BANK[9] || []).concat(fresh);
+      console.log('[seed] словник 9: всего ' + items.length + ', добавлено новых ' + fresh.length);
     }
   } catch(e){
     console.warn('[seed] не удалось подгрузить seed_quiz_task9.json:', e.message);
