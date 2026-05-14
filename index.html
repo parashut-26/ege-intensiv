@@ -3941,6 +3941,16 @@ function buildLimitedBank(taskN, n){
   return shuffleArray(full).slice(0, n);
 }
 
+/* Случайная подборка letterGap-вопросов из банка задания N.
+   Используется для задания 9 (большой словник) — отделяем letterGap-вопросы
+   от классических multi-вопросов, чтобы тренажёр был чистым по типу. */
+function buildShuffledLetterGapBank(taskN, n){
+  const full = (QUIZ_BANK[taskN] || []).filter(q => q && q.letterGap);
+  if(!full.length) return [];
+  const sh = shuffleArray(full);
+  return n == null || n >= sh.length ? sh : sh.slice(0, n);
+}
+
 /* Правильная русская форма множественного числа: 1 вопрос, 2 вопроса, 5 вопросов. */
 function ruPlural(n, one, few, many){
   const mod10 = n % 10, mod100 = n % 100;
@@ -7658,7 +7668,15 @@ function modalTest(taskN){
   let bank;
   if(STATE.testShuffle){
     if(!STATE.shuffledBank){
-      STATE.shuffledBank = buildShuffledParonymBank(STATE.testShuffle);
+      /* Для задания 5 — пары паронимов; для 9 — letterGap из большого словника;
+         для остальных — общий шафл по любому таcкN (letterGap или нет). */
+      if(taskN === 5){
+        STATE.shuffledBank = buildShuffledParonymBank(STATE.testShuffle);
+      } else if(taskN === 9){
+        STATE.shuffledBank = buildShuffledLetterGapBank(taskN, STATE.testShuffle);
+      } else {
+        STATE.shuffledBank = buildShuffledLetterGapBank(taskN, STATE.testShuffle);
+      }
     }
     bank = STATE.shuffledBank;
   } else if(STATE.testLimit != null){
@@ -13224,6 +13242,39 @@ function modalEditTheory(n){
           el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px', flexWrap:'wrap', gap:'6px' }},
             el('h4', null, '🎯 Вопросы тренажёра (' + qs.length + ')'),
             el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }},
+              /* Кнопки запуска тренажёра «как ученик» — учитель проверяет свои банки */
+              el('button', { class:'btn btn-p btn-sm',
+                title:'Открыть тренажёр для проверки (как видит ученик)',
+                onclick: () => {
+                  STATE.contentEditTaskN = null;
+                  STATE.testOpen = n; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {};
+                  STATE.testShuffle = null; STATE.testLimit = null; STATE.shuffledBank = null;
+                  STATE.theoryOpen = null;
+                  render();
+                }
+              }, '🎯 Открыть тренажёр'),
+              /* Для задания 5 — отдельный вход в банк пар паронимов */
+              n === 5 ? el('button', { class:'btn btn-secondary btn-sm',
+                title:'Случайные 10 пар паронимов',
+                onclick: () => {
+                  STATE.contentEditTaskN = null;
+                  STATE.testOpen = 5; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {};
+                  STATE.testShuffle = 10; STATE.testLimit = null; STATE.shuffledBank = null;
+                  STATE.theoryOpen = null;
+                  render();
+                }
+              }, '🎲 10 случайных пар') : null,
+              /* Для задания 9 — отдельный вход в большой словник letterGap */
+              n === 9 ? el('button', { class:'btn btn-secondary btn-sm',
+                title:'20 случайных слов из большого словника (letterGap)',
+                onclick: () => {
+                  STATE.contentEditTaskN = null;
+                  STATE.testOpen = 9; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {};
+                  STATE.testShuffle = 20; STATE.testLimit = null; STATE.shuffledBank = null;
+                  STATE.theoryOpen = null;
+                  render();
+                }
+              }, '🎲 20 слов из словника') : null,
               el('button', { class:'btn btn-y btn-sm',
                 title:'Добавить вопрос «слово с пропуском буквы»',
                 onclick: async () => {
