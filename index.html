@@ -4902,7 +4902,8 @@ async function recordMistakeForBank(opts){
 /* Сколько правильных подряд нужно для освобождения слова из чемодана */
 const MISTAKE_BANK_MASTER_STREAK = 3;
 
-/* Отметить правильный ответ. Если строка есть — увеличиваем streak; при streak>=MASTER_STREAK → mastered. */
+/* Отметить правильный ответ. Spaced repetition: streak растёт ТОЛЬКО если день
+   отличается от last_correct_date — нужны 3 правильных в РАЗНЫЕ дни. */
 async function recordCorrectForBank(opts){
   if(!sb || !MY_PROFILE) return;
   const word = String(opts.word || '').trim();
@@ -4915,23 +4916,51 @@ async function recordCorrectForBank(opts){
       '&task_n=eq.' + opts.taskN +
       wf +
       '&correct_answer=eq.' + encodeURIComponent(correct) +
-      '&select=id,correct_streak,is_mastered&limit=1');
+      '&select=id,correct_streak,is_mastered,last_correct_date&limit=1');
     if(!Array.isArray(found) || !found.length) return;
     const row = found[0];
     if(row.is_mastered) return;
-    const newStreak = (row.correct_streak || 0) + 1;
-    const mastered = newStreak >= MISTAKE_BANK_MASTER_STREAK;  /* нужно 3 правильных подряд */
+    /* Сегодняшняя дата в локальной таймзоне (YYYY-MM-DD) */
+    const today = new Date();
+    const todayStr = today.getFullYear() + '-' +
+      String(today.getMonth() + 1).padStart(2, '0') + '-' +
+      String(today.getDate()).padStart(2, '0');
+    const sameDay = row.last_correct_date === todayStr;
+    /* Если уже отвечал правильно сегодня — НЕ увеличиваем streak (нужны разные дни) */
+    const newStreak = sameDay ? (row.correct_streak || 0) : (row.correct_streak || 0) + 1;
+    const mastered = newStreak >= MISTAKE_BANK_MASTER_STREAK;
     await restRequest('PATCH', '/student_mistake_bank?id=eq.' + row.id,
       {
         correct_streak: newStreak,
         is_mastered: mastered,
         mastered_at: mastered ? new Date().toISOString() : null,
         last_seen_at: new Date().toISOString(),
+        last_correct_date: todayStr,
       },
       { prefer: 'return=minimal' });
     MISTAKE_BANK_CACHE.items = null;
   } catch(e){
     console.warn('[mistake-bank] correct fail:', e.message);
+  }
+}
+
+/* Пометить слово освоенным вручную — кнопка «Я знаю это слово». */
+async function markMistakeMasteredById(id){
+  if(!sb || !MY_PROFILE || !id) return false;
+  try {
+    await restRequest('PATCH', '/student_mistake_bank?id=eq.' + id,
+      {
+        is_mastered: true,
+        correct_streak: MISTAKE_BANK_MASTER_STREAK,
+        mastered_at: new Date().toISOString(),
+        last_seen_at: new Date().toISOString(),
+      },
+      { prefer: 'return=minimal' });
+    MISTAKE_BANK_CACHE.items = null;
+    return true;
+  } catch(e){
+    console.warn('[mistake-bank] manual master fail:', e.message);
+    return false;
   }
 }
 
@@ -8786,7 +8815,7 @@ function mistakeBankCard(){
         el('div', null,
           el('div', { style:{ fontSize:'26px', fontWeight:'800', color:'#92400E' }}, total + ' слов'),
           el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginTop:'2px' }},
-            'по ' + Object.keys(byTask).length + ' заданиям · уходят после ' + MISTAKE_BANK_MASTER_STREAK + ' правильных подряд')),
+            'по ' + Object.keys(byTask).length + ' заданиям · уходят после ' + MISTAKE_BANK_MASTER_STREAK + ' правильных ответов в РАЗНЫЕ дни')),
         el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }},
           el('button', { class:'btn btn-y',
             onclick: () => {
@@ -8887,9 +8916,31 @@ function modalMistakeTrainer(){
     if(showResult && isRight) correct++;
 
     const block = el('div', { style:{ marginBottom:'14px', padding:'14px', border:'1px solid var(--border)', borderRadius:'12px', background:'var(--surface-soft)' }});
-    block.append(el('div', { style:{ fontWeight:'700', marginBottom:'6px', fontSize:'13px' }},
-      (i+1) + '. ' + q.q,
-      el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'8px' }}, '№' + it.task_n)));
+    /* Сегодняшняя дата для отображения «уже отвечал сегодня» */
+    const today = new Date();
+    const todayStr = today.getFullYear() + '-' +
+      String(today.getMonth() + 1).padStart(2, '0') + '-' +
+      String(today.getDate()).padStart(2, '0');
+    const alreadyToday = it.last_correct_date === todayStr;
+    block.append(el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'6px', gap:'6px', flexWrap:'wrap' }},
+      el('div', { style:{ fontWeight:'700', fontSize:'13px' }},
+        (i+1) + '. ' + q.q,
+        el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'8px' }}, '№' + it.task_n),
+        alreadyToday ? el('span', { style:{ fontSize:'10px', color:'var(--ink-3)', marginLeft:'8px' }}, 'уже отвечал сегодня') : null),
+      /* Кнопка «Я знаю это слово» — мгновенное освоение вручную */
+      el('button', {
+        class:'btn btn-secondary btn-sm',
+        title:'Убрать слово из чемодана навсегда',
+        style:{ fontSize:'11px', padding:'2px 8px' },
+        onclick: async () => {
+          const ok = await markMistakeMasteredById(it.id);
+          if(ok){
+            showToast('✓ Слово отмечено как освоенное');
+            STATE.mistakeBankShuffled = null;
+            render();
+          }
+        }
+      }, '✓ Знаю')));
 
     const idx = q.word.indexOf('_');
     const before = idx >= 0 ? q.word.slice(0, idx) : q.word;
@@ -8946,12 +8997,17 @@ function modalMistakeTrainer(){
           : null,
         showResult && isRight
           ? (() => {
-              /* Новый streak = старый + 1 (после recordCorrectForBank). */
-              const newStreak = (it.correct_streak || 0) + 1;
+              /* Если уже отвечал правильно сегодня — streak НЕ растёт (нужны разные дни) */
+              const newStreak = alreadyToday ? (it.correct_streak || 0) : (it.correct_streak || 0) + 1;
               const remaining = MISTAKE_BANK_MASTER_STREAK - newStreak;
-              const text = remaining <= 0
-                ? '✓ Освоено! Слово уйдёт из чемодана.'
-                : '✓ Правильно! Ещё ' + remaining + ' ' + (remaining === 1 ? 'раз' : 'раза') + ' — и слово уйдёт.';
+              let text;
+              if(remaining <= 0){
+                text = '✓ Освоено! Слово уйдёт из чемодана.';
+              } else if(alreadyToday){
+                text = '✓ Правильно! Загляни сюда снова завтра — ещё ' + remaining + ' ' + (remaining === 1 ? 'день' : 'дня') + ' для освобождения.';
+              } else {
+                text = '✓ Правильно! Ещё ' + remaining + ' ' + (remaining === 1 ? 'день' : 'дня') + ' в разные дни — и слово уйдёт.';
+              }
               return el('div', { style:{ marginTop:'6px', fontSize:'12px', color:'var(--green)' }}, text);
             })()
           : null));

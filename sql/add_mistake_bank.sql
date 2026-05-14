@@ -73,5 +73,10 @@ CREATE POLICY "mistake_bank staff select"
     )
   );
 
+-- Поле для spaced repetition: дата последнего правильного ответа (YYYY-MM-DD).
+-- streak растёт только если дата изменилась — нужны 3 РАЗНЫХ дня для освобождения.
+ALTER TABLE student_mistake_bank
+  ADD COLUMN IF NOT EXISTS last_correct_date DATE;
+
 -- Проверка
 SELECT 'student_mistake_bank ok' AS status;
