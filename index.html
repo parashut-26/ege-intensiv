@@ -638,6 +638,7 @@ const STATE = {
   testAnswers: {},
   testChecked: false,
   testInstant: false,           // ⚡ показывать ответ сразу после ответа на вопрос
+  testInstantSubmitted: {},     // { i: true } — для каких вопросов в instant ученик нажал «Ответить»
   testShuffle: null,    // если задано — открыт тренажёр случайных пар (число вопросов)
   testLimit: null,      // если задано — выбрана подборка из N случайных вопросов из QUIZ_BANK
   shuffledBank: null,   // кэш перемешанной подборки на время теста
@@ -6685,7 +6686,7 @@ function taskAction(t, locked){
   if(locked) return chip('🔒 закрыто', 'grey');
   if(t.kind === 'morning')
     return el('button', { class:'btn btn-y btn-sm',
-      onclick: () => { STATE.testOpen = 4; STATE.testAnswers = {}; STATE.testChecked = false; render(); }
+      onclick: () => { STATE.testOpen = 4; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; render(); }
     }, '⚡ Пройти');
   if(t.kind === 'essay'){
     const myId = MY_PROFILE && MY_PROFILE.id;
@@ -7336,6 +7337,7 @@ function modalTheory(n){
             STATE.testOpen = n;
             STATE.testAnswers = {};
             STATE.testChecked = false;
+            STATE.testInstantSubmitted = {};
             STATE.testShuffle = null;
             STATE.testLimit = limit;          // null = «все»; иначе число
             STATE.shuffledBank = null;
@@ -7362,10 +7364,10 @@ function modalTheory(n){
               }, '⚡ Все ' + bankN + ' ' + wordQ(bankN)),
               /* Дополнительный режим только для паронимов (задание 5) */
               n === 5 ? el('button', { class:'btn btn-p',
-                onclick: () => { STATE.testOpen = 5; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testShuffle = 10; STATE.testLimit = null; STATE.shuffledBank = null; STATE.theoryOpen = null; render(); }
+                onclick: () => { STATE.testOpen = 5; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = 10; STATE.testLimit = null; STATE.shuffledBank = null; STATE.theoryOpen = null; render(); }
               }, '🎲 10 случайных пар') : null,
               n === 5 ? el('button', { class:'btn btn-secondary',
-                onclick: () => { STATE.testOpen = 5; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testShuffle = 5; STATE.testLimit = null; STATE.shuffledBank = null; STATE.theoryOpen = null; render(); }
+                onclick: () => { STATE.testOpen = 5; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = 5; STATE.testLimit = null; STATE.shuffledBank = null; STATE.theoryOpen = null; render(); }
               }, '🎲 Быстрые 5 пар') : null));
         })() : null,
 
@@ -7507,17 +7509,25 @@ function modalTest(taskN){
   };
   const allAnswered = bank.every(isAnswered);
   /* Показываем результат либо после нажатия «Проверить», либо сразу — если
-     включён режим «⚡ Мгновенная проверка» и на этот вопрос уже дан ответ. */
+     включён режим «⚡ Мгновенная проверка». Но для multi/fillNn/match/text —
+     только после явного нажатия «Ответить», иначе сработает раньше времени
+     (ученик выбрал 1 из 3 правильных — система считает «неверно»). */
   const instantMode = !!STATE.testInstant;
+  /* Типы, требующие подтверждения «Ответить» в instant-режиме.
+     Single (q.opts + не multi + числовой q.a) проверяется сразу после клика. */
+  const needsSubmit = (q) => !!(q.multi || q.fillNn || q.match || q.text);
+  const isInstantSubmitted = (i) => !!(STATE.testInstantSubmitted && STATE.testInstantSubmitted[i]);
   const isCheckedFor = (q, i) => {
     if(STATE.testChecked) return true;
     if(!instantMode) return false;
+    if(needsSubmit(q)) return isInstantSubmitted(i);
     return isAnswered(q, i);
   };
   /* Глобальный флаг — нужен для счётчика «правильно X / N» и для футера.
      Учитываем оба сценария: либо нажали «Проверить», либо в instant-режиме
-     все вопросы уже отвечены. */
-  const all = STATE.testChecked || (instantMode && allAnswered);
+     все вопросы проверены (single — по факту ответа, остальные — по нажатию «Ответить»). */
+  const allInstantChecked = instantMode && bank.every((q, i) => isCheckedFor(q, i));
+  const all = STATE.testChecked || allInstantChecked;
 
   /* Правильно ли отвечено? */
   const isCorrect = (q, i) => {
@@ -7801,6 +7811,25 @@ function modalTest(taskN){
       block.append(opts);
     }
 
+    /* Кнопка «Ответить» в instant-режиме — для multi/fillNn/match/text.
+       Видна пока ученик ещё не нажал и есть что подтверждать. Single не нужен —
+       там клик по варианту = и есть ответ. */
+    if(instantMode && needsSubmit(q) && !isInstantSubmitted(i) && !STATE.testChecked){
+      const canSubmit = isAnswered(q, i);
+      block.append(el('div', { style:{ marginTop:'10px', display:'flex', justifyContent:'flex-end' }},
+        el('button', {
+          class: canSubmit ? 'btn btn-p btn-sm' : 'btn btn-secondary btn-sm',
+          disabled: !canSubmit,
+          style: canSubmit ? {} : { opacity:.6, cursor:'not-allowed' },
+          onclick: () => {
+            if(!isAnswered(q, i)){ showToast('Сначала выбери ответ'); return; }
+            if(!STATE.testInstantSubmitted) STATE.testInstantSubmitted = {};
+            STATE.testInstantSubmitted[i] = true;
+            render();
+          }
+        }, canSubmit ? '✓ Ответить' : 'Выбери ответ')));
+    }
+
     /* Пояснение — показываем только после нажатия «Проверить», если в банке есть expl.
        Обрабатываем **markdown** для жирных букв/слов от YandexGPT. */
     if(all && q.expl){
@@ -7817,7 +7846,7 @@ function modalTest(taskN){
   });
 
   return el('div', { class:'modal-bg',
-    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.testOpen = null; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testShuffle = null; STATE.testLimit = null; STATE.shuffledBank = null; render(); }}
+    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.testOpen = null; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = null; STATE.testLimit = null; STATE.shuffledBank = null; render(); }}
   },
     el('div', { class:'modal', style:{ maxWidth:'700px' }},
       el('div', { class:'modal-head' },
@@ -7846,7 +7875,7 @@ function modalTest(taskN){
           })(),
           '⚡ Мгновенная проверка'),
         el('button', { class:'x',
-          onclick: () => { STATE.testOpen = null; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testShuffle = null; STATE.testLimit = null; STATE.shuffledBank = null; render(); }
+          onclick: () => { STATE.testOpen = null; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = null; STATE.testLimit = null; STATE.shuffledBank = null; render(); }
         }, '×')),
       body,
       el('div', { class:'modal-foot' },
@@ -7864,6 +7893,7 @@ function modalTest(taskN){
                 onclick: () => {
                   STATE.testAnswers = {};
                   STATE.testChecked = false;
+                  STATE.testInstantSubmitted = {};
                   /* В любом режиме случайной выборки — пересобрать подборку */
                   if(STATE.testShuffle || STATE.testLimit != null) STATE.shuffledBank = null;
                   render();
@@ -7891,6 +7921,7 @@ function modalTest(taskN){
                   STATE.testOpen = null;
                   STATE.testAnswers = {};
                   STATE.testChecked = false;
+                  STATE.testInstantSubmitted = {};
                   STATE.testShuffle = null;
                   STATE.testLimit = null;
                   STATE.shuffledBank = null;
