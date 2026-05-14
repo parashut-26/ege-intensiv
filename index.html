@@ -1127,12 +1127,20 @@ async function saveTheoryToDb(n, text){
    ======================================================================= */
 async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, shuffled }){
   if(!sb || !MY_PROFILE) return null;  /* демо-режим — не сохраняем */
-  const items = bank.map((q, i) => ({
-    src: q.src || null,
-    user: getUser(i),
-    expected: q.match ? q.a : (q.text ? q.a : (q.multi ? q.a : q.a)),
-    ok: !!isCorrect(q, i)
-  }));
+  const items = bank.map((q, i) => {
+    const item = {
+      src: q.src || null,
+      user: getUser(i),
+      expected: q.match ? q.a : (q.text ? q.a : (q.multi ? q.a : (q.letterGap ? q.correct : q.a))),
+      ok: !!isCorrect(q, i)
+    };
+    /* Для letterGap сохраняем само слово — иначе в истории ничего не понятно. */
+    if(q.letterGap){
+      item.word = q.word || null;
+      item.expl = q.expl || null;
+    }
+    return item;
+  });
   const score = items.filter(x => x.ok).length;
   const max_score = bank.length;
   const payload = {
@@ -10843,6 +10851,37 @@ function modalAttemptDetail(){
         if(q.q){
           card.append(el('div', { style:{ fontSize:'13px', marginBottom:'8px', whiteSpace:'pre-wrap' }}, q.q));
         }
+      }
+
+      /* letterGap: показываем само слово с пропуском, букву ученика и правильную.
+         item.word — это слово вида «пр_пятствие», сохранённое при saveAttempt. */
+      if(item.word){
+        const w = String(item.word);
+        const gapIdx = w.indexOf('_');
+        const before = gapIdx >= 0 ? w.slice(0, gapIdx) : w;
+        const after  = gapIdx >= 0 ? w.slice(gapIdx + 1) : '';
+        const userL = item.user != null ? String(item.user).toLowerCase() : '?';
+        const corrL = item.expected != null ? String(item.expected).toLowerCase() : '?';
+        const inkColor = ok ? '#065F46' : '#991B1B';
+        card.append(el('div', {
+          style:{ textAlign:'center', padding:'12px', background:'#fff', borderRadius:'8px', marginBottom:'8px', fontSize:'22px', fontWeight:'700' }
+        },
+          before,
+          el('span', {
+            style:{ display:'inline-block', minWidth:'30px', padding:'1px 8px', margin:'0 2px',
+                    background: ok ? '#D1FAE5' : '#FECACA', color: inkColor,
+                    border: '2px solid ' + (ok ? 'var(--green)' : 'var(--red)'),
+                    borderRadius:'6px' }
+          }, userL),
+          after,
+          !ok ? el('div', { style:{ fontSize:'13px', fontWeight:'500', color:'var(--green)', marginTop:'8px' }},
+            'Правильно: ', el('b', null, before + corrL + after)) : null));
+        if(item.expl){
+          card.append(el('div', { style:{ marginTop:'6px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px', fontSize:'12px' }},
+            el('div', { style:{ fontSize:'10px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Почему так?'),
+            el('div', { html: typeof formatExplanation === 'function' ? formatExplanation(item.expl) : String(item.expl) })));
+        }
+        return;  /* для letterGap дальше «варианты ответа» не показываем */
       }
 
       /* Определяем, был ли ответ списком индексов (multi-select / орфоэпия / паронимы / etc.) */
