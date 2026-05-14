@@ -1931,6 +1931,49 @@ async function sendChatMessage(text, extra){
   await restRequest('POST', '/chat_messages', payload, { prefer: 'return=minimal' });
   /* Сразу подтянем — чтобы и наше сообщение появилось без ожидания poll-тика */
   await loadChatMessages();
+  /* Уведомления о сообщениях в общий чат (fire-and-forget):
+     • учителю и кураторам — на ЛЮБОЕ сообщение (чтобы видеть вопросы учеников);
+     • ученикам — ТОЛЬКО когда пишет учитель/куратор (иначе спам между собой). */
+  notifyGroupChatRecipients(text, extra).catch(e => console.warn('[chat] notify error:', e && e.message));
+}
+
+/* Рассылка уведомлений по правилам выше. Получателей запрашиваем двумя
+   запросами вместо in.(a,b,c) — PHP-прокси иногда давится на скобках в in.() */
+async function notifyGroupChatRecipients(text, extra){
+  if(!MY_PROFILE) return;
+  const myRole = String(MY_PROFILE.role || '').toLowerCase();
+  const fromStaff = (myRole === 'teacher' || myRole === 'curator');
+  const myName = (MY_PROFILE.full_name || 'Кто-то').split(/\s+/)[0];
+  const previewBody = text && text.length > 220 ? text.slice(0, 220) + '…' : (text || '');
+  const previewAttach = extra && extra.voice_url ? '🎤 голосовое' :
+                        extra && extra.image_url ? '📷 фото' : '';
+  const preview = previewBody || previewAttach || '(пусто)';
+  const pushTitle = '💬 ' + myName + ' в общем чате';
+  const tgText = '💬 <b>' + escHtml(myName) + '</b> в общем чате:\n\n' + escHtml(preview);
+  const seen = new Set([MY_PROFILE.id]);
+  const send = (id) => {
+    if(!id || seen.has(id)) return;
+    seen.add(id);
+    notifyViaTelegram(id, tgText, 'https://zebrus.online');
+    notifyViaPush(id, pushTitle, preview, 'https://zebrus.online');
+  };
+  /* 1. Учитель и кураторы — всегда (кроме самого автора) */
+  try {
+    const t = await restRequest('GET', '/profiles?role=eq.teacher&select=id');
+    if(Array.isArray(t)) t.forEach(p => send(p.id));
+  } catch(_){}
+  try {
+    const c = await restRequest('GET', '/profiles?role=eq.curator&select=id');
+    if(Array.isArray(c)) c.forEach(p => send(p.id));
+  } catch(_){}
+  /* 2. Ученикам — только если автор учитель или куратор */
+  if(fromStaff){
+    try {
+      const s = await restRequest('GET',
+        '/profiles?role=eq.student&s_status=in.(active,lagging)&select=id');
+      if(Array.isArray(s)) s.forEach(p => send(p.id));
+    } catch(_){}
+  }
 }
 
 /* Стоимость «помогло другу» в пчёлках */
