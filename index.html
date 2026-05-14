@@ -8507,9 +8507,10 @@ function modalExamineQuestion(){
             : null));
     }
 
-    /* Пояснение — если есть */
     const expl = (q.explanation || '').trim();
-    if(expl){
+    /* Учителю — пояснение сразу. Для ученика пояснение покажем ПОСЛЕ блока РНО
+       как спойлер, чтобы он сначала сам сформулировал. */
+    if(expl && !isStudent){
       body.append(
         el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E', marginBottom:'6px' }}, '💡 Пояснение'),
         el('div', { html: formatExplanation(expl), style:{ padding:'10px 14px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'10px', fontSize:'14px', lineHeight:'1.6', wordBreak:'break-word', color:'var(--ink)' }}));
@@ -8552,8 +8553,15 @@ function modalExamineQuestion(){
             el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF' }}, '✍️ Работа над ошибкой'),
             status),
           el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'6px' }},
-            'Напиши своими словами, почему правильно — учитель увидит.'),
+            'Сначала напиши своими словами, почему правильно — потом сверишься с пояснением.'),
           noteTa));
+      /* Спойлер с пояснением учителя — после РНО, чтобы ученик сначала думал сам */
+      if(expl){
+        body.append(el('details', { style:{ marginTop:'14px', padding:'10px 14px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'10px' }},
+          el('summary', { style:{ cursor:'pointer', fontSize:'12px', fontWeight:'700', color:'#92400E' }},
+            '🔍 Показать пояснение учителя'),
+          el('div', { html: formatExplanation(expl), style:{ fontSize:'14px', lineHeight:'1.6', wordBreak:'break-word', color:'var(--ink)', marginTop:'8px' }})));
+      }
     } else {
       const note = (studentNote || '').trim();
       if(note){
@@ -15814,24 +15822,30 @@ function viewSolverResult(){
           }
         }, 800);
       };
+      /* Пояснение от учителя/AI скрыто по умолчанию: ученик сначала
+         сам пишет РНО, потом раскрывает спойлер, чтобы сверить. */
+      const explBlock = expl ? el('details', { style:{ marginTop:'8px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px' }},
+        el('summary', { style:{ cursor:'pointer', fontSize:'12px', fontWeight:'700', color:'#92400E' }},
+          '🔍 Показать пояснение учителя'),
+        el('div', { html: formatExplanation(expl), style:{ fontSize:'13px', color:'var(--ink)', lineHeight:'1.5', wordBreak:'break-word', marginTop:'6px' }})
+      ) : null;
+
       wrap.append(el('div', { class:'card', style:{ marginBottom:'8px', background:'#FEF2F2', borderColor:'#FCA5A5' }},
         el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--red)', marginBottom:'4px' }}, 'Задание №' + r.num),
         el('div', { style:{ fontSize:'13px', marginBottom:'2px' }},
           'Твой ответ: ', el('b', null, r.user || '(пусто)')),
         el('div', { style:{ fontSize:'13px', color:'var(--green)' }},
           'Правильный: ', el('b', null, r.correct)),
-        expl ? el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px' }},
-          el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Почему так?'),
-          el('div', { html: formatExplanation(expl), style:{ fontSize:'13px', color:'var(--ink)', lineHeight:'1.5', wordBreak:'break-word' }})
-        ) : null,
-        /* Блок РНО — пояснение ученика */
+        /* Блок РНО — пояснение ученика. Идёт ВЫШЕ спойлера с пояснением учителя,
+           чтобы ученик сначала написал своё, потом сравнил. */
         el('div', { style:{ marginTop:'10px', padding:'8px 10px', background:'#EFF6FF', border:'1px solid #93C5FD', borderRadius:'6px' }},
           el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between' }},
             el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#1E40AF' }}, '✍️ Работа над ошибкой'),
             status),
           el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px' }},
-            'Напиши своими словами, почему правильно — учитель увидит.'),
-          noteTa)));
+            'Сначала напиши своими словами, почему правильно — потом сверишься с пояснением.'),
+          noteTa),
+        explBlock));
     });
   }
 
