@@ -3153,14 +3153,16 @@ async function loadQuizSeedFile(){
     if(!r.ok) return;
     const seed9 = await r.json();
     if(Array.isArray(seed9)){
-      /* Нормализуем структуру к виду letterGap-вопроса и проставляем формулировку */
+      /* Нормализуем структуру к виду letterGap-вопроса и проставляем коллекцию */
+      const COLLECTION_NAME_9 = 'Большой словник';
       const items = seed9.map(it => ({
         letterGap: true,
         q: 'Вставь пропущенную букву',
         word: String(it.word || ''),
         correct: String(it.correct || '').toLowerCase(),
         expl: it.expl || undefined,
-        src: 'Большой словник',
+        src: COLLECTION_NAME_9,
+        collection: COLLECTION_NAME_9,  /* для группировки в редакторе */
       })).filter(it => it.word && it.correct && it.word.includes('_'));
       QUIZ_BANK[9] = (QUIZ_BANK[9] || []).concat(items);
       console.log('[seed] подгружен словник задания 9: +' + items.length + ' слов');
@@ -3942,13 +3944,29 @@ function buildLimitedBank(taskN, n){
 }
 
 /* Случайная подборка letterGap-вопросов из банка задания N.
-   Используется для задания 9 (большой словник) — отделяем letterGap-вопросы
-   от классических multi-вопросов, чтобы тренажёр был чистым по типу. */
-function buildShuffledLetterGapBank(taskN, n){
-  const full = (QUIZ_BANK[taskN] || []).filter(q => q && q.letterGap);
+   Если передана collection — фильтруем только её. */
+function buildShuffledLetterGapBank(taskN, n, collection){
+  let full = (QUIZ_BANK[taskN] || []).filter(q => q && q.letterGap);
+  if(collection){
+    full = full.filter(q => (q.collection || q.src) === collection);
+  }
   if(!full.length) return [];
   const sh = shuffleArray(full);
   return n == null || n >= sh.length ? sh : sh.slice(0, n);
+}
+
+/* Список уникальных коллекций в банке задания N (для группировки в UI).
+   Возвращает массив { name, count } отсортированный по убыванию count. */
+function listCollectionsForTask(taskN){
+  const bank = QUIZ_BANK[taskN] || [];
+  const counts = {};
+  bank.forEach(q => {
+    const name = (q && (q.collection || q.src)) || '— без коллекции —';
+    counts[name] = (counts[name] || 0) + 1;
+  });
+  return Object.keys(counts)
+    .map(k => ({ name: k, count: counts[k] }))
+    .sort((a, b) => b.count - a.count);
 }
 
 /* Правильная русская форма множественного числа: 1 вопрос, 2 вопроса, 5 вопросов. */
@@ -8016,7 +8034,7 @@ function modalTest(taskN){
             '💡 ' + q.hint));
         }
       }
-    } else {
+    } else if(q.opts && q.opts.length){
       const opts = el('div', { style:{ display:'flex', flexDirection:'column', gap:'6px' }});
       q.opts.forEach((opt, idx) => {
         const ans = STATE.testAnswers[i];
