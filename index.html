@@ -7543,6 +7543,9 @@ function modalTest(taskN){
     if(q.match){
       return ans && q.errors.every((_, k) => ans[k] != null && ans[k] !== '');
     }
+    if(q.letterGap){
+      return ans != null && String(ans).trim().length > 0;
+    }
     if(q.text) return ans != null && String(ans).trim().length > 0;
     if(q.multi) return Array.isArray(ans) && ans.length > 0;
     return ans != null;
@@ -7579,6 +7582,10 @@ function modalTest(taskN){
     if(q.match){
       const seq = q.errors.map((_, k) => (ans && ans[k]) || '_').join('');
       return seq === q.a;
+    }
+    if(q.letterGap){
+      const norm = String(ans || '').trim().toLowerCase();
+      return norm === String(q.correct || '').toLowerCase();
     }
     if(q.text){
       const accept = Array.isArray(q.a) ? q.a : [q.a];
@@ -7660,6 +7667,51 @@ function modalTest(taskN){
     if(q.multi){
       block.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
         '☑ Выберите ВСЕ верные варианты'));
+    }
+
+    /* letterGap: одно слово с пропуском "_" → inline-input в этом месте.
+       Пример q.word = "пр_пятствие", q.correct = "е". */
+    if(q.letterGap && typeof q.word === 'string'){
+      const sel = STATE.testAnswers[i] || '';
+      const showResult = all;
+      const isRight = String(sel || '').toLowerCase() === String(q.correct || '').toLowerCase();
+      const idx = q.word.indexOf('_');
+      const before = idx >= 0 ? q.word.slice(0, idx) : q.word;
+      const after  = idx >= 0 ? q.word.slice(idx + 1) : '';
+      const inpBg = !showResult ? '#fff'
+        : (isRight ? '#D1FAE5' : '#FECACA');
+      const inpBorder = !showResult ? 'var(--border-2)'
+        : (isRight ? 'var(--green)' : 'var(--red)');
+      const inpColor = !showResult ? '#0F766E'
+        : (isRight ? '#065F46' : '#991B1B');
+      const inp = el('input', {
+        type:'text', maxlength:'1',
+        style:{ width:'42px', textAlign:'center', fontSize:'24px', fontWeight:'700',
+                padding:'4px 6px', borderRadius:'8px', boxSizing:'border-box',
+                border:'2px solid ' + inpBorder, background:inpBg, color:inpColor,
+                margin:'0 2px', textTransform:'lowercase' },
+      });
+      inp.value = sel || '';
+      if(showResult) inp.disabled = true;
+      inp.oninput = (ev) => {
+        const v = String(ev.target.value || '').slice(0, 1).toLowerCase();
+        ev.target.value = v;
+        STATE.testAnswers[i] = v;
+        /* Если режим instant и буква введена — рендерим, чтобы появилась подсветка */
+        if(instantMode && v) render();
+      };
+      const row = el('div', { style:{ padding:'18px 16px', background:'#FFFCF2', borderRadius:'10px', textAlign:'center', border:'1px solid var(--border)' }},
+        el('div', { style:{ fontSize:'10px', color:'#854D0E', textTransform:'uppercase', fontWeight:'700', letterSpacing:'.08em', marginBottom:'12px' }},
+          '✏️ Вставь пропущенную букву'),
+        el('div', { style:{ fontSize:'28px', fontWeight:'700', letterSpacing:'.02em', lineHeight:'1.4', color:'var(--ink)' }},
+          before,
+          inp,
+          after),
+        showResult && !isRight
+          ? el('div', { style:{ marginTop:'10px', fontSize:'13px', color:'var(--green)' }},
+              'Правильно: ', el('b', null, q.correct))
+          : null);
+      block.append(row);
     }
 
     if(q.fillNn){
@@ -12409,6 +12461,7 @@ function questionPreview(q, idx, taskN){
   let typeLabel, typeKind;
   if(q.match){ typeLabel = '🔀 соответствие А–Д'; typeKind = 'p'; }
   else if(q.fillNn){ typeLabel = '✏️ заполнить Н/НН'; typeKind = 'warn'; }
+  else if(q.letterGap){ typeLabel = '✏️ пропуск буквы'; typeKind = 'warn'; }
   else if(q.text){ typeLabel = q.pair ? '🔁 пара паронимов' : '✏️ короткий ответ'; typeKind = 'p'; }
   else if(q.multi){ typeLabel = '☑ несколько верных'; typeKind = 'y'; }
   else { typeLabel = '○ один верный'; typeKind = 'grey'; }
@@ -12439,6 +12492,11 @@ function questionPreview(q, idx, taskN){
           } else if(typeof q.a === 'number'){
             const newA = prompt('Номер правильного ответа (1, 2, 3…):', String(q.a + 1));
             if(newA !== null && /^\d+$/.test(newA.trim())) q.a = parseInt(newA.trim()) - 1;
+          } else if(q.letterGap){
+            const newW = prompt('Слово с пропуском (вместо буквы поставь "_"). Например пр_пятствие:', q.word || '');
+            if(newW !== null && newW.includes('_')) q.word = newW.trim();
+            const newC = prompt('Какая буква пропущена? (одна буква):', q.correct || '');
+            if(newC !== null && newC.trim().length === 1) q.correct = newC.trim().toLowerCase();
           }
           /* Пояснение — ученик увидит после проверки */
           const newExpl = prompt('💡 Пояснение (почему такой ответ). Ученик увидит после проверки. Пусто = убрать:', q.expl || '');
@@ -12596,6 +12654,16 @@ function questionPreview(q, idx, taskN){
     /* Для Н/НН показываем правильную раскладку под текстом */
     block.append(el('div', { style:{ padding:'8px 10px', background:'var(--green-soft)', borderRadius:'8px', fontSize:'12px', color:'#065F46', fontWeight:'700' }},
       '✓ Правильно: ' + q.correct.map((c, k) => (k+1) + ') ' + c).join(', ')));
+  } else if(q.letterGap && typeof q.word === 'string'){
+    /* Превью: показать слово с буквой на месте пропуска, обозначив её зелёным фоном */
+    const idx = q.word.indexOf('_');
+    const before = idx >= 0 ? q.word.slice(0, idx) : q.word;
+    const after  = idx >= 0 ? q.word.slice(idx + 1) : '';
+    block.append(el('div', { style:{ padding:'18px 16px', background:'var(--green-soft)', border:'2px solid var(--green)', borderRadius:'10px', textAlign:'center', fontSize:'24px', fontWeight:'700', color:'#065F46' }},
+      before,
+      el('span', { style:{ display:'inline-block', minWidth:'42px', padding:'2px 8px', margin:'0 2px', background:'#fff', border:'2px solid var(--green)', borderRadius:'8px' }},
+        q.correct || '?'),
+      after));
   } else if(q.text){
     const accept = Array.isArray(q.a) ? q.a : [q.a];
     block.append(el('div', null,
@@ -12800,11 +12868,36 @@ function modalEditTheory(n){
 
         /* Банк тестов */
         el('div', { class:'card', style:{ background:'var(--y-soft)', border:'1px solid var(--y-2)' }},
-          el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px' }},
+          el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px', flexWrap:'wrap', gap:'6px' }},
             el('h4', null, '🎯 Вопросы тренажёра (' + qs.length + ')'),
-            el('button', { class:'btn btn-y btn-sm',
-              onclick: () => showToast('Откроется форма нового вопроса')
-            }, '➕ Добавить вопрос')),
+            el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }},
+              el('button', { class:'btn btn-y btn-sm',
+                title:'Добавить вопрос «слово с пропуском буквы»',
+                onclick: async () => {
+                  const w = prompt('Слово с пропуском (вместо буквы поставь "_"). Например пр_пятствие:');
+                  if(!w || !w.includes('_')) return;
+                  const c = prompt('Какая буква пропущена? (одна буква):');
+                  if(!c || c.trim().length !== 1) return;
+                  const q = prompt('Формулировка для ученика:', 'Вставь пропущенную букву');
+                  const expl = prompt('💡 Пояснение (необязательно, можно потом через 🤖):', '');
+                  const item = {
+                    letterGap: true,
+                    q: (q || 'Вставь пропущенную букву').trim(),
+                    word: w.trim(),
+                    correct: c.trim().toLowerCase(),
+                    src: 'Учитель'
+                  };
+                  if(expl && expl.trim()) item.expl = expl.trim();
+                  if(!QUIZ_BANK[n]) QUIZ_BANK[n] = [];
+                  QUIZ_BANK[n].push(item);
+                  const ok = await persistTaskBank(n);
+                  showToast(ok ? '✓ Вопрос добавлен' : '⚠ В БД не сохранилось, только локально');
+                  render();
+                }
+              }, '➕ Пропуск буквы'),
+              el('button', { class:'btn btn-secondary btn-sm',
+                onclick: () => showToast('Другие типы вопросов пока добавляются вручную через редактирование банка')
+              }, '➕ Другой тип'))),
           qs.length > 0
             ? el('div', null, qs.map((q, i) => questionPreview(q, i, n)))
             : el('p', { style:{ color:'var(--ink-3)', fontSize:'13px' }},
