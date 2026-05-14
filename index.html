@@ -4639,6 +4639,38 @@ function notifyViaPush(userId, title, body, link){
     .catch(e => console.warn('[PUSH] fetch упал:', e.message));
 }
 
+/* AI-генерация пояснения через Edge Function generate-explanation
+   → YandexGPT-lite. Возвращает строку с готовым черновиком. */
+async function callGenerateExplanation(questionText, correctAnswer, taskNum){
+  if(!sb) throw new Error('нет соединения с Supabase');
+  const token = getAccessToken();
+  if(!token) throw new Error('нужно войти в аккаунт');
+  const url = SUPABASE_URL + '/functions/v1/generate-explanation';
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': 'Bearer ' + token,
+      'apikey':        SUPABASE_KEY,
+    },
+    body: JSON.stringify({
+      question_text:  questionText,
+      correct_answer: correctAnswer,
+      task_num:       taskNum || null,
+    }),
+  });
+  const txt = await r.text();
+  let data = null;
+  try { data = JSON.parse(txt); } catch(_){}
+  if(!r.ok){
+    throw new Error((data && data.error) || ('HTTP ' + r.status + ' ' + txt.slice(0, 200)));
+  }
+  if(!data || !data.explanation){
+    throw new Error('Модель не вернула текст');
+  }
+  return String(data.explanation).trim();
+}
+
 /* Карточка для Профиля: «Push в браузере».
    По умолчанию рисуем состояние «не включено» — это правильно в 99% случаев
    при первом заходе. Потом async-проверка обновит состояние если подписка уже есть.
@@ -14593,6 +14625,35 @@ function modalEditVariant(){
     });
     explInp.value = q.explanation || '';
     explInp.oninput = () => { q.explanation = explInp.value; };
+    /* Кнопка генерации через YandexGPT — заполняет textarea черновиком */
+    const aiBtn = el('button', {
+      style:{ padding:'2px 8px', fontSize:'11px', cursor:'pointer', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px', color:'#92400E', fontWeight:'700' },
+      title:'Сгенерировать пояснение через YandexGPT (можно потом править)',
+      onclick: async (ev) => {
+        ev.preventDefault();
+        const btn = ev.target;
+        /* Берём актуальные значения, а не q.* — пользователь мог только что напечатать */
+        const qTextHtml = q.question_text || '';
+        const qText = qTextHtml.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+        const corr = (q.correct_answer || '').trim();
+        if(!qText){ showToast('⚠ Сначала введи текст задания'); return; }
+        if(!corr){ showToast('⚠ Сначала введи правильный ответ'); return; }
+        btn.disabled = true;
+        const origText = btn.textContent;
+        btn.textContent = '⏳';
+        try {
+          const res = await callGenerateExplanation(qText, corr, q.num);
+          explInp.value = res;
+          q.explanation = res;
+          showToast('✓ Черновик готов, проверь и поправь');
+        } catch(e){
+          showToast('⚠ ' + (e && e.message || 'ошибка генерации'));
+        } finally {
+          btn.disabled = false;
+          btn.textContent = origText;
+        }
+      }
+    }, '🤖 AI');
     taskInputs[n] = taskEd;
     ansInputs[n] = ansInp;
     block.append(
@@ -14602,8 +14663,9 @@ function modalEditVariant(){
       el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginTop:'4px', marginBottom:'2px' }},
         'Правильный ответ ученика (если есть альтернативы — через /, ученик пишет один любой допустимый)'),
       ansInp,
-      el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginTop:'4px', marginBottom:'2px', display:'flex', alignItems:'center', gap:'4px' }},
-        el('span', null, '💡 Пояснение (необязательно)')),
+      el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginTop:'4px', marginBottom:'2px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'8px' }},
+        el('span', null, '💡 Пояснение (необязательно)'),
+        aiBtn),
       explInp);
     body.append(block);
   }
