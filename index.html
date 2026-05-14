@@ -4655,6 +4655,38 @@ function notifyViaPush(userId, title, body, link){
     .catch(e => console.warn('[PUSH] fetch упал:', e.message));
 }
 
+/* AI-проверка сочинения через Edge Function check-essay → YandexGPT 5.1 Pro.
+   Возвращает { scores: {k1..k10}, comments: {k1..k10}, general, total, max }. */
+async function callCheckEssay(essayText, sourceText, studentName){
+  if(!sb) throw new Error('нет соединения с Supabase');
+  const token = getAccessToken();
+  if(!token) throw new Error('нужно войти в аккаунт');
+  const url = SUPABASE_URL + '/functions/v1/check-essay';
+  const r = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type':  'application/json',
+      'Authorization': 'Bearer ' + token,
+      'apikey':        SUPABASE_KEY,
+    },
+    body: JSON.stringify({
+      essay_text:   essayText,
+      source_text:  sourceText || '',
+      student_name: studentName || '',
+    }),
+  });
+  const txt = await r.text();
+  let data = null;
+  try { data = JSON.parse(txt); } catch(_){}
+  if(!r.ok){
+    throw new Error((data && data.error) || ('HTTP ' + r.status + ' ' + txt.slice(0, 200)));
+  }
+  if(!data || !data.scores){
+    throw new Error('Модель не вернула баллы');
+  }
+  return data;
+}
+
 /* AI-генерация пояснения через Edge Function generate-explanation
    → YandexGPT-lite. Возвращает строку с готовым черновиком. */
 async function callGenerateExplanation(questionText, correctAnswer, taskNum){
@@ -10713,6 +10745,61 @@ function modalEssayReview(essayId){
     el('div', { style:{ height:'10px' }}));
 
   ['Содержание', 'Речь', 'Грамотность'].forEach(sec => rightCol.append(sectionBlock(sec, lockK2K3)));
+
+  /* AI-кнопка проверки: только для текстовых сочинений (фото пока не отправляем). */
+  if(!isPhotoEssay && essayText && essayText.length > 50){
+    rightCol.append(
+      el('div', { class:'card', style:{ marginTop:'14px', background:'#FFFDF7', border:'1px solid #FACC15' }},
+        el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px', flexWrap:'wrap' }},
+          el('div', null,
+            el('div', { style:{ fontWeight:'700', fontSize:'13px', color:'#92400E' }}, '🤖 AI-черновик проверки'),
+            el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginTop:'2px' }}, 'YandexGPT расставит К1-К10 и напишет комментарий — потом подправь и сохрани')),
+          el('button', { class:'btn btn-y btn-sm',
+            onclick: async (ev) => {
+              const btn = ev.currentTarget;
+              btn.disabled = true;
+              const origText = btn.textContent;
+              btn.textContent = '⏳ Проверяю…';
+              try {
+                /* Подтянем исходный текст из варианта, если сочинение связано с вариантом */
+                let srcText = '';
+                if(essay.variant_id || (essay.attemptId && DB_ESSAYS.find(e => e.id === essay.id)?.variant_id)){
+                  try {
+                    const vid = essay.variant_id || DB_ESSAYS.find(e => e.id === essay.id)?.variant_id;
+                    if(vid){
+                      const arr = await restRequest('GET',
+                        '/test_variant_source_texts?variant_id=eq.' + vid +
+                        '&kind=in.(text_22_26,shared_22_26)&select=body&limit=1');
+                      if(Array.isArray(arr) && arr.length) srcText = String(arr[0].body || '');
+                    }
+                  } catch(_){}
+                }
+                const res = await callCheckEssay(essayText, srcText, essay.studentName || '');
+                /* Подставляем в STATE.scoresK — там ключи UPPERCASE (K1..K10) */
+                if(!STATE.scoresK) STATE.scoresK = {};
+                Object.keys(res.scores).forEach(k => {
+                  STATE.scoresK[k.toUpperCase()] = res.scores[k];
+                });
+                /* Складываем общий комментарий + краткие пометки по критериям */
+                const parts = [];
+                if(res.general) parts.push('🤖 ' + res.general);
+                const detail = Object.keys(res.scores)
+                  .filter(k => res.comments[k])
+                  .map(k => k.toUpperCase() + ' (' + res.scores[k] + '): ' + res.comments[k])
+                  .join('\n');
+                if(detail) parts.push('Разбор по критериям:\n' + detail);
+                STATE.essayComment = parts.join('\n\n');
+                showToast('✓ AI-черновик готов · ' + res.total + ' / ' + res.max + ' баллов');
+                render();
+              } catch(e){
+                showToast('⚠ ' + (e && e.message || 'ошибка AI-проверки'));
+              } finally {
+                btn.disabled = false;
+                btn.textContent = origText;
+              }
+            }
+          }, '🤖 Сгенерировать')));
+  }
 
   rightCol.append(
     el('div', { class:'card', style:{ marginTop:'14px', background:'var(--surface-soft)' }},
