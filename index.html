@@ -3171,6 +3171,7 @@ async function loadQuizSeedFile(){
     { task: 5,  file: 'seed_quiz_task5.json',  name: 'ОБЗ ФИПИ' },
     { task: 6,  file: 'seed_quiz_task6.json',  name: 'ОБЗ ФИПИ' },
     { task: 7,  file: 'seed_quiz_task7.json',  name: 'ОБЗ ФИПИ' },
+    { task: 8,  file: 'seed_quiz_task8.json',  name: 'ОБЗ ФИПИ' },
     { task: 9,  file: 'seed_quiz_task9.json',  name: 'Большой словник' },
     { task: 10, file: 'seed_quiz_task10.json', name: 'Приставки' },
     { task: 11, file: 'seed_quiz_task11.json', name: 'Суффиксы' },
@@ -3233,6 +3234,20 @@ async function loadQuizSeedFile(){
             q: String(it.q || ''),
             template: String(it.text),
             blanks: it.blanks,
+            expl: it.expl || undefined,
+            src: it.src || s.name, collection: s.name,
+          };
+        }
+        /* match: соответствие 5 ошибок ↔ 9 предложений (задание 8 ЕГЭ).
+           errors[] — 5 формулировок (А-Д), sentences[] — 9 предложений (1-9),
+           a — строка из 5 цифр (правильное соответствие). */
+        if(it && it.match && it.q && Array.isArray(it.errors) && Array.isArray(it.sentences) && typeof it.a === 'string'){
+          return {
+            match: true,
+            q: String(it.q),
+            errors: it.errors.map(String),
+            sentences: it.sentences.map(String),
+            a: String(it.a),
             expl: it.expl || undefined,
             src: it.src || s.name, collection: s.name,
           };
@@ -8341,6 +8356,13 @@ function modalTest(taskN){
     } else if(q.match){
       const ans = STATE.testAnswers[i] || {};
       const ok = all && isCorrect(q, i);
+      /* Сколько позиций совпало (для партиальной оценки по ЕГЭ) */
+      let matchedCount = 0;
+      q.errors.forEach((_, k) => {
+        if(String((ans && ans[k]) || '') === String(q.a[k])) matchedCount++;
+      });
+      /* Шкала ЕГЭ для заданий 8 и 22: 5 верных = 2 б, 3-4 = 1 б, иначе 0 */
+      const egePoints = matchedCount === 5 ? 2 : (matchedCount >= 3 ? 1 : 0);
       const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1.4fr)', gap:'18px', alignItems:'flex-start' }});
       /* Левая колонка: ошибки А-Д с селектами */
       const leftCol = el('div', null);
@@ -8389,6 +8411,19 @@ function modalTest(taskN){
       });
       grid.append(rightCol);
       block.append(grid);
+
+      /* После проверки — показываем партиальный балл по шкале ЕГЭ */
+      if(all){
+        const colour = egePoints === 2 ? 'var(--green)' : (egePoints === 1 ? 'var(--warn)' : 'var(--red)');
+        const bg = egePoints === 2 ? 'var(--green-soft)' : (egePoints === 1 ? '#fef3c7' : 'var(--red-soft)');
+        const userSeq = q.errors.map((_, k) => (ans && ans[k]) || '_').join('');
+        block.append(el('div', {
+          style:{ marginTop:'14px', padding:'10px 14px', background:bg, border:'1px solid '+colour, borderRadius:'10px', fontSize:'13px', color:colour, fontWeight:'700', display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'10px' }
+        },
+          el('span', null, 'Ваш ответ: ' + userSeq + ' · Правильно: ' + q.a),
+          el('span', null, 'Совпало: ' + matchedCount + ' / 5  →  ' + egePoints + (egePoints === 1 ? ' балл' : ' балла') + ' (ЕГЭ)')
+        ));
+      }
 
       if(all && q.hint){
         block.append(el('div', { style:{ marginTop:'12px', padding:'10px 12px', background:'var(--p-soft)', borderRadius:'8px', fontSize:'12px', color:'var(--p-deep)' }},
