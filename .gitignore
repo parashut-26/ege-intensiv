@@ -1,0 +1,6 @@
+*.bak
+*.before-*
+*.zip
+files/
+Padlet*
+.DS_Store
