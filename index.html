@@ -11044,6 +11044,7 @@ function modalEssayDraft(){
     photoStatus.textContent = '⏳ Заливаем ' + files.length + ' файл(ов)…';
     photoStatus.style.color = 'var(--ink-3)';
     let ok = 0, fail = 0;
+    const errors = [];   /* собираем тексты ошибок, чтобы показать ученику */
     for(const f of files){
       try {
         const url = await uploadEssayPhoto(f);
@@ -11051,12 +11052,21 @@ function modalEssayDraft(){
         ok++;
         renderThumbs();
       } catch(e){
-        console.error(e);
+        console.error('uploadEssayPhoto:', e);
         fail++;
+        errors.push((f.name || 'файл') + ': ' + (e && e.message || 'неизвестная ошибка'));
       }
     }
-    photoStatus.textContent = '✓ Загружено: ' + ok + (fail ? ' · ⚠ ошибок: ' + fail : '');
-    photoStatus.style.color = fail ? 'var(--red)' : 'var(--green)';
+    /* Показываем итог + причину каждой неудачи прямо под кнопкой,
+       чтобы ученик не оставался один на один с молчаливой «ошибок: 1». */
+    photoStatus.innerHTML = '';
+    photoStatus.append(el('div', { style:{ color: fail ? 'var(--red)' : 'var(--green)', fontWeight:'700' }},
+      '✓ Загружено: ' + ok + (fail ? ' · ⚠ ошибок: ' + fail : '')));
+    if(errors.length){
+      errors.slice(0, 3).forEach(err => {
+        photoStatus.append(el('div', { style:{ color:'var(--red)', fontSize:'11px', marginTop:'4px', wordBreak:'break-all' }}, '— ' + err));
+      });
+    }
     fileInput.value = '';
   });
 
