@@ -7948,7 +7948,10 @@ function modalTest(taskN){
         && ans.every(v => typeof v === 'number');
     }
     if(q.letterGap){
-      return ans != null && String(ans).trim().length > 0;
+      /* Считается «отвеченным» только когда введены ВСЕ символы пропуска.
+         Для одной буквы — любая буква, для НН — обе буквы. */
+      const want = Math.max(1, String(q.correct || '').length);
+      return ans != null && String(ans).trim().length >= want;
     }
     if(q.text) return ans != null && String(ans).trim().length > 0;
     if(q.multi) return Array.isArray(ans) && ans.length > 0;
@@ -7961,8 +7964,13 @@ function modalTest(taskN){
      (ученик выбрал 1 из 3 правильных — система считает «неверно»). */
   const instantMode = !!STATE.testInstant;
   /* Типы, требующие подтверждения «Ответить» в instant-режиме.
-     Single (q.opts + не multi + числовой q.a) проверяется сразу после клика. */
-  const needsSubmit = (q) => !!(q.multi || q.fillNn || q.match || q.text || q.inlineChoice);
+     Single (q.opts + не multi + числовой q.a) проверяется сразу после клика.
+     Для letterGap длиной 2+ (например, Н/НН) тоже требуем кнопку, чтобы
+     ученик не подбирал ответ методом перебора. */
+  const needsSubmit = (q) => !!(
+    q.multi || q.fillNn || q.match || q.text || q.inlineChoice ||
+    (q.letterGap && String(q.correct || '').length >= 2)
+  );
   const isInstantSubmitted = (i) => !!(STATE.testInstantSubmitted && STATE.testInstantSubmitted[i]);
   const isCheckedFor = (q, i) => {
     if(STATE.testChecked) return true;
@@ -8182,11 +8190,13 @@ function modalTest(taskN){
         const v = String(ev.target.value || '').slice(0, gapLen).toLowerCase();
         ev.target.value = v;
         STATE.testAnswers[i] = v;
-        /* В instant-режиме показываем подсветку, когда введена ВСЯ нужная длина */
-        if(instantMode && v.length >= gapLen){
+        /* Для коротких пропусков (1 буква) — instant-проверка с фокусом на следующее.
+           Для НН и других длинных пропусков ждём нажатия «Ответить», иначе можно
+           перебрать варианты («н» не подошло — попробую «нн»). */
+        const isLongGap = gapLen >= 2;
+        if(instantMode && v.length >= gapLen && !isLongGap){
           const nextI = i + 1;
           render();
-          /* requestAnimationFrame — после того, как DOM пересобран */
           requestAnimationFrame(() => {
             const next = document.querySelector('input[data-letter-i="' + nextI + '"]:not([disabled])');
             if(next) next.focus();
