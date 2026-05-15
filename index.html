@@ -13458,13 +13458,19 @@ function questionPreview(q, idx, taskN){
     block.append(el('div', { style:{ padding:'8px 10px', background:'var(--green-soft)', borderRadius:'8px', fontSize:'12px', color:'#065F46', fontWeight:'700' }},
       '✓ Правильно: ' + q.correct.map((c, k) => (k+1) + ') ' + c).join(', ')));
   } else if(q.letterGap && typeof q.word === 'string'){
-    /* Превью: показать слово с буквой на месте пропуска, обозначив её зелёным фоном */
+    /* Превью: показать слово с буквой на месте пропуска, обозначив её зелёным фоном.
+       Считаем длину серии подряд идущих '_' — для НН будет 2 подчёркивания. */
     const idx = q.word.indexOf('_');
+    let gapLen = 0;
+    if(idx >= 0){
+      while(idx + gapLen < q.word.length && q.word[idx + gapLen] === '_') gapLen++;
+    }
+    if(gapLen < 1) gapLen = Math.max(1, String(q.correct || '').length);
     const before = idx >= 0 ? q.word.slice(0, idx) : q.word;
-    const after  = idx >= 0 ? q.word.slice(idx + 1) : '';
+    const after  = idx >= 0 ? q.word.slice(idx + gapLen) : '';
     block.append(el('div', { style:{ padding:'18px 16px', background:'var(--green-soft)', border:'2px solid var(--green)', borderRadius:'10px', textAlign:'center', fontSize:'24px', fontWeight:'700', color:'#065F46' }},
       before,
-      el('span', { style:{ display:'inline-block', minWidth:'42px', padding:'2px 8px', margin:'0 2px', background:'#fff', border:'2px solid var(--green)', borderRadius:'8px' }},
+      el('span', { style:{ display:'inline-block', minWidth: (28 + gapLen * 14) + 'px', padding:'2px 8px', margin:'0 2px', background:'#fff', border:'2px solid var(--green)', borderRadius:'8px' }},
         q.correct || '?'),
       after));
   } else if(q.text){
