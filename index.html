@@ -3168,6 +3168,7 @@ async function loadQuizSeedFile(){
     { task: 12, file: 'seed_quiz_task12.json', name: 'Личные окончания глаголов' },
     { task: 13, file: 'seed_quiz_task13.json', name: 'Орфограмма НЕ' },
     { task: 14, file: 'seed_quiz_task14.json', name: 'Слитно / раздельно / дефис' },
+    { task: 15, file: 'seed_quiz_task15.json', name: 'Н и НН' },
   ];
   for(const s of seedDicts){
     try {
@@ -8017,8 +8018,14 @@ function modalTest(taskN){
       const normEY = s => String(s || '').toLowerCase().replace(/ё/g, 'е');
       const isRight = normEY(sel) === normEY(q.correct);
       const idx = q.word.indexOf('_');
+      /* Считаем длину пропуска (число '_' подряд в q.word, иначе по длине q.correct) */
+      let gapLen = 0;
+      if(idx >= 0){
+        while(idx + gapLen < q.word.length && q.word[idx + gapLen] === '_') gapLen++;
+      }
+      if(gapLen < 1) gapLen = Math.max(1, String(q.correct || '').length);
       const before = idx >= 0 ? q.word.slice(0, idx) : q.word;
-      const after  = idx >= 0 ? q.word.slice(idx + 1) : '';
+      const after  = idx >= 0 ? q.word.slice(idx + gapLen) : '';
       const inpBg = !showResult ? '#fff'
         : (isRight ? '#D1FAE5' : '#FECACA');
       const inpBorder = !showResult ? 'var(--border-2)'
@@ -8026,10 +8033,10 @@ function modalTest(taskN){
       const inpColor = !showResult ? '#0F766E'
         : (isRight ? '#065F46' : '#991B1B');
       const inp = el('input', {
-        type:'text', maxlength:'1',
+        type:'text', maxlength: String(gapLen),
         'data-letter-i': String(i),
         autocapitalize:'off', autocomplete:'off', autocorrect:'off', spellcheck:'false',
-        style:{ width:'42px', textAlign:'center', fontSize:'24px', fontWeight:'700',
+        style:{ width: (28 + gapLen * 14) + 'px', textAlign:'center', fontSize:'24px', fontWeight:'700',
                 padding:'4px 6px', borderRadius:'8px', boxSizing:'border-box',
                 border:'2px solid ' + inpBorder, background:inpBg, color:inpColor,
                 margin:'0 2px', textTransform:'lowercase' },
@@ -8037,12 +8044,11 @@ function modalTest(taskN){
       inp.value = sel || '';
       if(showResult) inp.disabled = true;
       inp.oninput = (ev) => {
-        const v = String(ev.target.value || '').slice(0, 1).toLowerCase();
+        const v = String(ev.target.value || '').slice(0, gapLen).toLowerCase();
         ev.target.value = v;
         STATE.testAnswers[i] = v;
-        /* Если режим instant и буква введена — рендерим, чтобы появилась подсветка,
-           и СРАЗУ переводим фокус на следующий input — иначе клавиатура схлопнется. */
-        if(instantMode && v){
+        /* В instant-режиме показываем подсветку, когда введена ВСЯ нужная длина */
+        if(instantMode && v.length >= gapLen){
           const nextI = i + 1;
           render();
           /* requestAnimationFrame — после того, как DOM пересобран */
@@ -9018,16 +9024,22 @@ function modalMistakeTrainer(){
       }, '✓ Знаю')));
 
     const idx = q.word.indexOf('_');
+    /* Считаем длину пропуска (число '_' подряд) */
+    let gapLen = 0;
+    if(idx >= 0){
+      while(idx + gapLen < q.word.length && q.word[idx + gapLen] === '_') gapLen++;
+    }
+    if(gapLen < 1) gapLen = Math.max(1, String(q.correct || '').length);
     const before = idx >= 0 ? q.word.slice(0, idx) : q.word;
-    const after  = idx >= 0 ? q.word.slice(idx + 1) : '';
+    const after  = idx >= 0 ? q.word.slice(idx + gapLen) : '';
     const inpBg = !showResult ? '#fff' : (isRight ? '#D1FAE5' : '#FECACA');
     const inpBorder = !showResult ? 'var(--border-2)' : (isRight ? 'var(--green)' : 'var(--red)');
     const inpColor = !showResult ? '#0F766E' : (isRight ? '#065F46' : '#991B1B');
     const inp = el('input', {
-      type:'text', maxlength:'1',
+      type:'text', maxlength: String(gapLen),
       'data-bank-i': String(i),
       autocapitalize:'off', autocomplete:'off', autocorrect:'off', spellcheck:'false',
-      style:{ width:'42px', textAlign:'center', fontSize:'24px', fontWeight:'700',
+      style:{ width: (28 + gapLen * 14) + 'px', textAlign:'center', fontSize:'24px', fontWeight:'700',
               padding:'4px 6px', borderRadius:'8px', boxSizing:'border-box',
               border:'2px solid ' + inpBorder, background:inpBg, color:inpColor,
               margin:'0 2px', textTransform:'lowercase' }
@@ -9035,10 +9047,10 @@ function modalMistakeTrainer(){
     inp.value = ans;
     if(showResult) inp.disabled = true;
     inp.oninput = async (ev) => {
-      const v = String(ev.target.value || '').slice(0, 1).toLowerCase();
+      const v = String(ev.target.value || '').slice(0, gapLen).toLowerCase();
       ev.target.value = v;
       STATE.testAnswers[i] = v;
-      if(v){
+      if(v.length >= gapLen){
         /* Сразу проверяем и записываем результат (Ё/Е равны) */
         const ok = normEY(v) === normEY(q.correct);
         const nextI = i + 1;
