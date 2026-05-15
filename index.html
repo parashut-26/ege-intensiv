@@ -3179,6 +3179,7 @@ async function loadQuizSeedFile(){
     { task: 13, file: 'seed_quiz_task13.json', name: 'Орфограмма НЕ' },
     { task: 14, file: 'seed_quiz_task14.json', name: 'Слитно / раздельно / дефис' },
     { task: 15, file: 'seed_quiz_task15.json', name: 'Н и НН' },
+    { task: 16, file: 'seed_quiz_task16.json', name: 'ОБЗ ФИПИ' },
   ];
   for(const s of seedDicts){
     try {
@@ -3248,6 +3249,19 @@ async function loadQuizSeedFile(){
             errors: it.errors.map(String),
             sentences: it.sentences.map(String),
             a: String(it.a),
+            expl: it.expl || undefined,
+            src: it.src || s.name, collection: s.name,
+          };
+        }
+        /* commaPick: задание 16 — 5 предложений, ученик отмечает те, где
+           одна запятая. В каждом пробеле — кликабельный слот, чтобы расставить
+           запятые «для себя» (правильность их позиции НЕ проверяется). */
+        if(it && it.commaPick && it.q && Array.isArray(it.sentences) && Array.isArray(it.a)){
+          return {
+            commaPick: true,
+            q: String(it.q),
+            sentences: it.sentences.map(String),
+            a: it.a.map(Number),  /* 0-based индексы выбранных предложений */
             expl: it.expl || undefined,
             src: it.src || s.name, collection: s.name,
           };
@@ -8008,6 +8022,10 @@ function modalTest(taskN){
     if(q.match){
       return ans && q.errors.every((_, k) => ans[k] != null && ans[k] !== '');
     }
+    if(q.commaPick){
+      /* Достаточно выбрать хотя бы одно предложение (как в q.multi) */
+      return Array.isArray(ans) && ans.length > 0;
+    }
     if(q.inlineChoice){
       /* Все blanks должны быть выбраны (не undefined) */
       return Array.isArray(ans) && q.blanks.length === ans.length
@@ -8034,7 +8052,7 @@ function modalTest(taskN){
      Для letterGap длиной 2+ (например, Н/НН) тоже требуем кнопку, чтобы
      ученик не подбирал ответ методом перебора. */
   const needsSubmit = (q) => !!(
-    q.multi || q.fillNn || q.match || q.text || q.inlineChoice ||
+    q.multi || q.fillNn || q.match || q.commaPick || q.text || q.inlineChoice ||
     (q.letterGap && String(q.correct || '').length >= 2)
   );
   const isInstantSubmitted = (i) => !!(STATE.testInstantSubmitted && STATE.testInstantSubmitted[i]);
@@ -8060,6 +8078,11 @@ function modalTest(taskN){
     if(q.match){
       const seq = q.errors.map((_, k) => (ans && ans[k]) || '_').join('');
       return seq === q.a;
+    }
+    if(q.commaPick){
+      const sel = Array.isArray(ans) ? ans.slice().sort((a,b)=>a-b) : [];
+      const exp = (q.a || []).slice().sort((a,b)=>a-b);
+      return sel.length === exp.length && sel.every((v, k) => v === exp[k]);
     }
     if(q.letterGap){
       /* Ё и Е считаем взаимозаменяемыми (как в школьных текстах часто) */
@@ -8430,6 +8453,108 @@ function modalTest(taskN){
       if(all && q.hint){
         block.append(el('div', { style:{ marginTop:'12px', padding:'10px 12px', background:'var(--p-soft)', borderRadius:'8px', fontSize:'12px', color:'var(--p-deep)' }},
           '💡 ' + q.hint));
+      }
+    } else if(q.commaPick){
+      /* Задание 16: 5 предложений, выбрать те, где ОДНА запятая.
+         В каждом пробеле — кликабельный слот (·/,) для черновика учеником.
+         Расстановка запятых НЕ проверяется — только индексы выбранных предложений. */
+      const ans = Array.isArray(STATE.testAnswers[i]) ? STATE.testAnswers[i] : [];
+      if(!STATE.testCommas) STATE.testCommas = {};
+      if(!STATE.testCommas[i]) STATE.testCommas[i] = {};
+
+      const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'10px' }});
+
+      q.sentences.forEach((sent, si) => {
+        const selected = ans.includes(si);
+        const isRight = (q.a || []).includes(si);
+        let bg = 'var(--surface)', border = '1px solid var(--border-2)';
+        if(all){
+          if(selected && isRight){ bg='var(--green-soft)'; border='1px solid var(--green)'; }
+          else if(selected && !isRight){ bg='var(--red-soft)'; border='1px solid var(--red)'; }
+          else if(!selected && isRight){ bg='var(--y-soft)'; border='1px dashed var(--y)'; }
+        } else if(selected){
+          bg='var(--y-soft)'; border='1px solid var(--y)';
+        }
+        const card = el('div', { style:{ padding:'12px 14px', background:bg, border:border, borderRadius:'12px', display:'flex', gap:'12px', alignItems:'flex-start' }});
+
+        /* Кнопка-чекбокс слева: выбрать предложение */
+        const toggle = el('button', {
+          disabled: all || undefined,
+          style:{ width:'34px', height:'34px', borderRadius:'8px', border:'1px solid var(--border-2)', background:'#fff', fontSize:'18px', fontWeight:'700', cursor: all ? 'default' : 'pointer', flexShrink:'0', color: selected ? 'var(--p)' : 'var(--ink-3)' },
+          onclick: () => {
+            if(all) return;
+            const cur = Array.isArray(STATE.testAnswers[i]) ? STATE.testAnswers[i].slice() : [];
+            const k = cur.indexOf(si);
+            if(k >= 0) cur.splice(k, 1); else cur.push(si);
+            STATE.testAnswers[i] = cur;
+            render();
+          }
+        }, selected ? '☑' : '☐');
+        card.append(toggle);
+
+        /* Правая часть: номер + предложение с кликабельными слотами */
+        const right = el('div', { style:{ flex:'1', minWidth:'0', lineHeight:'1.7', fontSize:'14px' }});
+        const head = el('span', { style:{ fontWeight:'700', color:'var(--p)', marginRight:'6px' }}, (si+1) + ')');
+        right.append(head);
+
+        const words = sent.split(/\s+/).filter(Boolean);
+        const commas = STATE.testCommas[i][si] || new Set();
+        STATE.testCommas[i][si] = commas;
+
+        words.forEach((w, wi) => {
+          if(wi > 0){
+            /* Слот между словом wi-1 и wi */
+            const slotIdx = wi;
+            const active = commas.has(slotIdx);
+            const slot = el('span', {
+              style:{
+                display:'inline-block',
+                minWidth: active ? 'auto' : '14px',
+                padding: active ? '0 2px' : '0',
+                textAlign:'center',
+                cursor: all ? 'default' : 'pointer',
+                color: active ? 'var(--red)' : 'var(--ink-3)',
+                fontWeight: active ? '700' : '400',
+                fontSize: active ? '15px' : '12px',
+                opacity: active ? 1 : 0.45,
+                userSelect: 'none'
+              },
+              onclick: (ev) => {
+                if(all) return;
+                ev.stopPropagation();
+                if(commas.has(slotIdx)) commas.delete(slotIdx); else commas.add(slotIdx);
+                render();
+              }
+            }, active ? ',' : '·');
+            right.append(slot);
+            /* Маленький "несгибаемый" пробел после запятой */
+            right.append(document.createTextNode(' '));
+          }
+          right.append(el('span', null, w));
+          if(wi < words.length - 1){
+            right.append(document.createTextNode(' '));
+          }
+        });
+
+        card.append(right);
+        list.append(card);
+      });
+
+      block.append(list);
+      block.append(el('div', { style:{ marginTop:'8px', fontSize:'11px', color:'var(--ink-3)' }},
+        '💡 Чекбокс слева — отметь предложения с одной запятой. Точки между словами можно превращать в запятые — это твой черновик (не проверяется).'));
+
+      if(all){
+        const ok = isCorrect(q, i);
+        const expectedStr = (q.a || []).map(k => k+1).sort().join('');
+        const yourStr = ans.slice().sort((a,b)=>a-b).map(k => k+1).join('') || '—';
+        block.append(el('div', {
+          style:{ marginTop:'12px', padding:'10px 14px', background: ok ? 'var(--green-soft)' : 'var(--red-soft)', border:'1px solid '+(ok ? 'var(--green)' : 'var(--red)'), borderRadius:'10px', fontSize:'13px', color: ok ? 'var(--green)' : 'var(--red)', fontWeight:'700' }
+        }, ok ? '✓ Верно: ' + expectedStr : '✗ Ваш ответ: ' + yourStr + ' · Правильно: ' + expectedStr));
+        if(q.hint){
+          block.append(el('div', { style:{ marginTop:'6px', padding:'8px 10px', background:'var(--p-soft)', borderRadius:'8px', fontSize:'12px', color:'var(--p-deep)' }},
+            '💡 ' + q.hint));
+        }
       }
     } else if(q.text){
       const ans = STATE.testAnswers[i];
