@@ -11303,10 +11303,58 @@ function modalNewStudent(){
         const result = await importStudents([{ full_name: fullName, email }]);
         const r = result.results[0];
         if(r.status === 'error') throw new Error(r.message || 'Не удалось создать');
-        await loadStudentsFromDb();
+
+        /* ВЕРИФИКАЦИЯ: Edge Function может вернуть «created»/«updated», но
+           по факту профиль мог не записаться (например, триггер откатил
+           всю цепочку, а ответ всё равно ушёл). Делаем явный direct-запрос
+           к /profiles и смотрим, реально ли он там. */
+        status.textContent = '⏳ Проверяем, что профиль реально в БД…';
+        let dbProfile = null;
+        try {
+          const verifyArr = await restRequest(
+            'GET',
+            '/profiles?email=eq.' + encodeURIComponent(email) +
+            '&select=id,full_name,email,role,s_status,s_type,bee,avatar_color,avatar_url,teacher_comment'
+          );
+          dbProfile = Array.isArray(verifyArr) && verifyArr[0] ? verifyArr[0] : null;
+        } catch(verifyErr){
+          /* Если verify-запрос упал (502 от прокси) — не критично,
+             всё равно делаем оптимистичный add ниже. */
+          console.warn('verify после addStudent упал:', verifyErr.message);
+        }
+
+        if(!dbProfile){
+          /* Профиль реально не появился. Скорее всего — триггер сломался
+             (RLS / SECURITY DEFINER не применён / другой косяк). */
+          throw new Error('Edge Function вернула «' + r.status + '», но профиля с этим e-mail в БД нет. Проверь, что SQL-фикс fix_auto_enroll_security_definer.sql применён и что трг_auto_enroll не падает.');
+        }
+
+        /* Оптимистично кладём ИМЕННО ЭТОТ профиль в STUDENTS — теперь у нас
+           настоящий id, не tmp-*. */
+        if(!STUDENTS.find(s => s.id === dbProfile.id)){
+          STUDENTS.push({
+            id: dbProfile.id,
+            name: dbProfile.full_name || fullName,
+            email: dbProfile.email || email,
+            type: dbProfile.s_type || 'гость',
+            status: dbProfile.s_status || 'pending',
+            bee: dbProfile.bee || 0,
+            avg: null,
+            progress: null,
+            color: dbProfile.avatar_color || _AVATAR_COLORS[(STUDENTS.length) % _AVATAR_COLORS.length],
+            avatarUrl: dbProfile.avatar_url || null,
+            paid: false,
+            paidAmount: 0,
+            teacher_comment: dbProfile.teacher_comment || ''
+          });
+        }
+        STATE.studentsFilter = 'all';
+        /* В фоне обновляем список — но в этом обновлении можем встретить 502 от прокси.
+           Тогда тот, кого только что добавили, останется в STUDENTS до следующей загрузки. */
+        loadStudentsFromDb().catch(e => console.warn('refresh после addStudent упал:', e.message));
         STATE.newStudentForm = false;
         if(isFakeEmail){
-          showToast('✓ ' + fullName + ' добавлен без e-mail. Дай ему ссылку-вход через 🔗 в строке.');
+          showToast('✓ ' + fullName + ' добавлен. Дай ему ссылку-вход через 🔗 в строке (без e-mail).');
         } else {
           showToast('✓ ' + fullName + ' добавлен' + (r.status === 'updated' ? ' (обновлён)' : ''));
         }
