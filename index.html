@@ -3222,6 +3222,17 @@ async function loadQuizSeedFile(){
             src: it.src || s.name, collection: s.name,
           };
         }
+        /* inlineChoice: text с placeholder'ами ${0}, ${1} и массив blanks */
+        if(it && it.inlineChoice && it.text && Array.isArray(it.blanks)){
+          return {
+            inlineChoice: true,
+            q: String(it.q || ''),
+            text: String(it.text),
+            blanks: it.blanks,
+            expl: it.expl || undefined,
+            src: it.src || s.name, collection: s.name,
+          };
+        }
         return null;
       }).filter(Boolean);
       /* Дедуп по уникальному ключу (word для letterGap или q для остальных) */
@@ -7924,6 +7935,11 @@ function modalTest(taskN){
     if(q.match){
       return ans && q.errors.every((_, k) => ans[k] != null && ans[k] !== '');
     }
+    if(q.inlineChoice){
+      /* Все blanks должны быть выбраны (не undefined) */
+      return Array.isArray(ans) && q.blanks.length === ans.length
+        && ans.every(v => typeof v === 'number');
+    }
     if(q.letterGap){
       return ans != null && String(ans).trim().length > 0;
     }
@@ -7939,7 +7955,7 @@ function modalTest(taskN){
   const instantMode = !!STATE.testInstant;
   /* Типы, требующие подтверждения «Ответить» в instant-режиме.
      Single (q.opts + не multi + числовой q.a) проверяется сразу после клика. */
-  const needsSubmit = (q) => !!(q.multi || q.fillNn || q.match || q.text);
+  const needsSubmit = (q) => !!(q.multi || q.fillNn || q.match || q.text || q.inlineChoice);
   const isInstantSubmitted = (i) => !!(STATE.testInstantSubmitted && STATE.testInstantSubmitted[i]);
   const isCheckedFor = (q, i) => {
     if(STATE.testChecked) return true;
@@ -7968,6 +7984,10 @@ function modalTest(taskN){
       /* Ё и Е считаем взаимозаменяемыми (как в школьных текстах часто) */
       const normEY = s => String(s || '').trim().toLowerCase().replace(/ё/g, 'е');
       return normEY(ans) === normEY(q.correct);
+    }
+    if(q.inlineChoice){
+      if(!Array.isArray(ans) || ans.length !== q.blanks.length) return false;
+      return q.blanks.every((b, k) => ans[k] === b.correct);
     }
     if(q.text){
       const accept = Array.isArray(q.a) ? q.a : [q.a];
@@ -8051,6 +8071,70 @@ function modalTest(taskN){
     if(q.multi){
       block.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
         '☑ Выберите ВСЕ верные варианты'));
+    }
+
+    /* inlineChoice: предложение с placeholder'ами ${0}, ${1}…
+       Клик по слову циклически переключает между вариантами (слитно/раздельно/дефис). */
+    if(q.inlineChoice && typeof q.text === 'string' && Array.isArray(q.blanks)){
+      const ansArr = Array.isArray(STATE.testAnswers[i]) ? STATE.testAnswers[i].slice() : new Array(q.blanks.length).fill(undefined);
+      const showResult = all;
+      /* Разбираем text по ${n}, рендерим текст с кликабельными span на местах placeholder'ов */
+      const wrap = el('div', { style:{ padding:'14px 16px', background:'#FFFCF2', borderRadius:'10px', border:'1px solid var(--border)', fontSize:'15px', lineHeight:'1.8' }});
+      const re = /\$\{(\d+)\}/g;
+      let lastIdx = 0; let m;
+      while((m = re.exec(q.text)) !== null){
+        if(m.index > lastIdx){
+          wrap.append(document.createTextNode(q.text.slice(lastIdx, m.index)));
+        }
+        const bIdx = +m[1];
+        const blank = q.blanks[bIdx];
+        if(blank){
+          const sel = ansArr[bIdx];   // undefined | 0 | 1 | 2
+          const display = (typeof sel === 'number') ? blank.variants[sel] : '(' + blank.variants[0].split(/[\s-]/)[0] + ')' + blank.variants[0].split(/[\s-]/).slice(1).join('');
+          const isRight = sel === blank.correct;
+          let bg = sel == null ? '#fff' : '#FEF3C7';
+          let color = '#0F766E';
+          let border = '2px solid var(--y)';
+          if(showResult){
+            if(isRight){ bg = '#D1FAE5'; color = '#065F46'; border = '2px solid var(--green)'; }
+            else { bg = '#FECACA'; color = '#991B1B'; border = '2px solid var(--red)'; }
+          }
+          const span = el('span', {
+            style:{ display:'inline-block', padding:'2px 8px', margin:'0 2px', borderRadius:'6px',
+                    background: bg, color: color, border: border,
+                    fontWeight:'700', cursor: showResult ? 'default' : 'pointer', userSelect:'none' },
+            title: showResult ? '' : 'Нажми, чтобы переключить вариант'
+          }, display);
+          if(!showResult){
+            span.onclick = () => {
+              const cur = Array.isArray(STATE.testAnswers[i]) ? STATE.testAnswers[i].slice() : new Array(q.blanks.length).fill(undefined);
+              const nextSel = (typeof cur[bIdx] === 'number') ? (cur[bIdx] + 1) % blank.variants.length : 0;
+              cur[bIdx] = nextSel;
+              STATE.testAnswers[i] = cur;
+              render();
+            };
+          }
+          wrap.append(span);
+        }
+        lastIdx = re.lastIndex;
+      }
+      if(lastIdx < q.text.length){
+        wrap.append(document.createTextNode(q.text.slice(lastIdx)));
+      }
+      block.append(wrap);
+      /* После проверки — показать правильные варианты под каждым блоком */
+      if(showResult){
+        const fixes = [];
+        q.blanks.forEach((b, k) => {
+          if(ansArr[k] !== b.correct){
+            fixes.push((k+1) + ') «' + b.variants[b.correct] + '»');
+          }
+        });
+        if(fixes.length){
+          block.append(el('div', { style:{ marginTop:'8px', fontSize:'13px', color:'var(--green)' }},
+            'Правильно: ' + fixes.join(' · ')));
+        }
+      }
     }
 
     /* letterGap: одно слово с пропуском "_" → inline-input в этом месте.
