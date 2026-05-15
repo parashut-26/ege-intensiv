@@ -10654,8 +10654,14 @@ function studentRow(s){
             }
           }) : null),
         el('div', null,
-          el('div', { style:{ fontWeight:'700' }}, s.name),
-          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, s.email)))),
+          /* Имя онлайн-учеников подсвечиваем: зелёный фон + насыщенный цвет */
+          el('div', {
+            style: online
+              ? { fontWeight:'800', color:'#065F46', background:'var(--green-soft)', padding:'2px 8px', borderRadius:'6px', display:'inline-block' }
+              : { fontWeight:'700' },
+            title: online ? 'Сейчас в приложении' : undefined
+          }, s.name),
+          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop: online ? '4px' : '0' }}, s.email)))),
     el('td', null, s.type === 'свой' ? chip('🐝 свой', 'y') : chip('⭐ гость', 'grey')),
     /* Прогресс / Пчёлки / Балл / Посещения — считаются «на лету»
        (GROUP_STATS.byStudent для прогресса+балла, ATTENDANCE_BY_ACT для посещений). */
@@ -18220,8 +18226,13 @@ function viewCuratorStudents(){
                     }
                   }) : null),
                 el('div', null,
-                  el('div', { style:{ fontWeight:'700' }}, s.name),
-                  el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, s.email)))),
+                  el('div', {
+                    style: online
+                      ? { fontWeight:'800', color:'#065F46', background:'var(--green-soft)', padding:'2px 8px', borderRadius:'6px', display:'inline-block' }
+                      : { fontWeight:'700' },
+                    title: online ? 'Сейчас в приложении' : undefined
+                  }, s.name),
+                  el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop: online ? '4px' : '0' }}, s.email)))),
               el('td', null, s.type === 'свой' ? chip('🐝 свой', 'y') : chip('⭐ гость', 'grey')),
               el('td', null, progress != null
                 ? el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
