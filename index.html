@@ -13349,6 +13349,7 @@ function questionPreview(q, idx, taskN){
   if(q.match){ typeLabel = '🔀 соответствие А–Д'; typeKind = 'p'; }
   else if(q.fillNn){ typeLabel = '✏️ заполнить Н/НН'; typeKind = 'warn'; }
   else if(q.letterGap){ typeLabel = '✏️ пропуск буквы'; typeKind = 'warn'; }
+  else if(q.inlineChoice){ typeLabel = '🔘 inline-выбор'; typeKind = 'p'; }
   else if(q.text){ typeLabel = q.pair ? '🔁 пара паронимов' : '✏️ короткий ответ'; typeKind = 'p'; }
   else if(q.multi){ typeLabel = '☑ несколько верных'; typeKind = 'y'; }
   else { typeLabel = '○ один верный'; typeKind = 'grey'; }
@@ -13541,6 +13542,25 @@ function questionPreview(q, idx, taskN){
     /* Для Н/НН показываем правильную раскладку под текстом */
     block.append(el('div', { style:{ padding:'8px 10px', background:'var(--green-soft)', borderRadius:'8px', fontSize:'12px', color:'#065F46', fontWeight:'700' }},
       '✓ Правильно: ' + q.correct.map((c, k) => (k+1) + ') ' + c).join(', ')));
+  } else if(q.inlineChoice && typeof q.text === 'string' && Array.isArray(q.blanks)){
+    /* Превью inlineChoice: текст с подстановкой правильных вариантов в виде зелёных плашек */
+    const wrap = el('div', { style:{ padding:'14px 16px', background:'var(--green-soft)', border:'2px solid var(--green)', borderRadius:'10px', fontSize:'15px', lineHeight:'1.8' }});
+    const re = /\$\{(\d+)\}/g;
+    let lastIdx = 0; let m;
+    while((m = re.exec(q.text)) !== null){
+      if(m.index > lastIdx) wrap.append(document.createTextNode(q.text.slice(lastIdx, m.index)));
+      const bIdx = +m[1];
+      const blank = q.blanks[bIdx];
+      if(blank){
+        wrap.append(el('span', {
+          style:{ display:'inline-block', padding:'2px 8px', margin:'0 2px', borderRadius:'6px',
+                  background:'#fff', color:'#065F46', border:'2px solid var(--green)', fontWeight:'700' }
+        }, blank.variants[blank.correct]));
+      }
+      lastIdx = re.lastIndex;
+    }
+    if(lastIdx < q.text.length) wrap.append(document.createTextNode(q.text.slice(lastIdx)));
+    block.append(wrap);
   } else if(q.letterGap && typeof q.word === 'string'){
     /* Превью: показать слово с буквой на месте пропуска, обозначив её зелёным фоном.
        Считаем длину серии подряд идущих '_' — для НН будет 2 подчёркивания. */
