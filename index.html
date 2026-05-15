@@ -10567,10 +10567,28 @@ function studentRow(s){
                   return;
                 }
                 try {
-                  await restRequest('DELETE', '/profiles?id=eq.' + s.id, null, { prefer: 'return=minimal' });
+                  /* Полное удаление: profile + auth.user (через Edge Function).
+                     Если удалять только profile через REST DELETE — клиент ученика
+                     потом пересоздаст профиль из своей открытой сессии. */
+                  const url = SUPABASE_URL + '/functions/v1/delete-student';
+                  const resp = await fetchWithRetry(url, {
+                    method:'POST',
+                    headers:{ 'Content-Type':'application/json' },
+                    body: JSON.stringify({ student_id: s.id, requester_id: MY_PROFILE && MY_PROFILE.id })
+                  });
+                  if(!resp.ok){
+                    const txt = await resp.text();
+                    let msg = txt; try { msg = JSON.parse(txt).error || txt; } catch(_){}
+                    throw new Error(msg);
+                  }
+                  const data = await resp.json();
                   const i = STUDENTS.indexOf(s);
                   if(i >= 0) STUDENTS.splice(i, 1);
-                  showToast('🗑 Ученик удалён');
+                  if(data.warning){
+                    showToast('🗑 Удалён, но auth.user остался: ' + data.warning);
+                  } else {
+                    showToast('🗑 Ученик удалён полностью');
+                  }
                   render();
                 } catch(e){ showToast('⚠ ' + e.message); }
               }
