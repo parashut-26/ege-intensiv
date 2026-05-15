@@ -9478,19 +9478,23 @@ function viewTeacherOverview(){
           onclick: async () => { showToast('⏳ Обновляю…'); await loadGroupStats(); render(); }
         }, '🔄 Обновить')));
 
-    /* Лидерборд: топ-5 по решённым заданиям */
+    /* Лидерборд: топ-5 по решённым заданиям. Пропускаем «фантомов» —
+       тех, кого нет в STUDENTS (удалённые или гости из другой группы).
+       Если хочешь видеть всех — у учителя есть полная таблица в «Ученики». */
     const leaderboard = Object.entries(gs.byStudent)
       .map(([sid, st]) => {
         const sObj = STUDENTS.find(s => s.id === sid);
+        if(!sObj || !sObj.name) return null;
         return {
           id: sid,
-          name: (sObj && sObj.name) || '—',
-          color: (sObj && sObj.color) || '#A78BFA',
+          name: sObj.name,
+          color: sObj.color || '#A78BFA',
           attempts: st.count,
           tasks: st.tasks.size,
           avg: st.max ? Math.round(st.score / st.max * 100) : 0
         };
       })
+      .filter(Boolean)
       .sort((a, b) => b.tasks - a.tasks || b.avg - a.avg)
       .slice(0, 5);
 
