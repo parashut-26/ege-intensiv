@@ -1424,6 +1424,11 @@ async function restoreSession(){
           render();
           /* После основных загрузок — стартуем фоновый чат-poll */
           startUnreadBgPoll();
+          /* Онлайн-присутствие */
+          startPresenceHeartbeat();
+          if(profile.role === 'teacher' || profile.role === 'curator'){
+            startPresenceRefreshLoop();
+          }
         }).catch(() => {});
         return;
       } else {
@@ -1485,8 +1490,9 @@ async function restoreSession(){
     /* Загружаем теорию в фоне */
     Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile())]).then(() => {
           render();
-          /* После основных загрузок — стартуем фоновый чат-poll */
           startUnreadBgPoll();
+          startPresenceHeartbeat();
+          if(profile.role === 'teacher' || profile.role === 'curator') startPresenceRefreshLoop();
         }).catch(() => {});
   } else {
     STATE.view = 'login';
@@ -3200,7 +3206,7 @@ async function loadStudentsFromDb(){
      В демо-режиме (без sb) сюда не заходим — моки остаются. */
   STUDENTS = [];
   try {
-    const arr = await restRequest('GET', '/profiles?role=eq.student&select=id,full_name,email,s_type,s_status,bee,avatar_color,avatar_url,teacher_comment&order=full_name.asc');
+    const arr = await restRequest('GET', '/profiles?role=eq.student&select=id,full_name,email,s_type,s_status,bee,avatar_color,avatar_url,teacher_comment,last_seen_at&order=full_name.asc');
     if(!Array.isArray(arr)){ console.warn('students load: не массив'); return; }
     STUDENTS = arr.map((p, i) => ({
       id: p.id,
@@ -3215,13 +3221,69 @@ async function loadStudentsFromDb(){
       avatarUrl: p.avatar_url || null,
       paid: false,      // отдельная таблица payments — подтянем позже
       paidAmount: 0,
-      teacher_comment: p.teacher_comment || ''
+      teacher_comment: p.teacher_comment || '',
+      lastSeenAt: p.last_seen_at || null
     }));
     STUDENTS_LOADED = true;
     console.log('✓ Учеников загружено: ' + STUDENTS.length);
   } catch(e){
     console.warn('Не удалось загрузить учеников:', e.message);
   }
+}
+
+/* =========================================================
+   ОНЛАЙН-ПРИСУТСТВИЕ
+   ========================================================= */
+
+/* Heartbeat: каждые 30 сек PATCH profiles.last_seen_at = NOW().
+   Запускается после успешного login и продолжает биться, пока вкладка
+   открыта (даже свёрнутая). Сразу шлём первый пинг. */
+let _PRESENCE_TIMER = null;
+function startPresenceHeartbeat(){
+  if(_PRESENCE_TIMER) return;
+  const ping = async () => {
+    if(!sb || !MY_PROFILE) return;
+    /* Если вкладка свёрнута больше N минут — пингуем реже (раз в 2 мин). */
+    if(document.hidden && Date.now() % 4 !== 0) return;
+    try {
+      await restRequest('PATCH', '/profiles?id=eq.' + MY_PROFILE.id,
+        { last_seen_at: new Date().toISOString() }, { prefer: 'return=minimal', noRetry: true });
+    } catch(e){ /* молча — не критично, следующий пинг попробует ещё */ }
+  };
+  ping();
+  _PRESENCE_TIMER = setInterval(ping, 30000);
+}
+
+/* Лёгкая подгрузка только id + last_seen_at для STUDENTS — каждые 30 сек
+   у учителя/куратора. Обновляет существующие объекты, не пересоздавая массив. */
+let _PRESENCE_REFRESH_TIMER = null;
+async function refreshStudentsPresence(){
+  if(!sb || !STUDENTS_LOADED) return;
+  try {
+    const arr = await restRequest('GET', '/profiles?role=eq.student&select=id,last_seen_at', { noRetry: true });
+    if(!Array.isArray(arr)) return;
+    const map = {};
+    arr.forEach(p => { map[p.id] = p.last_seen_at; });
+    let changed = false;
+    STUDENTS.forEach(s => {
+      const ls = map[s.id] || null;
+      if(s.lastSeenAt !== ls){ s.lastSeenAt = ls; changed = true; }
+    });
+    if(changed) render();
+  } catch(e){ /* молча */ }
+}
+function startPresenceRefreshLoop(){
+  if(_PRESENCE_REFRESH_TIMER) return;
+  refreshStudentsPresence();
+  _PRESENCE_REFRESH_TIMER = setInterval(refreshStudentsPresence, 30000);
+}
+
+/* Helper: онлайн ли ученик прямо сейчас (пинг в последние 90 сек) */
+function isOnline(lastSeenAt){
+  if(!lastSeenAt) return false;
+  const t = new Date(lastSeenAt).getTime();
+  if(isNaN(t)) return false;
+  return (Date.now() - t) < 90 * 1000;
 }
 
 /* Кэш сочинений из БД (для учительского/кураторского списка) */
@@ -10575,10 +10637,22 @@ function viewTeacherStudents(){
 
 function studentRow(s){
   const isPending = s.status === 'pending';
+  const online = isOnline(s.lastSeenAt);
   return el('tr', null,
     el('td', null,
       el('div', { style:{ display:'flex', gap:'10px', alignItems:'center' }},
-        avatarChip(s.name, s.color, 34, s.avatarUrl),
+        /* Аватар + точка-индикатор онлайна снизу-справа */
+        el('div', { style:{ position:'relative' }},
+          avatarChip(s.name, s.color, 34, s.avatarUrl),
+          online ? el('span', {
+            title:'Сейчас в приложении',
+            style:{
+              position:'absolute', bottom:'-2px', right:'-2px',
+              width:'10px', height:'10px', borderRadius:'50%',
+              background:'var(--green)', border:'2px solid #fff',
+              boxShadow:'0 0 4px rgba(34,197,94,0.6)'
+            }
+          }) : null),
         el('div', null,
           el('div', { style:{ fontWeight:'700' }}, s.name),
           el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, s.email)))),
@@ -18131,9 +18205,20 @@ function viewCuratorStudents(){
                              avg >= 60 ? 'var(--warn)' : 'var(--red)';
             const attColor = totalDays && attended === totalDays ? 'var(--green)' :
                              attended > 0 ? 'var(--warn)' : 'var(--ink-3)';
+            const online = isOnline(s.lastSeenAt);
             return el('tr', null,
               el('td', null, el('div', { style:{ display:'flex', gap:'10px', alignItems:'center' }},
-                avatarChip(s.name, s.color),
+                el('div', { style:{ position:'relative' }},
+                  avatarChip(s.name, s.color),
+                  online ? el('span', {
+                    title:'Сейчас в приложении',
+                    style:{
+                      position:'absolute', bottom:'-2px', right:'-2px',
+                      width:'10px', height:'10px', borderRadius:'50%',
+                      background:'var(--green)', border:'2px solid #fff',
+                      boxShadow:'0 0 4px rgba(34,197,94,0.6)'
+                    }
+                  }) : null),
                 el('div', null,
                   el('div', { style:{ fontWeight:'700' }}, s.name),
                   el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, s.email)))),
