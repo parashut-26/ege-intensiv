@@ -4144,8 +4144,51 @@ function buildShuffledLetterGapBank(taskN, n, collection){
     full = full.filter(q => q && (q.letterGap || q.inlineChoice));
   }
   if(!full.length) return [];
-  const sh = shuffleArray(full);
-  return n == null || n >= sh.length ? sh : sh.slice(0, n);
+  /* «Память» уже виденных вопросов в localStorage: при следующем заходе
+     ученик получит сначала непрошедшие. Когда осталось мало непрошедших —
+     сбрасываем «память» и идём по новой. */
+  const seen = quizSeenGet(taskN, collection);
+  let unseen = full.filter(q => !seen.has(quizQuestionKey(q)));
+  /* Если непрошедших меньше, чем просим — добавляем уже виденные (вернее,
+     сбрасываем seen, чтобы дальше пошло заново). */
+  const want = n == null ? full.length : n;
+  if(unseen.length < Math.min(want, Math.ceil(full.length * 0.2))){
+    quizSeenReset(taskN, collection);
+    unseen = full.slice();
+  }
+  const sh = shuffleArray(unseen);
+  const picked = want >= sh.length ? sh : sh.slice(0, want);
+  /* Помечаем как «виденные» сразу при выборке */
+  quizSeenAdd(taskN, collection, picked.map(quizQuestionKey));
+  return picked;
+}
+
+/* === Память виденных вопросов (localStorage) === */
+function quizQuestionKey(q){
+  if(!q) return '';
+  if(q.word) return q.word;
+  if(q.src && q.src.indexOf(' · ') >= 0) return q.src;
+  return q.q || '';
+}
+function quizSeenStorageKey(taskN, collection){
+  return 'zebrus_seenQ_' + taskN + '_' + (collection || '__any__');
+}
+function quizSeenGet(taskN, collection){
+  try {
+    const raw = localStorage.getItem(quizSeenStorageKey(taskN, collection));
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch(_){ return new Set(); }
+}
+function quizSeenAdd(taskN, collection, keys){
+  if(!keys || !keys.length) return;
+  try {
+    const set = quizSeenGet(taskN, collection);
+    keys.forEach(k => { if(k) set.add(k); });
+    localStorage.setItem(quizSeenStorageKey(taskN, collection), JSON.stringify([...set]));
+  } catch(_){}
+}
+function quizSeenReset(taskN, collection){
+  try { localStorage.removeItem(quizSeenStorageKey(taskN, collection)); } catch(_){}
 }
 
 /* Список уникальных коллекций в банке задания N (для группировки в UI).
