@@ -3142,8 +3142,48 @@ async function uploadEssayPhoto(file){
   }
   const ext = (compressed.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'jpg'])[1].toLowerCase();
   const path = MY_PROFILE.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
-  await uploadToStorage('essays', path, compressed, compressed.type || 'image/jpeg');
-  return SUPABASE_DIRECT_URL + '/storage/v1/object/public/essays/' + path;
+  /* Стратегия:
+     1) Пробуем uploadToStorage (прямой Supabase → прокси).
+        На десктопе с VPN работает; на мобиле в РФ обычно падает с «Load failed».
+     2) Если упало — fallback через Edge Function upload-essay-photo:
+        она бежит в Deno-рантайме Supabase, ходит к Storage из самой Supabase,
+        и обходит как блокировку *.supabase.co, так и кривой PHP-прокси на reg.ru. */
+  try {
+    await uploadToStorage('essays', path, compressed, compressed.type || 'image/jpeg');
+    return SUPABASE_DIRECT_URL + '/storage/v1/object/public/essays/' + path;
+  } catch(directErr){
+    console.warn('uploadToStorage упал, fallback на Edge Function:', directErr.message);
+    /* Конвертируем blob → base64 */
+    const base64 = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => {
+        const result = r.result || '';
+        const i = result.indexOf(',');
+        resolve(i >= 0 ? result.slice(i + 1) : result);
+      };
+      r.onerror = () => reject(new Error('Не удалось прочитать файл'));
+      r.readAsDataURL(compressed);
+    });
+    const fnUrl = SUPABASE_URL + '/functions/v1/upload-essay-photo';
+    const resp = await fetchWithRetry(fnUrl, {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
+      body: JSON.stringify({
+        requester_id: MY_PROFILE.id,
+        filename: compressed.name || 'photo.jpg',
+        content_type: compressed.type || 'image/jpeg',
+        base64
+      })
+    });
+    if(!resp.ok){
+      const txt = await resp.text();
+      let msg = txt; try { msg = JSON.parse(txt).error || txt; } catch(_){}
+      throw new Error('Edge upload: ' + msg);
+    }
+    const data = await resp.json();
+    if(!data.url) throw new Error('Edge upload вернул пустой url');
+    return data.url;
+  }
 }
 
 /* Цвета аватарок — циклически по индексу */
