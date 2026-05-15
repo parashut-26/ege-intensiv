@@ -17529,10 +17529,28 @@ function chatPanel(role){
     ensureGroupChatRoom().then(rid => {
       STATE.chatLoading = false;
       if(rid){
-        loadChatMessages().then(() => { startChatPolling(); render(); });
-      } else { render(); }
+        loadChatMessages().then(() => {
+          /* Если сообщений в массиве пусто — повторим через 2 сек.
+             Бывает race condition: пользователь только что зарегистрировался,
+             прокси/RLS вернули пустой массив, хотя сообщения есть. */
+          if(!STATE.chatMessages || !STATE.chatMessages.length){
+            setTimeout(() => {
+              loadChatMessages().then(() => { startChatPolling(); render(); });
+            }, 2000);
+          } else {
+            startChatPolling();
+          }
+          render();
+        });
+      } else {
+        /* Не нашли комнату — даём ещё одну попытку через 2 сек, потом разрешаем перезапрос */
+        setTimeout(() => { STATE.chatRoomTried = false; render(); }, 2000);
+        render();
+      }
     });
   }
+  /* Если сообщения уже загружались, но пришли пустыми — даём кнопку «Обновить»
+     прямо в шапке чата (см. ниже). */
   if(channel === 'dm' && STATE.dmList === null && !STATE.dmListTried){
     STATE.dmListTried = true;
     loadDmList().then(() => {
@@ -17562,14 +17580,35 @@ function chatPanel(role){
         : '🐝 Краш-тест 2026 · общий чат'));
   panel.append(
     el('div', { class:'chat-head' }, headLeft,
-      el('button', { style:{ color:'#fff', fontSize:'18px' },
-        onclick: () => {
-          STATE.chatOpen = false;
-          if(!STATE.chatRoomId) STATE.chatRoomTried = false;
-          stopChatPolling();
-          render();
-        }
-      }, '×')));
+      el('div', { style:{ display:'flex', gap:'6px', alignItems:'center' }},
+        /* Кнопка «Обновить» — на случай если сообщения зависли при первой загрузке */
+        el('button', {
+          style:{ color:'#fff', fontSize:'14px', background:'transparent', border:'none', cursor:'pointer', padding:'4px 8px' },
+          title:'Обновить сообщения',
+          onclick: async () => {
+            STATE.chatRoomTried = false;
+            STATE.chatLoading = false;
+            if(channel === 'dm' && STATE.dmRoomId){
+              await loadDmMessages();
+            } else {
+              if(!STATE.chatRoomId){
+                const rid = await ensureGroupChatRoom();
+                if(rid) await loadChatMessages();
+              } else {
+                await loadChatMessages();
+              }
+            }
+            render();
+          }
+        }, '↻'),
+        el('button', { style:{ color:'#fff', fontSize:'18px' },
+          onclick: () => {
+            STATE.chatOpen = false;
+            if(!STATE.chatRoomId) STATE.chatRoomTried = false;
+            stopChatPolling();
+            render();
+          }
+        }, '×'))));
 
   /* Сколько непрочитанных в каждой вкладке */
   const groupUnread = STATE.chatRoomId ? (STATE.unreadByRoom[STATE.chatRoomId] || 0) : 0;
