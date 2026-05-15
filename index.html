@@ -8363,8 +8363,10 @@ function modalTest(taskN){
       });
       /* Шкала ЕГЭ для заданий 8 и 22: 5 верных = 2 б, 3-4 = 1 б, иначе 0 */
       const egePoints = matchedCount === 5 ? 2 : (matchedCount >= 3 ? 1 : 0);
-      const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1.4fr)', gap:'18px', alignItems:'flex-start' }});
-      /* Левая колонка: ошибки А-Д с селектами */
+      /* На мобиле — вертикально (ошибки сверху, предложения снизу);
+         на широком экране — две колонки. Используем flex с wrap. */
+      const grid = el('div', { style:{ display:'flex', flexDirection:'column', gap:'18px', alignItems:'stretch' }});
+      /* Верхняя секция: ошибки А-Д с селектами */
       const leftCol = el('div', null);
       leftCol.append(el('div', { style:{ fontSize:'11px', textTransform:'uppercase', color:'var(--ink-3)', fontWeight:'700', letterSpacing:'.08em', marginBottom:'10px' }}, q.leftLabel || 'Грамматические ошибки'));
       q.errors.forEach((errText, ei) => {
