@@ -3237,9 +3237,15 @@ async function loadQuizSeedFile(){
         }
         return null;
       }).filter(Boolean);
-      /* Дедуп по уникальному ключу (word для letterGap или q для остальных) */
-      const have = new Set((QUIZ_BANK[s.task] || []).map(q => q.word || q.q));
-      const fresh = items.filter(it => !have.has(it.word || it.q));
+      /* Дедуп по уникальному ключу: word для letterGap; src (если уникальный, типа
+         «ОБЗ ФИПИ · 76164B»); иначе сам q. Раньше использовали q — но если 104
+         задания делят одну формулировку (как в задании 5), все 103 считались
+         дубликатами. */
+      const keyOf = (q) => q.word
+        ? q.word
+        : (q.src && q.src.indexOf(' · ') >= 0 ? q.src : q.q);
+      const have = new Set((QUIZ_BANK[s.task] || []).map(keyOf));
+      const fresh = items.filter(it => !have.has(keyOf(it)));
       QUIZ_BANK[s.task] = (QUIZ_BANK[s.task] || []).concat(fresh);
       console.log('[seed] коллекция «' + s.name + '» (задание ' + s.task + '): всего ' + items.length + ', добавлено ' + fresh.length);
     } catch(e){
