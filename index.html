@@ -1142,6 +1142,16 @@ async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, 
       item.word = q.word || null;
       item.expl = q.expl || null;
     }
+    /* Для commaPick (задание 16) сохраняем расставленные учеником запятые,
+       чтобы учитель потом мог их посмотреть в drill-down. */
+    if(q.commaPick && STATE.testCommas && STATE.testCommas[i]){
+      const commasObj = {};
+      Object.keys(STATE.testCommas[i]).forEach(sentIdx => {
+        const s = STATE.testCommas[i][sentIdx];
+        if(s && s.size) commasObj[sentIdx] = Array.from(s).sort((a,b)=>a-b);
+      });
+      if(Object.keys(commasObj).length) item.commas = commasObj;
+    }
     return item;
   });
   const score = items.filter(x => x.ok).length;
@@ -3262,6 +3272,7 @@ async function loadQuizSeedFile(){
             q: String(it.q),
             sentences: it.sentences.map(String),
             a: it.a.map(Number),  /* 0-based индексы выбранных предложений */
+            correctCommas: it.correctCommas || undefined,  /* эталон от учителя */
             expl: it.expl || undefined,
             src: it.src || s.name, collection: s.name,
           };
@@ -11467,6 +11478,75 @@ function modalAttemptDetail(){
         return;  /* для letterGap дальше «варианты ответа» не показываем */
       }
 
+      /* commaPick (задание 16): рисуем 5 предложений с подсветкой выбора +
+         расставленные учеником запятые между словами. */
+      if(q && q.commaPick && Array.isArray(q.sentences)){
+        const userSet = new Set(Array.isArray(item.user) ? item.user.map(Number) : []);
+        const correctSet = new Set(Array.isArray(item.expected) ? item.expected.map(Number) : []);
+        const studentCommas = (item.commas || {});  /* { sentIdx: [slotIdx, …] } */
+        const teacherCommas = (q.correctCommas || {});  /* эталон от учителя */
+        const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'8px' }});
+        q.sentences.forEach((sent, si) => {
+          const picked = userSet.has(si);
+          const isRight = correctSet.has(si);
+          let bg = '#fff', border = '1px solid var(--border-2)', mark = '';
+          if(picked && isRight){ bg='var(--green-soft)'; border='1px solid var(--green)'; mark='✓ выбрано'; }
+          else if(picked && !isRight){ bg='var(--red-soft)'; border='1px solid var(--red)'; mark='✗ лишнее'; }
+          else if(!picked && isRight){ bg='var(--y-soft)'; border='1px dashed var(--y)'; mark='пропущено'; }
+          const row = el('div', { style:{ padding:'10px 12px', background:bg, border:border, borderRadius:'10px', display:'flex', gap:'10px', alignItems:'flex-start' }});
+          row.append(el('div', { style:{ fontWeight:'700', color:'var(--p)', fontSize:'13px', minWidth:'24px' }}, (si+1) + ')'));
+          const sentBox = el('div', { style:{ flex:'1', minWidth:'0', lineHeight:'1.8', fontSize:'13px' }});
+          const words = sent.split(/\s+/).filter(Boolean);
+          const studentSlots = new Set(Array.isArray(studentCommas[si]) ? studentCommas[si] : []);
+          const teacherSlots = new Set(Array.isArray(teacherCommas[si]) ? teacherCommas[si] : []);
+          words.forEach((w, wi) => {
+            if(wi > 0){
+              const slotIdx = wi;
+              const inStudent = studentSlots.has(slotIdx);
+              const inTeacher = teacherSlots.has(slotIdx);
+              if(inStudent){
+                /* Запятая, которую поставил ученик. Если совпадает с эталоном — зелёная,
+                   если не совпадает — красная, если эталона нет — синяя (просто ввёл) */
+                const colour = inTeacher ? 'var(--green)' : (Object.keys(teacherCommas).length ? 'var(--red)' : 'var(--p)');
+                sentBox.append(el('span', { style:{ color:colour, fontWeight:'700', padding:'0 2px' }}, ','));
+                sentBox.append(document.createTextNode(' '));
+              } else if(inTeacher){
+                /* Ученик пропустил эталонную запятую — показываем серым */
+                sentBox.append(el('span', { style:{ color:'var(--y)', fontWeight:'700', padding:'0 2px', opacity:0.55, textDecoration:'underline dotted' }}, ','));
+                sentBox.append(document.createTextNode(' '));
+              } else {
+                sentBox.append(document.createTextNode(' '));
+              }
+            }
+            sentBox.append(document.createTextNode(w));
+          });
+          row.append(sentBox);
+          if(mark){
+            row.append(el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', fontWeight:'700', whiteSpace:'nowrap', marginLeft:'auto' }}, mark));
+          }
+          list.append(row);
+        });
+        card.append(list);
+        /* Подпись: что значит цвет запятой */
+        const hasTeacher = Object.keys(teacherCommas).length > 0;
+        card.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'6px' }},
+          hasTeacher
+            ? 'Зелёная запятая — совпадает с эталоном; красная — лишняя; жёлтая (пунктир) — пропущенная.'
+            : 'Запятые — расставленные учеником (эталон от учителя не задан).'));
+        /* Итог */
+        const yourStr = Array.from(userSet).sort((a,b)=>a-b).map(k=>k+1).join('') || '—';
+        const expectStr = Array.from(correctSet).sort((a,b)=>a-b).map(k=>k+1).join('');
+        card.append(el('div', { style:{ marginTop:'6px', fontSize:'12px', color: ok ? 'var(--green)' : 'var(--red)', fontWeight:'700' }},
+          ok ? '✓ Верно: ' + expectStr : '✗ Ваш ответ: ' + yourStr + ' · Правильно: ' + expectStr));
+        if(item.expl || (q && q.expl)){
+          const expl = item.expl || q.expl;
+          card.append(el('div', { style:{ marginTop:'6px', padding:'8px 10px', background:'var(--p-soft)', borderRadius:'8px', fontSize:'12px' }},
+            '💡 ' + expl));
+        }
+        body.append(card);
+        return;  /* для commaPick дальше generic-разбор не нужен */
+      }
+
       /* Определяем, был ли ответ списком индексов (multi-select / орфоэпия / паронимы / etc.) */
       const userIdxs = Array.isArray(item.user)
         ? item.user.map(v => Number(v)).filter(n => !isNaN(n))
@@ -13768,6 +13848,63 @@ function questionPreview(q, idx, taskN){
     grid.append(leftCol);
     grid.append(rightCol);
     block.append(grid);
+  } else if(q.commaPick && Array.isArray(q.sentences)){
+    /* Превью commaPick (задание 16): 5 предложений с подсветкой правильных,
+       и кликабельные слоты между словами — учитель может разметить эталонные
+       позиции запятых. q.correctCommas: { sentIdx: [slotIdx, …] }. */
+    const correctSet = new Set((q.a || []).map(Number));
+    if(!q.correctCommas) q.correctCommas = {};
+    const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'8px' }});
+    q.sentences.forEach((sent, si) => {
+      const isRight = correctSet.has(si);
+      const bg = isRight ? 'var(--green-soft)' : '#fff';
+      const border = isRight ? '1px solid var(--green)' : '1px solid var(--border-2)';
+      const row = el('div', { style:{ padding:'10px 12px', background:bg, border:border, borderRadius:'10px', display:'flex', gap:'10px', alignItems:'flex-start' }});
+      row.append(el('div', { style:{ fontWeight:'700', color: isRight ? '#065F46' : 'var(--ink-3)', minWidth:'24px', fontSize:'13px' }}, (si+1) + ')' + (isRight ? ' ✓' : '')));
+      const sentBox = el('div', { style:{ flex:'1', minWidth:'0', lineHeight:'1.8', fontSize:'13px' }});
+      const words = sent.split(/\s+/).filter(Boolean);
+      if(!Array.isArray(q.correctCommas[si])) q.correctCommas[si] = [];
+      const slots = new Set(q.correctCommas[si]);
+      words.forEach((w, wi) => {
+        if(wi > 0){
+          const slotIdx = wi;
+          const active = slots.has(slotIdx);
+          const slot = el('span', {
+            style:{
+              display:'inline-block',
+              minWidth: active ? 'auto' : '14px',
+              padding: active ? '0 2px' : '0',
+              textAlign:'center',
+              cursor:'pointer',
+              color: active ? 'var(--red)' : 'var(--ink-3)',
+              fontWeight: active ? '700' : '400',
+              fontSize: active ? '15px' : '12px',
+              opacity: active ? 1 : 0.45,
+              userSelect:'none'
+            },
+            onclick: async (ev) => {
+              ev.stopPropagation();
+              if(slots.has(slotIdx)) slots.delete(slotIdx); else slots.add(slotIdx);
+              q.correctCommas[si] = Array.from(slots).sort((a,b)=>a-b);
+              const ok = await persistTaskBank(taskN);
+              if(ok) showToast('✓ Эталон запятых сохранён');
+              render();
+            }
+          }, active ? ',' : '·');
+          sentBox.append(slot);
+          sentBox.append(document.createTextNode(' '));
+        }
+        sentBox.append(document.createTextNode(w));
+      });
+      row.append(sentBox);
+      list.append(row);
+    });
+    block.append(list);
+    block.append(el('div', { style:{ marginTop:'8px', fontSize:'11px', color:'var(--ink-3)' }},
+      '💡 Кликай на точки `·` между словами, чтобы расставить эталонные запятые. Ученик увидит ваш эталон в своей попытке (для самопроверки). Сохраняется автоматически.'));
+    const expectStr = Array.from(correctSet).sort((a,b)=>a-b).map(k=>k+1).join('');
+    block.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'var(--green-soft)', borderRadius:'8px', fontSize:'12px', color:'#065F46', fontWeight:'700' }},
+      '✓ Правильный ответ (номера предложений с одной запятой): ' + expectStr));
   } else if(q.fillNn){
     /* Для Н/НН показываем правильную раскладку под текстом */
     block.append(el('div', { style:{ padding:'8px 10px', background:'var(--green-soft)', borderRadius:'8px', fontSize:'12px', color:'#065F46', fontWeight:'700' }},
