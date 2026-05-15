@@ -7768,13 +7768,20 @@ function modalTheory(n){
               n === 5 ? el('button', { class:'btn btn-secondary',
                 onclick: () => { STATE.testOpen = 5; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = 5; STATE.testLimit = null; STATE.shuffledBank = null; STATE.theoryOpen = null; render(); }
               }, '🎲 Быстрые 5 пар') : null,
-              /* Большой словник для задания 9 — отдельные кнопки случайной подборки */
-              n === 9 ? el('button', { class:'btn btn-p',
-                onclick: () => { STATE.testOpen = 9; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = 20; STATE.testLimit = null; STATE.shuffledBank = null; STATE.theoryOpen = null; render(); }
-              }, '🎲 20 случайных слов') : null,
-              n === 9 ? el('button', { class:'btn btn-secondary',
-                onclick: () => { STATE.testOpen = 9; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = 10; STATE.testLimit = null; STATE.shuffledBank = null; STATE.theoryOpen = null; render(); }
-              }, '🎲 Быстрые 10 слов') : null));
+              /* Кнопки случайной подборки letterGap — для любого задания,
+                 где в банке есть letterGap-вопросы (словник). */
+              (function(){
+                const hasGap = (QUIZ_BANK[n] || []).some(q => q && q.letterGap);
+                if(!hasGap) return null;
+                return [
+                  el('button', { class:'btn btn-p',
+                    onclick: () => { STATE.testOpen = n; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = 20; STATE.testLimit = null; STATE.shuffledBank = null; STATE.testCollection = null; STATE.theoryOpen = null; render(); }
+                  }, '🎲 20 случайных слов'),
+                  el('button', { class:'btn btn-secondary',
+                    onclick: () => { STATE.testOpen = n; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = 10; STATE.testLimit = null; STATE.shuffledBank = null; STATE.testCollection = null; STATE.theoryOpen = null; render(); }
+                  }, '🎲 Быстрые 10 слов')
+                ];
+              })()));
         })() : null,
 
         /* Если на вкладке Практика, но банка ещё нет — пояснение */
