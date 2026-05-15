@@ -1373,8 +1373,11 @@ async function restoreSession(){
   }
 
   if(!sb){
+    /* Supabase не загрузился → показываем ошибку, демо больше не запускаем,
+       чтобы посторонние не попали в кабинет учителя. */
     STATE.authLoading = false;
-    STATE.authMode = 'demo';
+    STATE.authMode = 'live';
+    STATE.authError = 'Не удалось подключиться к серверу. Попробуй обновить страницу.';
     _AUTH_BOOTSTRAP_RUNNING = false;
     render();
     return;
@@ -6176,12 +6179,56 @@ function myProfileAvatarCard(){
   const name = MY_PROFILE.full_name || 'Профиль';
   const color = MY_PROFILE.avatar_color || '#8B5CF6';
   const card = el('div', { class:'card', style:{ marginBottom:'16px' }});
+
+  const editName = async () => {
+    const newName = prompt('Имя и Фамилия:', name);
+    if(newName == null) return;
+    const trimmed = newName.trim();
+    if(!trimmed) return;
+    try {
+      await restRequest('PATCH', '/profiles?id=eq.' + MY_PROFILE.id,
+        { full_name: trimmed }, { prefer: 'return=minimal' });
+      MY_PROFILE.full_name = trimmed;
+      showToast('✓ Имя обновлено');
+      render();
+    } catch(e){ showToast('⚠ ' + e.message); }
+  };
+
+  const editEmail = async () => {
+    const cur = MY_PROFILE.email || '';
+    const newEmail = prompt('Новый e-mail (на него будут приходить уведомления и коды входа):', cur);
+    if(newEmail == null) return;
+    const clean = newEmail.trim().toLowerCase();
+    if(!clean) return;
+    if(!clean.includes('@') || !clean.includes('.')){ showToast('⚠ Похоже, e-mail некорректный'); return; }
+    if(clean === cur.toLowerCase()){ return; }
+    if(!confirm('Сменить e-mail на «' + clean + '»?\n\nВажно: при следующем входе нужно будет использовать новую почту.')) return;
+    try {
+      await restRequest('PATCH', '/profiles?id=eq.' + MY_PROFILE.id,
+        { email: clean }, { prefer: 'return=minimal' });
+      MY_PROFILE.email = clean;
+      showToast('✓ E-mail обновлён');
+      render();
+    } catch(e){
+      const msg = String(e.message || '');
+      if(msg.toLowerCase().includes('duplicate') || msg.includes('23505')){
+        showToast('⚠ Такой e-mail уже занят другим пользователем');
+      } else {
+        showToast('⚠ ' + msg);
+      }
+    }
+  };
+
   card.append(
     el('div', { style:{ display:'flex', alignItems:'center', gap:'14px' }},
       avatarUploader(MY_PROFILE.avatar_url || null, name, color),
-      el('div', { style:{ flex:1 }},
-        el('div', { style:{ fontWeight:'700', fontSize:'15px' }}, name),
-        el('div', { style:{ fontSize:'13px', color:'var(--ink-2)' }}, MY_PROFILE.email || '—'),
+      el('div', { style:{ flex:1, minWidth:0 }},
+        el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }},
+          el('div', { style:{ fontWeight:'700', fontSize:'15px' }}, name),
+          el('button', { class:'btn-icon', title:'Изменить имя', onclick: editName }, '✏️')),
+        el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', marginTop:'2px', flexWrap:'wrap' }},
+          el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', wordBreak:'break-all' }}, MY_PROFILE.email || '—'),
+          el('button', { class:'btn-icon', title:'Изменить e-mail', onclick: editEmail }, '✉️')),
         el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px' }},
           'Нажми 📸 на аватаре, чтобы загрузить свой'))));
   return card;
@@ -6473,38 +6520,14 @@ function viewLogin(){
         el('p', { class:'foot-note', style:{ marginTop:'14px' }},
           'Без паролей и без VPN. На e-mail придёт 6-значный код.'));
     }
-    card.append(
-      el('div', { class:'divider' }, 'или'),
-      el('button', { class:'login-btn btn-secondary',
-        onclick: () => { STATE.authMode = 'demo'; render(); }
-      }, '👀 Посмотреть в демо-режиме (без входа)'));
+    /* Демо-режим убран: посторонние через него могли попасть в кабинет учителя. */
   } else {
-    /* Демо-режим — три кнопки ролей, как раньше */
-    card.append(
-      el('button', { class:'login-btn btn-y',
-        onclick: () => {
-          STATE.view='student';
-          try { if(!localStorage.getItem('zebrus_onboarded')){ STATE.showOnboarding = true; }} catch(e){}
-          render();
-        }
-      }, '🐝 Войти как ученик (демо)'),
-      el('button', { class:'login-btn btn-teal',
-        onclick: () => { STATE.view='curator'; render(); }
-      }, '🤝 Войти как куратор (демо)'),
-      el('button', { class:'login-btn btn-p',
-        onclick: () => { STATE.view='teacher'; render(); }
-      }, '👩‍🏫 Войти как учитель (демо)'));
-    if(sb){
-      card.append(
-        el('div', { class:'divider' }, 'или'),
-        el('button', { class:'login-btn btn-secondary',
-          onclick: () => { STATE.authMode = 'live'; STATE.authStage = 'idle'; render(); }
-        }, '🔐 Войти по e-mail (через Supabase)'));
-    }
-    card.append(
-      el('p', { class:'foot-note' },
-        sb ? 'Демо-режим — данные не сохраняются между сессиями.'
-           : 'Подключение к Supabase не загрузилось. Работает демо-режим.'));
+    /* Если по какой-то причине authMode не 'live' (старые сессии) — принудительно
+       включаем live и не показываем демо-кнопок. */
+    STATE.authMode = 'live';
+    STATE.authStage = 'idle';
+    setTimeout(render, 0);
+    card.append(el('p', { class:'foot-note' }, 'Перенаправляем на вход…'));
   }
 
   return el('div', { class:'login-wrap' }, card);
@@ -17923,6 +17946,24 @@ function viewCuratorChat(){
       'Открывайте плавающий чат справа внизу. Под своими сообщениями вы будете подписаны как «куратор».'));
 }
 
+function viewCuratorProfile(){
+  const wrap = el('div', { class:'fade-in' });
+  wrap.append(
+    el('h1', null, '👤 Профиль'),
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'20px' }},
+      'Ваши данные. Имя и e-mail можно изменить.'));
+  /* Карточка с аватаром, именем и e-mail + кнопками редактирования */
+  const avCard = myProfileAvatarCard();
+  if(avCard) wrap.append(avCard);
+  /* Telegram (если есть профиль из БД) */
+  const tgCard = telegramLinkCard();
+  if(tgCard) wrap.append(tgCard);
+  /* Web Push в браузере */
+  const pushCard = webPushCard();
+  if(pushCard) wrap.append(pushCard);
+  return wrap;
+}
+
 /* =======================================================================
    ЧАТ
    ======================================================================= */
@@ -18476,11 +18517,13 @@ function _renderNow(){
       { key:'essays', label:'Сочинения', ic:'📝',
         badge: ESSAYS_LOADED ? (ESSAYS.filter(e => e.status === 'new').length || null) : null },
       { key:'chat', label:'Чат', ic:'💬' },
+      { key:'profile', label:'Профиль', ic:'👤' },
     ];
     const map = {
       students: viewCuratorStudents,
       essays: viewCuratorEssays,
       chat: viewCuratorChat,
+      profile: viewCuratorProfile,
     };
     const content = map[STATE.curatorTab]();
     root.append(
@@ -18616,8 +18659,11 @@ function _renderNow(){
 if(sb){
   restoreSession();
 } else {
+  /* Без Supabase демо больше не запускаем — выводим ошибку, чтобы посторонние
+     не попали в кабинет учителя. */
   STATE.authLoading = false;
-  STATE.authMode = 'demo';
+  STATE.authMode = 'live';
+  STATE.authError = 'Не удалось подключиться к серверу. Обнови страницу.';
   render();
 }
 </script>
