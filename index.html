@@ -1717,9 +1717,29 @@ let CURATORS = [
 ];
 
 const _DEFAULT_CURATOR_PERMS = {
+  /* Загрузка/редактирование заданий и материалов */
   addTasks: false, addMaterials: false, editTasks: false,
-  manageDays: false, approveGuests: false
+  /* Проверки */
+  checkEssays: false,   /* проверка сочинений (К1-К10, финальная оценка) */
+  checkTests: false,    /* просмотр и проверка попыток в тренажёрах теории */
+  checkVariants: false, /* проверка пробников/вариантов ЕГЭ */
+  /* Управление интенсивом */
+  manageDays: false,    /* двигать вебинары и менять время */
+  addLessons: false,    /* добавлять занятия в дни интенсива */
+  approveGuests: false  /* подтверждать заявки гостей */
 };
+
+/* Хелпер: какие права у текущего вошедшего куратора?
+   Возвращает объект с булевыми флагами. Для учителя — всё true. */
+function myCuratorPerms(){
+  if(!MY_PROFILE) return { ..._DEFAULT_CURATOR_PERMS };
+  if(MY_PROFILE.role === 'teacher'){
+    const all = {};
+    Object.keys(_DEFAULT_CURATOR_PERMS).forEach(k => all[k] = true);
+    return all;
+  }
+  return { ..._DEFAULT_CURATOR_PERMS, ...(MY_PROFILE.curator_perms || {}) };
+}
 
 /* Загрузить реальный список кураторов из БД */
 async function loadCuratorsFromDb(){
@@ -11731,11 +11751,19 @@ function modalCuratorPerms(){
   const close = () => { STATE.curatorPermsFor = null; render(); };
 
   const permRows = [
-    { key:'addTasks', label:'Может добавлять задания', desc:'Создавать новые тесты и упражнения' },
-    { key:'addMaterials', label:'Может загружать материалы', desc:'PDF, doc, видео в Базу знаний' },
-    { key:'editTasks', label:'Может редактировать чужие задания', desc:'Менять существующие задания учителя' },
-    { key:'manageDays', label:'Может управлять расписанием дня', desc:'Двигать вебинары и менять время' },
-    { key:'approveGuests', label:'Может одобрять гостей', desc:'Подтверждать заявки на интенсив' },
+    /* Проверки */
+    { key:'checkEssays', label:'📝 Проверять сочинения', desc:'Открывать сданные работы, ставить К1-К10, замечания, финализировать оценку' },
+    { key:'checkTests', label:'🎯 Проверять тесты', desc:'Видеть попытки учеников в тренажёрах теории, drill-down ответов' },
+    { key:'checkVariants', label:'📋 Проверять пробники', desc:'Пересдачи вариантов ЕГЭ, ручная корректировка баллов' },
+    /* Создание/правка контента */
+    { key:'addTasks', label:'➕ Загружать задания', desc:'Добавлять новые вопросы в банк QUIZ_BANK, импорт Excel/PDF' },
+    { key:'editTasks', label:'✏️ Редактировать задания', desc:'Менять существующие вопросы, формулировки и правильные ответы' },
+    { key:'addMaterials', label:'📚 Загружать материалы', desc:'PDF, doc, видео в Базу знаний и в дни' },
+    /* Управление расписанием */
+    { key:'manageDays', label:'📅 Управлять расписанием', desc:'Двигать вебинары, менять время и название занятий' },
+    { key:'addLessons', label:'＋ Добавлять уроки в дни', desc:'Создавать новые занятия и привязывать их к дням интенсива' },
+    /* Ученики */
+    { key:'approveGuests', label:'👋 Одобрять гостей', desc:'Подтверждать pending-заявки на интенсив' },
   ];
 
   const status = el('div', { style:{ fontSize:'12px', minHeight:'16px' }}, '');
@@ -18512,19 +18540,36 @@ function _renderNow(){
   }
 
   if(STATE.view === 'curator'){
+    const perms = myCuratorPerms();
     const tabs = [
       { key:'students', label:'Ученики', ic:'👥' },
       { key:'essays', label:'Сочинения', ic:'📝',
         badge: ESSAYS_LOADED ? (ESSAYS.filter(e => e.status === 'new').length || null) : null },
-      { key:'chat', label:'Чат', ic:'💬' },
-      { key:'profile', label:'Профиль', ic:'👤' },
     ];
+    if(perms.addTasks || perms.editTasks || perms.addMaterials || perms.checkTests){
+      tabs.push({ key:'content', label:'Задания', ic:'📚' });
+    }
+    if(perms.checkVariants){
+      tabs.push({ key:'variants', label:'Пробники', ic:'📋' });
+    }
+    if(perms.manageDays || perms.addLessons){
+      tabs.push({ key:'days', label:'Дни', ic:'📅' });
+    }
+    tabs.push({ key:'chat', label:'Чат', ic:'💬' });
+    tabs.push({ key:'profile', label:'Профиль', ic:'👤' });
     const map = {
       students: viewCuratorStudents,
-      essays: viewCuratorEssays,
+      /* Если есть право финальной проверки — показываем учительский вид
+         сочинений (с финализацией К1-К10), иначе кураторский (пре-чек). */
+      essays: perms.checkEssays ? viewTeacherEssays : viewCuratorEssays,
+      content: viewTeacherContent,
+      variants: viewTeacherVariants,
+      days: viewTeacherDays,
       chat: viewCuratorChat,
       profile: viewCuratorProfile,
     };
+    /* Если вкладка стала недоступна — откатываемся на «Учеников». */
+    if(!map[STATE.curatorTab]) STATE.curatorTab = 'students';
     const content = map[STATE.curatorTab]();
     root.append(
       shellHeader('curator'),
