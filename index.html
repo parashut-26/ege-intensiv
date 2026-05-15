@@ -7971,8 +7971,10 @@ function modalTest(taskN){
     }
     if(q.text){
       const accept = Array.isArray(q.a) ? q.a : [q.a];
-      const norm = String(ans || '').trim().toLowerCase();
-      return accept.some(a => String(a).toLowerCase() === norm);
+      /* Ё/Е считаем равными — частое расхождение в учебных текстах */
+      const normEY = s => String(s || '').trim().toLowerCase().replace(/ё/g, 'е');
+      const userNorm = normEY(ans);
+      return accept.some(a => normEY(a) === userNorm);
     }
     if(q.multi){
       const sel = Array.isArray(ans) ? ans.slice().sort() : [];
