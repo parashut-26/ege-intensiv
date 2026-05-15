@@ -124,8 +124,31 @@ serve(async (req) => {
         }
 
         const userId = newUser.user!.id;
-        // Обновляем профиль с правильным именем (триггер мог поставить email префикс)
-        await supabase.from('profiles').update({ full_name: fullName }).eq('id', userId);
+        // На случай, если триггер on_auth_user_created не отработал — делаем upsert профиля сами.
+        // (Раньше полагались на триггер, но он у некоторых деплоев не создан/не срабатывает,
+        //  из-за чего auth.users есть, а profiles нет.)
+        const { error: upsertErr } = await supabase.from('profiles').upsert(
+          {
+            id: userId,
+            email,
+            full_name: fullName,
+            role: 'student',
+            s_type: 'гость',
+            s_status: 'pending',
+          },
+          { onConflict: 'id' }
+        );
+        if (upsertErr) {
+          results.push({ email, full_name: fullName, status: 'error', message: 'auth ok, но profile upsert упал: ' + upsertErr.message });
+          continue;
+        }
+
+        // Проверяем, что профиль реально на месте — на случай молчаливого fail
+        const { data: verify } = await supabase.from('profiles').select('id').eq('id', userId).maybeSingle();
+        if (!verify) {
+          results.push({ email, full_name: fullName, status: 'error', message: 'profile создался, но запрос обратно вернул пусто (RLS?)' });
+          continue;
+        }
 
         results.push({ email, full_name: fullName, status: 'created' });
       } catch (e: any) {
