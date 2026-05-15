@@ -3162,6 +3162,9 @@ async function loadQuizSeedFile(){
   /* Универсальный загрузчик seed-словников letterGap. Каждый файл —
      отдельная коллекция (имя видно ученику и учителю в редакторе банка). */
   const seedDicts = [
+    { task: 1,  file: 'seed_quiz_task1.json',  name: 'ОБЗ ЕГЭ' },
+    { task: 2,  file: 'seed_quiz_task2.json',  name: 'ОБЗ ЕГЭ' },
+    { task: 3,  file: 'seed_quiz_task3.json',  name: 'ОБЗ ЕГЭ' },
     { task: 9,  file: 'seed_quiz_task9.json',  name: 'Большой словник' },
     { task: 10, file: 'seed_quiz_task10.json', name: 'Приставки' },
     { task: 11, file: 'seed_quiz_task11.json', name: 'Суффиксы' },
@@ -3189,6 +3192,17 @@ async function loadQuizSeedFile(){
             src: s.name, collection: s.name,
           };
         }
+        /* text-вопрос: q + a (строка или массив строк) — короткий текстовый ответ */
+        if(it && it.text && it.q && (typeof it.a === 'string' || Array.isArray(it.a))){
+          return {
+            text: true, q: String(it.q), a: it.a,
+            sourceText: it.sourceText || undefined,
+            context: it.context || undefined,
+            sentences: it.sentences || undefined,
+            expl: it.expl || undefined,
+            src: it.src || s.name, collection: s.name,
+          };
+        }
         if(it && it.q && Array.isArray(it.opts) && typeof it.a === 'number'){
           return {
             q: String(it.q), opts: it.opts.map(String), a: it.a,
@@ -3196,9 +3210,18 @@ async function loadQuizSeedFile(){
             src: s.name, collection: s.name,
           };
         }
+        /* multi-вопрос: q + opts + a (массив индексов) */
+        if(it && it.multi && it.q && Array.isArray(it.opts) && Array.isArray(it.a)){
+          return {
+            multi: true, q: String(it.q), opts: it.opts.map(String), a: it.a,
+            sourceText: it.sourceText || undefined,
+            expl: it.expl || undefined,
+            src: it.src || s.name, collection: s.name,
+          };
+        }
         return null;
       }).filter(Boolean);
-      /* Дедуп по уникальному ключу (word для letterGap или q для choice) */
+      /* Дедуп по уникальному ключу (word для letterGap или q для остальных) */
       const have = new Set((QUIZ_BANK[s.task] || []).map(q => q.word || q.q));
       const fresh = items.filter(it => !have.has(it.word || it.q));
       QUIZ_BANK[s.task] = (QUIZ_BANK[s.task] || []).concat(fresh);
