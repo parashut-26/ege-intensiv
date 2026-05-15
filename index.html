@@ -4095,9 +4095,18 @@ function bankFor(taskN){
 /* Случайная подборка N вопросов из банка по конкретному заданию.
    Если в банке меньше N — берём все, что есть. */
 function buildLimitedBank(taskN, n){
-  const full = bankFor(taskN);
-  if(n == null || n >= full.length) return full;
-  return shuffleArray(full).slice(0, n);
+  /* «🎯 5/10 вопросов» — это классические ЕГЭ-задания: multi-выбор, match,
+     задания с рядами слов и т.п. letterGap-слова (одиночные пропуски букв)
+     открываются отдельной кнопкой «🎲 случайные слова», поэтому отсюда их
+     исключаем — иначе после загрузки большого словника на 941 слово
+     случайная выборка из всего банка состояла бы почти из одних slow. */
+  const fullRaw = bankFor(taskN);
+  const full = fullRaw.filter(q => !(q && q.letterGap));
+  /* Fallback: если в банке вообще нет НЕ-letterGap-вопросов (например,
+     задание полностью словарное) — используем весь банк, чтобы не показать пусто. */
+  const pool = full.length ? full : fullRaw;
+  if(n == null || n >= pool.length) return pool;
+  return shuffleArray(pool).slice(0, n);
 }
 
 /* Случайная подборка из банка задания N.
