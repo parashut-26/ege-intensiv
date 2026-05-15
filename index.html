@@ -3140,20 +3140,12 @@ async function uploadEssayPhoto(file){
   if(looksLikeHeic){
     throw new Error('Это фото в формате HEIC — Safari не смог конвертировать. На iPhone: Настройки → Камера → Форматы → Наиболее совместимые. Затем переснять или выбрать другое.');
   }
-  const ext = (compressed.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'jpg'])[1].toLowerCase();
-  const path = MY_PROFILE.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
-  /* Стратегия:
-     1) Пробуем uploadToStorage (прямой Supabase → прокси).
-        На десктопе с VPN работает; на мобиле в РФ обычно падает с «Load failed».
-     2) Если упало — fallback через Edge Function upload-essay-photo:
-        она бежит в Deno-рантайме Supabase, ходит к Storage из самой Supabase,
-        и обходит как блокировку *.supabase.co, так и кривой PHP-прокси на reg.ru. */
-  try {
-    await uploadToStorage('essays', path, compressed, compressed.type || 'image/jpeg');
-    return SUPABASE_DIRECT_URL + '/storage/v1/object/public/essays/' + path;
-  } catch(directErr){
-    console.warn('uploadToStorage упал, fallback на Edge Function:', directErr.message);
-    /* Конвертируем blob → base64 */
+  /* Стратегия — Edge Function первая, прямой Storage только как fallback.
+     Раньше пробовали прямой → прокси → Edge Function. Но в РФ на мобиле без VPN
+     прямой висит ~30 сек до таймаута → ученик думает, что не работает и тыкает
+     повторно, потом загружается дважды. Делаем наоборот: Edge Function (надёжно,
+     быстро, обходит блокировки и багованный PHP-прокси), а прямой — резерв. */
+  const tryEdgeFunction = async () => {
     const base64 = await new Promise((resolve, reject) => {
       const r = new FileReader();
       r.onload = () => {
@@ -3183,6 +3175,17 @@ async function uploadEssayPhoto(file){
     const data = await resp.json();
     if(!data.url) throw new Error('Edge upload вернул пустой url');
     return data.url;
+  };
+
+  try {
+    return await tryEdgeFunction();
+  } catch(edgeErr){
+    console.warn('Edge Function упал, fallback на прямой Storage:', edgeErr.message);
+    /* Резерв: старый путь напрямую (работает на десктопе с VPN). */
+    const ext = (compressed.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'jpg'])[1].toLowerCase();
+    const path = MY_PROFILE.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
+    await uploadToStorage('essays', path, compressed, compressed.type || 'image/jpeg');
+    return SUPABASE_DIRECT_URL + '/storage/v1/object/public/essays/' + path;
   }
 }
 
@@ -10622,11 +10625,49 @@ function studentRow(s){
     el('td', { style:{ textAlign:'right' }},
       isPending
         ? el('div', { style:{ display:'flex', gap:'4px', justifyContent:'flex-end' }},
-            el('button', { class:'btn-icon', style:{ background:'var(--green-soft)', color:'var(--green)' },
-              onclick: () => { s.status = 'active'; s.progress = 0; s.bee = 0; s.avg = 0; showToast('Ученик одобрен'); render(); }
+            /* ✓ — Одобрить: PATCH /profiles s_status=active. Раньше меняли
+               только локальный объект — на refresh возвращалось pending. */
+            el('button', { class:'btn-icon', title:'Одобрить', style:{ background:'var(--green-soft)', color:'var(--green)' },
+              onclick: async () => {
+                if(!/^[0-9a-f-]{36}$/i.test(s.id)){
+                  s.status = 'active'; showToast('Одобрено (локально)'); render(); return;
+                }
+                try {
+                  await restRequest('PATCH', '/profiles?id=eq.' + s.id,
+                    { s_status: 'active' }, { prefer: 'return=minimal' });
+                  s.status = 'active'; s.progress = 0; s.bee = s.bee || 0; s.avg = s.avg || 0;
+                  showToast('✓ Ученик одобрен');
+                  render();
+                } catch(err){ showToast('⚠ ' + err.message); }
+              }
             }, '✓'),
-            el('button', { class:'btn-icon', style:{ background:'var(--red-soft)', color:'var(--red)' },
-              onclick: () => { const i = STUDENTS.indexOf(s); if(i>=0) STUDENTS.splice(i, 1); showToast('Заявка отклонена'); render(); }
+            /* ✕ — Отклонить: полное удаление через Edge Function delete-student
+               (profile + auth.user), иначе ученик «возрождается» при следующем заходе. */
+            el('button', { class:'btn-icon', title:'Отклонить заявку (удалить ученика)',
+              style:{ background:'var(--red-soft)', color:'var(--red)' },
+              onclick: async () => {
+                if(!confirm('Отклонить заявку «' + (s.name || s.email) + '»? Профиль и аккаунт будут удалены полностью.')) return;
+                if(!/^[0-9a-f-]{36}$/i.test(s.id)){
+                  const i = STUDENTS.indexOf(s); if(i>=0) STUDENTS.splice(i, 1);
+                  showToast('Удалено (локально)'); render(); return;
+                }
+                try {
+                  const url = SUPABASE_URL + '/functions/v1/delete-student';
+                  const resp = await fetchWithRetry(url, {
+                    method:'POST',
+                    headers:{ 'Content-Type':'application/json' },
+                    body: JSON.stringify({ student_id: s.id, requester_id: MY_PROFILE && MY_PROFILE.id })
+                  });
+                  if(!resp.ok){
+                    const txt = await resp.text();
+                    let msg = txt; try { msg = JSON.parse(txt).error || txt; } catch(_){}
+                    throw new Error(msg);
+                  }
+                  const i = STUDENTS.indexOf(s); if(i>=0) STUDENTS.splice(i, 1);
+                  showToast('🗑 Заявка отклонена, аккаунт удалён');
+                  render();
+                } catch(err){ showToast('⚠ ' + err.message); }
+              }
             }, '✕'))
         : el('div', { style:{ display:'flex', gap:'4px', justifyContent:'flex-end' }},
             el('button', { class:'btn-icon', title:'Посмотреть карточку',
@@ -11090,13 +11131,29 @@ function modalEssayDraft(){
   renderThumbs();
   const fileInput = el('input', { type:'file', accept:'image/*', multiple:'multiple',
     style:{ display:'none' }});
+  /* Флаг — идёт ли сейчас загрузка фото. Блокирует повторные клики, чтобы
+     ученик не загрузил то же самое дважды, пока ждёт ответа Edge Function. */
+  let photoUploading = false;
+  const photoBtn = el('button', { class:'btn btn-p',
+    onclick: () => {
+      if(photoUploading) return;
+      fileInput.click();
+    }
+  }, '📷 Выбрать фото');
+
   fileInput.addEventListener('change', async ev => {
     const files = Array.from(ev.target.files || []);
     if(!files.length) return;
+    /* Блокируем повторные клики на время загрузки */
+    photoUploading = true;
+    photoBtn.disabled = true;
+    photoBtn.textContent = '⏳ Загружаю…';
+    photoBtn.style.opacity = '0.6';
+
     photoStatus.textContent = '⏳ Заливаем ' + files.length + ' файл(ов)…';
     photoStatus.style.color = 'var(--ink-3)';
     let ok = 0, fail = 0;
-    const errors = [];   /* собираем тексты ошибок, чтобы показать ученику */
+    const errors = [];
     for(const f of files){
       try {
         const url = await uploadEssayPhoto(f);
@@ -11109,8 +11166,6 @@ function modalEssayDraft(){
         errors.push((f.name || 'файл') + ': ' + (e && e.message || 'неизвестная ошибка'));
       }
     }
-    /* Показываем итог + причину каждой неудачи прямо под кнопкой,
-       чтобы ученик не оставался один на один с молчаливой «ошибок: 1». */
     photoStatus.innerHTML = '';
     photoStatus.append(el('div', { style:{ color: fail ? 'var(--red)' : 'var(--green)', fontWeight:'700' }},
       '✓ Загружено: ' + ok + (fail ? ' · ⚠ ошибок: ' + fail : '')));
@@ -11120,6 +11175,11 @@ function modalEssayDraft(){
       });
     }
     fileInput.value = '';
+    /* Снимаем блокировку */
+    photoUploading = false;
+    photoBtn.disabled = false;
+    photoBtn.textContent = '📷 Выбрать фото';
+    photoBtn.style.opacity = '1';
   });
 
   const photoBlock = el('div', null,
@@ -11128,9 +11188,7 @@ function modalEssayDraft(){
       el('h4', { style:{ marginBottom:'4px' }}, 'Загрузи фото своей работы'),
       el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'12px' }},
         'Можно несколько страниц — учитель сможет ставить пометки прямо на фотографии.'),
-      el('button', { class:'btn btn-p',
-        onclick: () => fileInput.click()
-      }, '📷 Выбрать фото')),
+      photoBtn),
     fileInput,
     photoStatus,
     photoList);
