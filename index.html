@@ -3128,6 +3128,18 @@ async function compressImage(file){
 async function uploadEssayPhoto(file){
   if(!sb || !MY_PROFILE) throw new Error('нет авторизации');
   const compressed = await compressImage(file);
+  /* Превентивная проверка размера — PHP-прокси на reg.ru с post_max_size≈8MB
+     отбивает большие файлы. Просим ученика уменьшить разрешение в камере. */
+  if(compressed.size > 7 * 1024 * 1024){
+    throw new Error('Файл слишком большой (' + (compressed.size / 1024 / 1024 | 0) + ' МБ). На iPhone: Настройки → Камера → Форматы → Наиболее совместимые. Затем переснять.');
+  }
+  /* HEIC не отображается у учителя — браузеры его не поддерживают.
+     Если compressImage не справилась с конверсией (вернула HEIC как есть),
+     предупреждаем ученика. */
+  const looksLikeHeic = /heic|heif/i.test(compressed.type || '') || /\.heic$|\.heif$/i.test(compressed.name || '');
+  if(looksLikeHeic){
+    throw new Error('Это фото в формате HEIC — Safari не смог конвертировать. На iPhone: Настройки → Камера → Форматы → Наиболее совместимые. Затем переснять или выбрать другое.');
+  }
   const ext = (compressed.name.match(/\.([a-zA-Z0-9]{1,10})$/) || ['', 'jpg'])[1].toLowerCase();
   const path = MY_PROFILE.id + '/' + Date.now() + '_' + Math.random().toString(36).slice(2, 8) + '.' + ext;
   await uploadToStorage('essays', path, compressed, compressed.type || 'image/jpeg');
