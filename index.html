@@ -1720,13 +1720,16 @@ const _DEFAULT_CURATOR_PERMS = {
   /* Загрузка/редактирование заданий и материалов */
   addTasks: false, addMaterials: false, editTasks: false,
   /* Проверки */
-  checkEssays: false,   /* проверка сочинений (К1-К10, финальная оценка) */
-  checkTests: false,    /* просмотр и проверка попыток в тренажёрах теории */
-  checkVariants: false, /* проверка пробников/вариантов ЕГЭ */
+  checkEssays: false,    /* проверка сочинений (К1-К10, финальная оценка) — видит ВСЕ работы */
+  checkTests: false,     /* просмотр и проверка попыток в тренажёрах теории */
+  checkVariants: false,  /* проверка пробников/вариантов ЕГЭ */
+  /* «Эксперт» — видит только сочинения, явно назначенные ему учителем.
+     Используется когда учитель работает с внешним проверяющим. */
+  expertMode: false,
   /* Управление интенсивом */
-  manageDays: false,    /* двигать вебинары и менять время */
-  addLessons: false,    /* добавлять занятия в дни интенсива */
-  approveGuests: false  /* подтверждать заявки гостей */
+  manageDays: false,     /* двигать вебинары и менять время */
+  addLessons: false,     /* добавлять занятия в дни интенсива */
+  approveGuests: false   /* подтверждать заявки гостей */
 };
 
 /* Хелпер: какие права у текущего вошедшего куратора?
@@ -3464,7 +3467,7 @@ async function loadEssaysFromDb(){
   try {
     /* Берём сочинения и подтягиваем имя ученика. У essays три FK к profiles
        (student_id, pre_checked_by, finalized_by) — указываем явно через !essays_student_id_fkey. */
-    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,photo_urls,word_count,status,submitted_at,format,student:profiles!essays_student_id_fkey(full_name,email),review:essay_reviews(total,general_comment,is_pre_check,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10)&order=submitted_at.desc&limit=200');
+    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,photo_urls,word_count,status,submitted_at,format,assigned_curator_id,student:profiles!essays_student_id_fkey(full_name,email),review:essay_reviews(total,general_comment,is_pre_check,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10)&order=submitted_at.desc&limit=200');
     if(Array.isArray(arr)){
       DB_ESSAYS = arr.map(e => {
         const r = e.review && (Array.isArray(e.review) ? e.review[0] : e.review);
@@ -3478,7 +3481,8 @@ async function loadEssaysFromDb(){
           wordCount: e.word_count,
           status: e.status,
           submittedAt: e.submitted_at,
-          format: e.format
+          format: e.format,
+          assignedCuratorId: e.assigned_curator_id || null
         };
         if(r){
           obj.review = r;
@@ -10130,8 +10134,15 @@ function essayRow(e, isCurator){
           wcWarn),
         el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }},
           preview + (when ? ' · ' + when : '') + (e.preBy ? ' · 🤝 София: ' + e.preScore + '/22' : '')))),
-    el('div', { style:{ display:'flex', gap:'6px', alignItems:'center' }},
+    el('div', { style:{ display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap' }},
       stChip,
+      /* Бейдж: кому назначена работа (виден учителю и эксперту) */
+      e.assignedCuratorId
+        ? (function(){
+            const c = CURATORS.find(x => x.id === e.assignedCuratorId);
+            return chip('🎓 ' + (c ? c.name.split(' ')[0] : 'эксперт'), 'p');
+          })()
+        : null,
       canPreviewAsStudent
         ? el('button', { class:'btn-icon', title:'Посмотреть как ученик',
             style:{ background:'var(--p-soft)', color:'var(--p)' },
@@ -10148,6 +10159,55 @@ function essayRow(e, isCurator){
               STATE.studentEssayResultOpen = e.id;
               render();
             }}, '👁')
+        : null,
+      /* Назначить эксперту / Снять назначение — только учителю и только для DB-работ.
+         Эксперт = куратор с правом expertMode. Если у такого куратора нет
+         назначений — он не видит чужие сочинения. После проверки учитель снимает
+         назначение, и эксперт теряет доступ. */
+      (!isCurator && typeof e.id === 'number' && MY_PROFILE && MY_PROFILE.role === 'teacher')
+        ? el('button', { class:'btn-icon',
+            title: e.assignedCuratorId ? 'Снять назначение эксперта' : 'Назначить эксперту',
+            style: e.assignedCuratorId
+              ? { background:'var(--p-soft)', color:'var(--p)' }
+              : { background:'var(--y-soft)', color:'var(--y)' },
+            onclick: async (ev) => {
+              ev.stopPropagation();
+              if(e.assignedCuratorId){
+                /* Снять назначение */
+                const cur = CURATORS.find(x => x.id === e.assignedCuratorId);
+                if(!confirm('Снять назначение' + (cur ? ' с эксперта «' + cur.name + '»' : '') + '?\n\nПосле этого он больше не сможет открыть эту работу.')) return;
+                try {
+                  await restRequest('PATCH', '/essays?id=eq.' + encodeURIComponent(e.id),
+                    { assigned_curator_id: null }, { prefer: 'return=minimal' });
+                  e.assignedCuratorId = null;
+                  showToast('🔓 Доступ эксперта снят');
+                  render();
+                } catch(err){ showToast('⚠ ' + err.message); }
+              } else {
+                /* Назначить */
+                const experts = CURATORS.filter(c => c.perms && (c.perms.expertMode || c.perms.checkEssays));
+                if(!experts.length){
+                  showToast('Нет кураторов с правом проверки сочинений. Добавь куратора и включи «🎓 Режим эксперта».');
+                  return;
+                }
+                const listText = experts.map((c, i) => (i+1) + ') ' + c.name).join('\n');
+                const choice = prompt('Кому назначить работу «' + (e.studentName || 'ученика') + '»? Введи номер:\n\n' + listText);
+                if(!choice) return;
+                const idx = parseInt(choice.trim(), 10) - 1;
+                if(isNaN(idx) || idx < 0 || idx >= experts.length){
+                  showToast('Неверный номер');
+                  return;
+                }
+                const chosen = experts[idx];
+                try {
+                  await restRequest('PATCH', '/essays?id=eq.' + encodeURIComponent(e.id),
+                    { assigned_curator_id: chosen.id }, { prefer: 'return=minimal' });
+                  e.assignedCuratorId = chosen.id;
+                  showToast('🎓 Назначено: ' + chosen.name);
+                  render();
+                } catch(err){ showToast('⚠ ' + err.message); }
+              }
+            }}, e.assignedCuratorId ? '🔓' : '🎓')
         : null,
       /* Удаление сочинения — только для учителя/куратора, только для DB-работ.
          RLS на стороне БД дополнительно защитит. */
@@ -11770,7 +11830,8 @@ function modalCuratorPerms(){
 
   const permRows = [
     /* Проверки */
-    { key:'checkEssays', label:'📝 Проверять сочинения', desc:'Открывать сданные работы, ставить К1-К10, замечания, финализировать оценку' },
+    { key:'checkEssays', label:'📝 Проверять сочинения (все)', desc:'Видит ВСЕ сданные работы, ставит К1-К10, замечания. Для штатного куратора.' },
+    { key:'expertMode', label:'🎓 Режим эксперта по сочинениям', desc:'Видит ТОЛЬКО сочинения, которые учитель явно назначил ему. После проверки доступ можно снять. Для внешнего эксперта.' },
     { key:'checkTests', label:'🎯 Проверять тесты', desc:'Видеть попытки учеников в тренажёрах теории, drill-down ответов' },
     { key:'checkVariants', label:'📋 Проверять пробники', desc:'Пересдачи вариантов ЕГЭ, ручная корректировка баллов' },
     /* Создание/правка контента */
@@ -12083,7 +12144,15 @@ function viewTeacherEssays(){
   const wrap = el('div', { class:'fade-in' });
   /* Объединяем реальные (DB) сочинения и моки. Реальные — приоритетно, потому что у них
      есть конкретный текст и word_count. Моки оставляем как «исторические» для UX-демо. */
-  const allEssays = [...DB_ESSAYS, ...ESSAYS.filter(m => !DB_ESSAYS.find(d => d.id === m.id))];
+  let allEssays = [...DB_ESSAYS, ...ESSAYS.filter(m => !DB_ESSAYS.find(d => d.id === m.id))];
+  /* Куратор-эксперт видит ТОЛЬКО назначенные ему сочинения.
+     Учитель и обычный куратор (checkEssays) видят все. */
+  if(MY_PROFILE && MY_PROFILE.role === 'curator'){
+    const myPerms = myCuratorPerms();
+    if(myPerms.expertMode && !myPerms.checkEssays){
+      allEssays = allEssays.filter(e => e.assignedCuratorId === MY_PROFILE.id);
+    }
+  }
   /* Маппинг статусов: в БД enum {draft, submitted, in_progress, pre_checked, done},
      в моке — {new, pre_checked, in_progress, done}. submitted ≈ new. */
   const norm = e => ({ ...e, status: e.status === 'submitted' ? 'new' : e.status });
@@ -17964,13 +18033,23 @@ function viewCuratorStudents(){
                 : '—'),
               el('td', null, statusChip(s.status)),
               el('td', { style:{ textAlign:'right' }},
-                el('button', { class:'btn-icon', title:'Написать в ЛС',
-                  onclick: () => {
-                    if(!/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(s.id)){ showToast('Этот ученик ещё не зарегистрирован'); return; }
-                    STATE.chatOpen = true; STATE.chatChannel = 'dm'; render();
-                    openDmWith(s.id, { name: s.name, role: 'student' });
-                  }
-                }, '💬')));
+                el('div', { style:{ display:'inline-flex', gap:'4px' }},
+                  /* «👁 Открыть карточку» — те же возможности, что у учителя:
+                     попытки, варианты, комментарий куратора/учителя. */
+                  el('button', { class:'btn-icon', title:'Открыть карточку ученика',
+                    onclick: () => {
+                      if(!/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(s.id)){ showToast('Этот ученик ещё не зарегистрирован'); return; }
+                      STATE.studentDetailOpen = s.id;
+                      render();
+                    }
+                  }, '👁'),
+                  el('button', { class:'btn-icon', title:'Написать в ЛС',
+                    onclick: () => {
+                      if(!/^[0-9a-f]{8}-[0-9a-f]{4}/i.test(s.id)){ showToast('Этот ученик ещё не зарегистрирован'); return; }
+                      STATE.chatOpen = true; STATE.chatChannel = 'dm'; render();
+                      openDmWith(s.id, { name: s.name, role: 'student' });
+                    }
+                  }, '💬'))));
           })))));
   return wrap;
 }
@@ -18561,9 +18640,17 @@ function _renderNow(){
     const perms = myCuratorPerms();
     const tabs = [
       { key:'students', label:'Ученики', ic:'👥' },
-      { key:'essays', label:'Сочинения', ic:'📝',
-        badge: ESSAYS_LOADED ? (ESSAYS.filter(e => e.status === 'new').length || null) : null },
     ];
+    /* Сочинения видны куратору с правом checkEssays или expertMode.
+       Бейдж: для эксперта — только назначенные ему; для остальных — все «new». */
+    if(perms.checkEssays || perms.expertMode){
+      const myId = MY_PROFILE ? MY_PROFILE.id : null;
+      const visibleEssays = perms.expertMode
+        ? ESSAYS.filter(e => e.assignedCuratorId === myId)
+        : ESSAYS;
+      tabs.push({ key:'essays', label:'Сочинения', ic:'📝',
+        badge: ESSAYS_LOADED ? (visibleEssays.filter(e => e.status === 'new').length || null) : null });
+    }
     if(perms.addTasks || perms.editTasks || perms.addMaterials || perms.checkTests){
       tabs.push({ key:'content', label:'Задания', ic:'📚' });
     }
@@ -18579,7 +18666,10 @@ function _renderNow(){
       students: viewCuratorStudents,
       /* Если есть право финальной проверки — показываем учительский вид
          сочинений (с финализацией К1-К10), иначе кураторский (пре-чек). */
-      essays: perms.checkEssays ? viewTeacherEssays : viewCuratorEssays,
+      /* Эксперт (expertMode) и полный куратор (checkEssays) — оба видят
+         учительский интерфейс проверки с К1-К10. Базовый кураторский (только
+         пре-чек) — для куратора без расширенных прав. */
+      essays: (perms.checkEssays || perms.expertMode) ? viewTeacherEssays : viewCuratorEssays,
       content: viewTeacherContent,
       variants: viewTeacherVariants,
       days: viewTeacherDays,
