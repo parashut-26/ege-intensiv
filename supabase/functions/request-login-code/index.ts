@@ -61,21 +61,36 @@ serve(async (req) => {
       body: JSON.stringify({
         from: FROM_EMAIL,
         to: email,
-        subject: 'Код для входа · ЗебРус',
+        /* Тема нейтральная — без слова «код» и без цифр. В шторке/локскрине
+           телефона пользователь не должен видеть код, пока не откроет письмо. */
+        subject: 'Вход в ЗебРус',
         html: `
           <div style="font-family: Manrope, Arial, sans-serif; max-width: 480px; margin: auto; padding: 24px; background: #fff; color: #1f2937;">
+            <!-- Невидимый preheader — первое, что показывается в превью почты.
+                 Заполняем нейтральным текстом, чтобы код не светился в уведомлении. -->
+            <div style="display:none; max-height:0; overflow:hidden; visibility:hidden; opacity:0; color:transparent; mso-hide:all;">
+              Подтверждение входа в личный кабинет. Откройте письмо, чтобы продолжить.
+            </div>
             <div style="font-size: 28px; margin-bottom: 16px;">🐝 ЗебРус</div>
-            <h2 style="margin: 0 0 12px 0; color: #1f2937;">Ваш код для входа</h2>
+            <p style="color: #1f2937; font-size: 15px; line-height: 1.5; margin: 0 0 14px 0;">
+              Здравствуйте! Вы запросили вход в личный кабинет ЗебРус.
+              Чтобы продолжить — откройте приложение и введите одноразовый код,
+              указанный ниже. Если вы не запрашивали вход, просто проигнорируйте это письмо.
+            </p>
             <div style="font-size: 36px; font-weight: 800; letter-spacing: 6px; padding: 18px; background: #FEF3C7; border-radius: 12px; text-align: center; color: #78350F; margin: 16px 0;">
               ${code}
             </div>
-            <p style="color: #6B7280; font-size: 14px; line-height: 1.5;">
-              Введите этот код в приложении в течение 15 минут.
-              Если вы не запрашивали код — просто проигнорируйте письмо.
+            <p style="color: #6B7280; font-size: 13px; line-height: 1.5;">
+              Код действителен 15 минут.
+            </p>
+            <hr style="border:none; border-top:1px solid #E5E7EB; margin: 20px 0;">
+            <p style="color: #9CA3AF; font-size: 12px; line-height: 1.5;">
+              <b>Не нашли это письмо?</b> Загляни в папку «Спам» или «Промоакции».
+              Если оно там — нажми «Не спам», и следующие письма придут прямо в инбокс.
             </p>
           </div>
         `,
-        text: `Ваш код для входа в ЗебРус: ${code}\n\nКод действителен 15 минут.`,
+        text: `Здравствуйте!\n\nВы запросили вход в личный кабинет ЗебРус. Чтобы продолжить — откройте приложение и введите одноразовый код, указанный ниже.\n\nКод: ${code}\n\nКод действителен 15 минут.\n\nЕсли вы не запрашивали вход — просто проигнорируйте это письмо.`,
       }),
     });
 

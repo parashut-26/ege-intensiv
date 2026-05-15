@@ -6445,7 +6445,7 @@ function viewLogin(){
           oninput: ev => { STATE.authFullName = ev.target.value; }
         }),
         el('label', { style:{ display:'block', fontSize:'12px', color:'var(--ink-2)', fontWeight:'700', marginBottom:'6px' }}, 'Код приглашения от учителя:'),
-        el('input', { type:'text', placeholder:'KRASH2026',
+        el('input', { type:'text', placeholder:'• • • • • •',
           value: STATE.authInviteCode || '',
           style:{ width:'100%', padding:'12px 14px', borderRadius:'12px', border:'1px solid var(--border-2)', fontSize:'16px', fontWeight:'700', letterSpacing:'2px', textTransform:'uppercase', marginBottom:'10px' },
           oninput: ev => { STATE.authInviteCode = ev.target.value.toUpperCase(); }
@@ -10380,7 +10380,7 @@ function viewTeacherStudents(){
         onclick: async () => {
           const title = prompt('Название кода (для тебя — не видно ученикам):', 'Краш-тест 2026');
           if(title === null) return;
-          let code = prompt('Сам код (заглавные буквы, без пробелов):', 'KRASH2026');
+          let code = prompt('Сам код (заглавные буквы, без пробелов):', '');
           if(!code) return;
           code = code.trim().toUpperCase();
           const maxStr = prompt('Лимит регистраций (или Enter без значения для безлимита):', '30');
