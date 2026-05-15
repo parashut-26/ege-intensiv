@@ -632,6 +632,9 @@ const STATE = {
   showOnboarding: false,
   onboardingStep: 1,              // 1..ONBOARDING_STEPS.length — текущий слайд тура
   showPushHelp: false,            // модалка-инструкция «Как включить уведомления»
+  /* Конструктор вопроса для банка тренажёров. Если null — модалка закрыта.
+     { taskN, type, q, opts, a, correct, word, expl, src } */
+  questionBuilder: null,
   theoryOpen: null,        // номер задания
   taskTab: 'theory',       // 'theory' | 'practice' — какая вкладка открыта в карточке задания
   attendanceOpen: false,   // открыта модалка посещаемости
@@ -13513,6 +13516,242 @@ function questionPreview(q, idx, taskN){
 }
 
 /* =======================================================================
+   КОНСТРУКТОР ВОПРОСА для банка тренажёров.
+   Открывается из «➕ Новый вопрос» в редакторе банка. Поддерживает 4 типа:
+   - one    : Викторина — один правильный ответ из нескольких вариантов
+   - multi  : Опрос — несколько правильных ответов
+   - text   : Короткий ответ (слово или число; можно несколько вариантов через /)
+   - letterGap: Слово с пропущенной буквой
+   ======================================================================= */
+function modalQuestionBuilder(){
+  const b = STATE.questionBuilder;
+  if(!b) return null;
+  const close = () => { STATE.questionBuilder = null; render(); };
+  const setType = (t) => {
+    b.type = t;
+    if(t === 'one' || t === 'multi'){
+      if(!Array.isArray(b.opts) || !b.opts.length) b.opts = ['', ''];
+      if(t === 'one' && typeof b.a !== 'number') b.a = 0;
+      if(t === 'multi' && !Array.isArray(b.a)) b.a = [];
+    } else if(t === 'text'){
+      if(typeof b.a !== 'string') b.a = '';
+    } else if(t === 'letterGap'){
+      if(typeof b.word !== 'string') b.word = '';
+      if(typeof b.correct !== 'string') b.correct = '';
+    }
+    render();
+  };
+  if(!b.type) b.type = 'one';
+
+  /* Шапка */
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        '➕ Конструктор · задание №' + b.taskN),
+      el('h2', { style:{ marginTop:'4px' }}, 'Новый вопрос для тренажёра')),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const body = el('div', { class:'modal-body' });
+
+  /* Селектор типа */
+  const typeRow = el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap', marginBottom:'14px' }});
+  const types = [
+    { k:'one',       label:'⚪ Один правильный' },
+    { k:'multi',     label:'☑ Несколько правильных' },
+    { k:'text',      label:'✏️ Короткий ответ (слово/число)' },
+    { k:'letterGap', label:'🔡 Пропуск буквы в слове' },
+  ];
+  types.forEach(t => {
+    typeRow.append(el('button', {
+      class: 'btn btn-sm' + (b.type === t.k ? ' btn-p' : ' btn-secondary'),
+      onclick: () => setType(t.k)
+    }, t.label));
+  });
+  body.append(
+    el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', fontWeight:'700', marginBottom:'4px' }}, 'Тип вопроса'),
+    typeRow);
+
+  /* Поле «Формулировка задания» */
+  const qTa = el('textarea', {
+    placeholder:'Текст задания (то, что увидит ученик)',
+    rows: 2,
+    style:{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'13px', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit' }
+  });
+  qTa.value = b.q || '';
+  qTa.oninput = () => { b.q = qTa.value; };
+  body.append(
+    el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', fontWeight:'700', marginBottom:'4px', marginTop:'4px' }}, 'Формулировка задания'),
+    qTa);
+
+  /* Поля в зависимости от типа */
+  if(b.type === 'one' || b.type === 'multi'){
+    const isMulti = b.type === 'multi';
+    body.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', fontWeight:'700', marginTop:'14px', marginBottom:'6px' }},
+      'Варианты ответа · отметь ' + (isMulti ? 'все правильные' : 'один правильный')));
+    const optsBox = el('div', null);
+    b.opts.forEach((opt, idx) => {
+      const row = el('div', { style:{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'4px' }});
+      const isCorrect = isMulti ? (Array.isArray(b.a) && b.a.includes(idx)) : b.a === idx;
+      const mark = el('button', {
+        class: 'btn btn-sm' + (isCorrect ? ' btn-p' : ' btn-secondary'),
+        style:{ minWidth:'40px', padding:'4px 8px' },
+        onclick: () => {
+          if(isMulti){
+            const cur = Array.isArray(b.a) ? b.a.slice() : [];
+            const k = cur.indexOf(idx);
+            if(k >= 0) cur.splice(k, 1); else cur.push(idx);
+            b.a = cur;
+          } else {
+            b.a = idx;
+          }
+          render();
+        }
+      }, isCorrect ? (isMulti ? '☑' : '●') : (isMulti ? '☐' : '○'));
+      const optInp = el('input', { type:'text',
+        placeholder:'Вариант ' + (idx + 1),
+        style:{ flex:1, padding:'6px 8px', borderRadius:'6px', border:'1px solid var(--border-2)', fontSize:'13px', boxSizing:'border-box' }
+      });
+      optInp.value = opt;
+      optInp.oninput = () => { b.opts[idx] = optInp.value; };
+      const delBtn = el('button', { class:'btn-icon', style:{ color:'var(--red)' },
+        onclick: () => {
+          b.opts.splice(idx, 1);
+          if(isMulti){
+            b.a = (Array.isArray(b.a) ? b.a : [])
+              .filter(i => i !== idx)
+              .map(i => i > idx ? i - 1 : i);
+          } else if(b.a === idx){
+            b.a = 0;
+          } else if(b.a > idx){
+            b.a = b.a - 1;
+          }
+          render();
+        }
+      }, '✕');
+      row.append(mark, optInp, delBtn);
+      optsBox.append(row);
+    });
+    body.append(optsBox);
+    body.append(el('button', { class:'btn btn-secondary btn-sm', style:{ marginTop:'4px' },
+      onclick: () => { b.opts.push(''); render(); }
+    }, '+ добавить вариант'));
+  } else if(b.type === 'text'){
+    body.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', fontWeight:'700', marginTop:'14px', marginBottom:'4px' }},
+      'Правильный ответ (несколько вариантов через /)'));
+    const aInp = el('input', { type:'text',
+      placeholder:'например: который  или  245  или  она / эта',
+      style:{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'13px', boxSizing:'border-box' }
+    });
+    aInp.value = typeof b.a === 'string' ? b.a : (Array.isArray(b.a) ? b.a.join(' / ') : '');
+    aInp.oninput = () => { b.a = aInp.value; };
+    body.append(aInp);
+  } else if(b.type === 'letterGap'){
+    body.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', fontWeight:'700', marginTop:'14px', marginBottom:'4px' }},
+      'Слово с пропуском (поставь "_" на месте пропуска)'));
+    const wInp = el('input', { type:'text',
+      placeholder:'например: пр_пятствие',
+      style:{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'13px', boxSizing:'border-box' }
+    });
+    wInp.value = b.word || '';
+    wInp.oninput = () => { b.word = wInp.value; };
+    body.append(wInp);
+    body.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', fontWeight:'700', marginTop:'10px', marginBottom:'4px' }},
+      'Пропущенная буква (для НН — две буквы)'));
+    const cInp = el('input', { type:'text', maxlength:'3',
+      placeholder:'е',
+      style:{ width:'80px', padding:'8px 10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'14px', boxSizing:'border-box', textAlign:'center', textTransform:'lowercase' }
+    });
+    cInp.value = b.correct || '';
+    cInp.oninput = () => { b.correct = cInp.value; };
+    body.append(cInp);
+  }
+
+  /* Коллекция */
+  body.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', fontWeight:'700', marginTop:'14px', marginBottom:'4px' }},
+    'Коллекция (необязательно — для группировки)'));
+  const collOptions = listCollectionsForTask(b.taskN).map(c => c.name).filter(n => n !== '— без коллекции —');
+  const collInp = el('input', { type:'text',
+    list: 'collection-suggestions-' + b.taskN,
+    placeholder:'например: Учительские, Орфоэпика',
+    style:{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'13px', boxSizing:'border-box' }
+  });
+  collInp.value = b.collection || '';
+  collInp.oninput = () => { b.collection = collInp.value; };
+  body.append(collInp);
+  if(collOptions.length){
+    const dl = el('datalist', { id: 'collection-suggestions-' + b.taskN });
+    collOptions.forEach(name => dl.append(el('option', { value: name })));
+    body.append(dl);
+  }
+
+  /* Пояснение */
+  body.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', fontWeight:'700', marginTop:'14px', marginBottom:'4px' }},
+    '💡 Пояснение (необязательно — ученик увидит после проверки)'));
+  const explTa = el('textarea', {
+    placeholder:'Почему правильный ответ именно такой. Правило, разбор.',
+    rows: 3,
+    style:{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'13px', boxSizing:'border-box', resize:'vertical', fontFamily:'inherit' }
+  });
+  explTa.value = b.expl || '';
+  explTa.oninput = () => { b.expl = explTa.value; };
+  body.append(explTa);
+
+  /* Футер с кнопкой сохранить */
+  const saveBtn = el('button', { class:'btn btn-p',
+    onclick: async (ev) => {
+      const q = (b.q || '').trim();
+      if(!q){ showToast('⚠ Введи формулировку задания'); return; }
+      let item = { q, src: 'Учитель' };
+      if(b.collection && b.collection.trim()) item.collection = b.collection.trim();
+      if(b.expl && b.expl.trim()) item.expl = b.expl.trim();
+      if(b.type === 'one'){
+        const opts = (b.opts || []).map(s => String(s || '').trim()).filter(Boolean);
+        if(opts.length < 2){ showToast('⚠ Нужно минимум 2 варианта'); return; }
+        if(typeof b.a !== 'number' || b.a >= opts.length){ showToast('⚠ Отметь правильный вариант'); return; }
+        item.opts = opts;
+        item.a = b.a;
+      } else if(b.type === 'multi'){
+        const opts = (b.opts || []).map(s => String(s || '').trim()).filter(Boolean);
+        if(opts.length < 2){ showToast('⚠ Нужно минимум 2 варианта'); return; }
+        const aArr = (Array.isArray(b.a) ? b.a : []).filter(i => i < opts.length);
+        if(!aArr.length){ showToast('⚠ Отметь хотя бы один правильный'); return; }
+        item.multi = true; item.opts = opts; item.a = aArr;
+      } else if(b.type === 'text'){
+        const a = String(b.a || '').trim();
+        if(!a){ showToast('⚠ Введи правильный ответ'); return; }
+        const accept = a.split('/').map(s => s.trim()).filter(Boolean);
+        item.text = true;
+        item.a = accept.length === 1 ? accept[0] : accept;
+      } else if(b.type === 'letterGap'){
+        const w = String(b.word || '').trim();
+        const c = String(b.correct || '').trim().toLowerCase();
+        if(!w.includes('_')){ showToast('⚠ Слово должно содержать "_" на месте пропуска'); return; }
+        if(!c){ showToast('⚠ Введи пропущенную букву'); return; }
+        item = Object.assign(item, { letterGap: true, word: w, correct: c });
+        if(!item.q) item.q = 'Вставь пропущенную букву';
+      }
+      if(!QUIZ_BANK[b.taskN]) QUIZ_BANK[b.taskN] = [];
+      QUIZ_BANK[b.taskN].push(item);
+      ev.target.disabled = true;
+      ev.target.textContent = '⏳ Сохраняю…';
+      const ok = await persistTaskBank(b.taskN);
+      showToast(ok ? '✓ Вопрос добавлен в банк' : '⚠ Сохранено локально, но в БД не записалось');
+      STATE.questionBuilder = null;
+      render();
+    }
+  }, '✓ Сохранить в банк');
+
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+  },
+    el('div', { class:'modal', style:{ maxWidth:'620px' }},
+      head, body,
+      el('div', { class:'modal-foot' },
+        el('button', { class:'btn btn-secondary', onclick: close }, 'Отмена'),
+        saveBtn)));
+}
+
+/* =======================================================================
    МОДАЛЬ РЕДАКТИРОВАНИЯ ТЕОРИИ ПО НОМЕРУ
    ======================================================================= */
 function modalEditTheory(n){
@@ -13752,32 +13991,22 @@ function modalEditTheory(n){
                 }
               }, '🎲 20 слов из словника') : null,
               el('button', { class:'btn btn-y btn-sm',
-                title:'Добавить вопрос «слово с пропуском буквы»',
-                onclick: async () => {
-                  const w = prompt('Слово с пропуском (вместо буквы поставь "_"). Например пр_пятствие:');
-                  if(!w || !w.includes('_')) return;
-                  const c = prompt('Какая буква пропущена? (одна буква):');
-                  if(!c || c.trim().length !== 1) return;
-                  const q = prompt('Формулировка для ученика:', 'Вставь пропущенную букву');
-                  const expl = prompt('💡 Пояснение (необязательно, можно потом через 🤖):', '');
-                  const item = {
-                    letterGap: true,
-                    q: (q || 'Вставь пропущенную букву').trim(),
-                    word: w.trim(),
-                    correct: c.trim().toLowerCase(),
-                    src: 'Учитель'
+                title:'Конструктор: викторина, опрос, короткий ответ, пропуск буквы',
+                onclick: () => {
+                  STATE.questionBuilder = {
+                    taskN: n,
+                    type: 'one',
+                    q: '',
+                    opts: ['', ''],
+                    a: 0,
+                    word: '',
+                    correct: '',
+                    expl: '',
+                    collection: '',
                   };
-                  if(expl && expl.trim()) item.expl = expl.trim();
-                  if(!QUIZ_BANK[n]) QUIZ_BANK[n] = [];
-                  QUIZ_BANK[n].push(item);
-                  const ok = await persistTaskBank(n);
-                  showToast(ok ? '✓ Вопрос добавлен' : '⚠ В БД не сохранилось, только локально');
                   render();
                 }
-              }, '➕ Пропуск буквы'),
-              el('button', { class:'btn btn-secondary btn-sm',
-                onclick: () => showToast('Другие типы вопросов пока добавляются вручную через редактирование банка')
-              }, '➕ Другой тип'))),
+              }, '➕ Новый вопрос'))),
           qs.length > 0
             ? el('div', null, qs.map((q, i) => questionPreview(q, i, n)))
             : el('p', { style:{ color:'var(--ink-3)', fontSize:'13px' }},
@@ -17765,6 +17994,7 @@ function _renderNow(){
   if(STATE.examineQuestion) root.append(modalExamineQuestion());
   if(STATE.linkAttempt) root.append(modalLinkStudent());
   if(STATE.showPushHelp) root.append(modalPushHelp());
+  if(STATE.questionBuilder) root.append(modalQuestionBuilder());
   if(STATE.mistakeTrainerOpen) root.append(modalMistakeTrainer());
   if(STATE.linkEssay) root.append(modalLinkEssay());
   if(STATE.studentEssayResultOpen != null) root.append(modalEssayResult(STATE.studentEssayResultOpen));
