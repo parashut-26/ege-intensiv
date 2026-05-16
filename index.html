@@ -1997,7 +1997,15 @@ function _scheduleGroupStatsReload(){
   _GROUP_STATS_RELOAD_TIMER = setTimeout(async () => {
     _GROUP_STATS_RELOAD_TIMER = null;
     try {
-      await loadGroupStats();
+      /* Параллельно тянем обе сводки:
+         loadGroupStats — для «Слабые места группы» на Сводке учителя.
+         loadReportAttempts({silent}) — для «Сводная: ученики × задания» в Аналитике.
+         Silent — без сброса в null, чтобы таблица не моргала «Загружаем…». */
+      const tasks = [loadGroupStats()];
+      if(STATE.reportTried){
+        tasks.push(loadReportAttempts({ silent: true }));
+      }
+      await Promise.all(tasks);
       if(typeof render === 'function') render();
     } catch(e){
       console.warn('realtime stats reload:', e.message);
@@ -14489,18 +14497,21 @@ function critRow(c, lockK2K3){
    ======================================================================= */
 
 /* Грузим все попытки (для интенсива хватит 5000 строк). Только один раз. */
-async function loadReportAttempts(){
+async function loadReportAttempts(opts){
   if(!sb) return;
-  if(STATE.reportTried) return;
+  const silent = !!(opts && opts.silent);
+  /* Без флага silent работает как раньше: загружается один раз.
+     С silent — refresh из realtime: данные обновляются без «Загружаем…» спиннера. */
+  if(!silent && STATE.reportTried) return;
   STATE.reportTried = true;
-  STATE.reportAttempts = null;  /* null = идёт загрузка */
+  if(!silent) STATE.reportAttempts = null;  /* null = идёт загрузка */
   try {
     const arr = await restRequest('GET',
       '/attempts?select=student_id,ege_task_n,score,max_score,created_at&order=created_at.desc&limit=5000');
     STATE.reportAttempts = Array.isArray(arr) ? arr : [];
   } catch(e){
     console.warn('loadReportAttempts упал:', e.message);
-    STATE.reportAttempts = [];
+    if(!silent) STATE.reportAttempts = [];
   }
   render();
 }
@@ -14658,10 +14669,17 @@ function reportSummaryCard(){
     setTimeout(loadReportAttempts, 0);
   }
   const card = el('div', { class:'card', style:{ marginTop:'18px' }});
+  const liveOnReport = _REALTIME_CHANNELS && _REALTIME_CHANNELS.length > 0;
   card.append(
     el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'10px', marginBottom:'10px' }},
       el('div', null,
-        el('h3', null, '📋 Сводная: ученики × задания ЕГЭ'),
+        el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
+          el('h3', null, '📋 Сводная: ученики × задания ЕГЭ'),
+          liveOnReport ? el('span', {
+            style:{ fontSize:'11px', color:'var(--green)', fontWeight:'700',
+                    display:'inline-flex', alignItems:'center', gap:'4px' },
+            title:'Live: новые попытки появляются автоматически'
+          }, '🟢 live') : null),
         el('p', { style:{ color:'var(--ink-2)', fontSize:'12px', marginTop:'4px' }},
           'В ячейке — процент лучшей попытки ученика по этому заданию. Зелёный — от 80%, жёлтый — от 50%, красный — ниже.'))));
 
