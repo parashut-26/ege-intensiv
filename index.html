@@ -8859,21 +8859,24 @@ function modalTest(taskN){
       const normEY = s => String(s || '').toLowerCase().replace(/ё/g, 'е');
       const isRight = normEY(sel) === normEY(q.correct);
       const idx = q.word.indexOf('_');
-      /* Считаем длину пропуска (число '_' подряд в q.word, иначе по длине q.correct).
-         Дополнительно: gapLen НЕ МЕНЬШЕ длины правильного ответа. */
-      let gapLen = 0;
+      /* Сколько РЕАЛЬНО подчёркиваний в слове — нужно для правильной нарезки
+         «до» и «после» (чтобы окончание «ы» в «проявленЫ» не съелось). */
+      let gapLenWord = 0;
       if(idx >= 0){
-        while(idx + gapLen < q.word.length && q.word[idx + gapLen] === '_') gapLen++;
+        while(idx + gapLenWord < q.word.length && q.word[idx + gapLenWord] === '_') gapLenWord++;
       }
-      gapLen = Math.max(gapLen, String(q.correct || '').length, 1);
-      /* Для тренажёра -Н-/-НН- (задание 15): чтобы поле НЕ подсказывало ответ
-         своей шириной, делаем его одинаковым для «Н» и «НН» — всегда 2 символа.
-         Так ученик сам решает: писать Н или НН — без визуальной подсказки.
-         Проверка идёт по точному совпадению строки, как и раньше. */
+      if(gapLenWord < 1) gapLenWord = 1;
+      /* Сколько символов МОЖЕТ ввести ученик (ширина input + maxlength).
+         Начинаем с реального пропуска, дальше — не меньше длины правильного
+         ответа, потом — для Н/НН всегда 2 (чтобы поле не подсказывало). */
+      let gapLen = Math.max(gapLenWord, String(q.correct || '').length, 1);
       const isNNTrainer = (taskN === 15) || /^нн?$/i.test(String(q.correct || ''));
       if(isNNTrainer) gapLen = 2;
+      /* ВАЖНО: для нарезки слова используем gapLenWord (фактическое число «_»),
+         а не gapLen — иначе при Н/НН-override (gapLen=2) для слов с одним «_»
+         «откусится» лишний символ окончания. */
       const before = idx >= 0 ? q.word.slice(0, idx) : q.word;
-      const after  = idx >= 0 ? q.word.slice(idx + gapLen) : '';
+      const after  = idx >= 0 ? q.word.slice(idx + gapLenWord) : '';
       const inpBg = !showResult ? '#fff'
         : (isRight ? '#D1FAE5' : '#FECACA');
       const inpBorder = !showResult ? 'var(--border-2)'
