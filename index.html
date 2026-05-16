@@ -8764,9 +8764,11 @@ function modalTest(taskN){
         el('div', { style:{ fontSize:'11px', color:'#854D0E', marginTop:'6px' }}, '↓ напишите его пароним')));
     }
 
-    if(q.sentences && !q.match){
+    if(q.sentences && !q.match && !q.commaPick){
       /* Это блок sentences для задания 5 (паронимы и подобное) — НЕ для match-вопросов.
-         Match-вопросы используют q.sentences внутри своей таблицы ниже. */
+         Match-вопросы используют q.sentences внутри своей таблицы ниже.
+         commaPick (задание 16) тоже не нужен здесь — он рендерит те же
+         предложения ниже, с кликабельными запятыми. */
       const sentList = el('div', { style:{ marginBottom:'12px', display:'flex', flexDirection:'column', gap:'6px' }});
       q.sentences.forEach((s, si) => {
         /* Сначала markdown (**жирный**), потом подсветка CAPS-слов жёлтым */
