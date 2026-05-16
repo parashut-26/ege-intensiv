@@ -365,6 +365,8 @@ body.no-anim .fade-in{animation:none}
 .chat-fab{position:fixed;bottom:24px;right:24px;width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,#A78BFA,#8B5CF6);color:#fff;font-size:24px;display:flex;align-items:center;justify-content:center;box-shadow:var(--shadow-lg);z-index:25;border:0}
 .chat-fab .dot{position:absolute;top:8px;right:8px;width:10px;height:10px;border-radius:50%;background:var(--red);border:2px solid #fff}
 .chat-panel{position:fixed;bottom:90px;right:24px;width:340px;max-width:calc(100vw - 48px);height:480px;max-height:70vh;background:var(--surface);border-radius:20px;box-shadow:var(--shadow-lg);display:flex;flex-direction:column;border:1px solid var(--border);z-index:25;overflow:hidden}
+.chat-panel.expanded{bottom:24px;right:24px;left:24px;top:24px;width:auto;height:auto;max-height:none;max-width:none}
+@media (max-width:600px){.chat-panel.expanded{bottom:8px;right:8px;left:8px;top:8px}}
 .chat-head{padding:14px 16px;background:linear-gradient(135deg,#A78BFA,#8B5CF6);color:#fff;display:flex;align-items:center;justify-content:space-between}
 .chat-head h4{color:#fff;font-size:15px}
 .chat-tabs{display:flex;border-bottom:1px solid var(--border);background:var(--bg)}
@@ -397,8 +399,10 @@ body.no-anim .fade-in{animation:none}
 .variants-summary .vh-q{min-width:34px;font-size:10px}
 .variants-summary .vc{min-width:34px;cursor:help}
 .variants-summary .vc-empty{color:var(--ink-3);min-width:34px}
-.chat-input{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border);background:var(--surface);align-items:center;position:relative}
+.chat-input{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border);background:var(--surface);align-items:flex-end;position:relative}
 .chat-input input{flex:1;min-width:120px;padding:8px 12px;border:1px solid var(--border-2);border-radius:10px;font-size:13px}
+.chat-input textarea{flex:1;min-width:120px;padding:8px 12px;border:1px solid var(--border-2);border-radius:12px;font-size:14px;font-family:inherit;resize:none;min-height:38px;max-height:200px;line-height:1.4;box-sizing:border-box;outline:none}
+.chat-input textarea:focus{border-color:var(--p)}
 .chat-input button{padding:8px 14px;border-radius:10px;background:var(--p);color:#fff;font-weight:700;font-size:12px}
 /* Эмодзи-пикер */
 .emoji-wrap{flex:0 0 auto}
@@ -2080,6 +2084,29 @@ async function markChatMessageHelped(messageId){
     await loadChatMessages();
   }
   return { alreadyHelped: false, beesAwarded: HELPED_BEES, authorId: msg.author_id };
+}
+
+/* Редактирование сообщения. Только автор. RLS: msgs_helped + msgs_update
+   (если есть) проверит. PATCH /chat_messages?id=eq.<id> body=newBody. */
+async function editChatMessage(messageId, newBody){
+  if(!sb || !MY_PROFILE) return;
+  if(!newBody || !newBody.trim()) return;
+  try {
+    await restRequest('PATCH',
+      '/chat_messages?id=eq.' + encodeURIComponent(messageId),
+      { body: newBody.trim(), edited_at: new Date().toISOString() },
+      { prefer: 'return=minimal' });
+    /* Обновляем локально, не дожидаясь reload */
+    if(STATE.chatChannel === 'dm' && STATE.dmRoomId){
+      await loadDmMessages();
+    } else {
+      await loadChatMessages();
+    }
+    render();
+    showToast('✏ Изменено');
+  } catch(e){
+    showToast('⚠ ' + (e.message || 'не удалось обновить'));
+  }
 }
 
 /* Удаление сообщения. Автор удаляет своё, учитель/куратор — любое.
@@ -18693,7 +18720,7 @@ function chatPanel(role){
     });
   }
 
-  const panel = el('div', { class:'chat-panel' });
+  const panel = el('div', { class:'chat-panel' + (STATE.chatExpanded ? ' expanded' : '') });
 
   /* Шапка с заголовком */
   const headLeft = el('div', null,
@@ -18725,6 +18752,15 @@ function chatPanel(role){
             render();
           }
         }, '↻'),
+        /* Кнопка «Развернуть на весь экран / Свернуть» */
+        el('button', {
+          style:{ color:'#fff', fontSize:'14px', background:'transparent', border:'none', cursor:'pointer', padding:'4px 8px' },
+          title: STATE.chatExpanded ? 'Свернуть' : 'Развернуть на весь экран',
+          onclick: () => {
+            STATE.chatExpanded = !STATE.chatExpanded;
+            render();
+          }
+        }, STATE.chatExpanded ? '⤡' : '⛶'),
         el('button', { style:{ color:'#fff', fontSize:'18px' },
           onclick: () => {
             STATE.chatOpen = false;
@@ -18801,9 +18837,21 @@ function chatPanel(role){
       el('div', { class:'chat-input' },
         MY_PROFILE ? chatAttachButtons() : null,
         emojiButton('chat-i'),
-        el('input', { id:'chat-i', placeholder: MY_PROFILE ? (STATE.chatRecording ? '🔴 Идёт запись…' : 'Сообщение…') : 'Войдите, чтобы писать',
+        el('textarea', { id:'chat-i', rows:'1',
+          placeholder: MY_PROFILE ? (STATE.chatRecording ? '🔴 Идёт запись…' : 'Сообщение… (Shift+Enter — перенос)') : 'Войдите, чтобы писать',
           disabled: !MY_PROFILE || STATE.chatRecording,
-          onkeydown: e => { if(e.key === 'Enter'){ e.preventDefault(); sendChat(); }}}),
+          oninput: (e) => {
+            /* Авто-рост textarea: устанавливаем высоту по контенту */
+            e.target.style.height = 'auto';
+            e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
+          },
+          onkeydown: e => {
+            if(e.key === 'Enter' && !e.shiftKey){
+              e.preventDefault();
+              sendChat();
+            }
+          }
+        }),
         el('button', { onclick: () => sendChat(), disabled: !MY_PROFILE || STATE.chatRecording }, 'Отправить')));
   }
 
@@ -18900,9 +18948,20 @@ function chatPanel(role){
         el('div', { class:'chat-input' },
           chatAttachButtons(),
           emojiButton('chat-i'),
-          el('input', { id:'chat-i', placeholder: STATE.chatRecording ? '🔴 Идёт запись…' : 'Сообщение…',
+          el('textarea', { id:'chat-i', rows:'1',
+            placeholder: STATE.chatRecording ? '🔴 Идёт запись…' : 'Сообщение… (Shift+Enter — перенос)',
             disabled: STATE.chatRecording,
-            onkeydown: e => { if(e.key === 'Enter'){ e.preventDefault(); sendChat(); }}}),
+            oninput: (e) => {
+              e.target.style.height = 'auto';
+              e.target.style.height = Math.min(e.target.scrollHeight, 200) + 'px';
+            },
+            onkeydown: e => {
+              if(e.key === 'Enter' && !e.shiftKey){
+                e.preventDefault();
+                sendChat();
+              }
+            }
+          }),
           el('button', { onclick: () => sendChat(), disabled: STATE.chatRecording }, 'Отправить')));
     }
   }
@@ -18941,6 +19000,25 @@ function chatBubbleDb(m, role, meId){
         title: 'Удалить сообщение',
         onclick: (ev) => { ev.stopPropagation(); deleteChatMessage(m.id); }
       }, '×'));
+  }
+  /* Кнопка редактирования — только автору, для текстовых сообщений */
+  if(mine && m.body){
+    bubble.append(el('button', {
+      class: 'bubble-edit',
+      title: 'Редактировать',
+      style:{ position:'absolute', top:'-8px', right:'18px', width:'22px', height:'22px',
+              padding:'0', lineHeight:'18px', fontSize:'12px', fontWeight:'700',
+              borderRadius:'50%', background:'#fff', color:'var(--p)',
+              border:'2px solid #fff', cursor:'pointer', boxShadow:'0 1px 3px rgba(0,0,0,.2)',
+              display:'flex', alignItems:'center', justifyContent:'center' },
+      onclick: (ev) => {
+        ev.stopPropagation();
+        const newText = prompt('Изменить сообщение:', m.body);
+        if(newText === null) return;
+        if(newText.trim() === m.body.trim()) return;
+        editChatMessage(m.id, newText);
+      }
+    }, '✏'));
   }
   if(!mine){
     const who = el('div', { class:'who' }, authorName);
