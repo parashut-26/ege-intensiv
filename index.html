@@ -1185,6 +1185,23 @@ async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, 
   });
   const score = items.filter(x => x.ok).length;
   const max_score = bank.length;
+
+  /* Защита от «пустых» попыток: если ученик не ответил ни на один вопрос
+     (зашёл в тренажёр, нажал «Сохранить и закрыть» сразу) — не сохраняем.
+     Иначе в статистике группы такая попытка считается как 0/N → 100% ошибок
+     и поднимает задание в «слабые места» при полном отсутствии данных. */
+  const answeredCount = items.filter(it => {
+    const u = it && it.user;
+    if(u == null) return false;
+    if(Array.isArray(u)) return u.length > 0 && u.some(v => v != null && v !== '');
+    if(typeof u === 'object') return Object.keys(u).length > 0;
+    return String(u).trim().length > 0;
+  }).length;
+  if(answeredCount === 0){
+    console.log('saveAttempt: пустая попытка, не сохраняем');
+    return null;
+  }
+
   const payload = {
     student_id: MY_PROFILE.id,
     ege_task_n: taskN,
@@ -1906,8 +1923,15 @@ async function loadGroupStats(){
   if(!sb) return;
   try {
     /* attempts всей группы — последние 2000 (с запасом). */
-    const arr = await restRequest('GET', '/attempts?select=student_id,ege_task_n,score,max_score,created_at&order=created_at.desc&limit=2000');
-    if(!Array.isArray(arr)){ GROUP_STATS = null; return; }
+    const arrRaw = await restRequest('GET', '/attempts?select=student_id,ege_task_n,score,max_score,created_at&order=created_at.desc&limit=2000');
+    if(!Array.isArray(arrRaw)){ GROUP_STATS = null; return; }
+    /* Оставляем только попытки реальных учеников (на случай если учитель/куратор
+       тестировал тренажёр от своего имени — такая попытка не должна влиять на
+       групповую статистику). STUDENTS уже загружен с фильтром role=student. */
+    const studentIds = new Set((STUDENTS || []).map(s => s.id));
+    const arr = studentIds.size
+      ? arrRaw.filter(a => studentIds.has(a.student_id))
+      : arrRaw;
     const today = new Date(); today.setHours(0,0,0,0);
     const todayStr = today.toDateString();
     const studentsToday = new Set();
