@@ -1424,7 +1424,7 @@ async function restoreSession(){
         _AUTH_BOOTSTRAP_RUNNING = false;
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile()), loadPaymentSuggestionsFromDb()]).then(() => {
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb().then(() => loadPaymentsFromDb()), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile()), loadPaymentSuggestionsFromDb()]).then(() => {
           render();
           /* После основных загрузок — стартуем фоновый чат-poll */
           startUnreadBgPoll();
@@ -1492,7 +1492,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile()), loadPaymentSuggestionsFromDb()]).then(() => {
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb().then(() => loadPaymentsFromDb()), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile()), loadPaymentSuggestionsFromDb()]).then(() => {
           render();
           startUnreadBgPoll();
           startPresenceHeartbeat();
@@ -3264,6 +3264,10 @@ async function loadStudentsFromDb(){
 let PAYMENT_SUGGESTIONS = [];          // массив pending-предложений
 let PAYMENT_SUGGESTIONS_LOADED = false;
 
+/* PAYMENTS — реальные подтверждённые/ручные оплаты из БД. */
+let PAYMENTS = [];
+let PAYMENTS_LOADED = false;
+
 async function loadPaymentSuggestionsFromDb(){
   if(!sb) return;
   if(!MY_PROFILE || (MY_PROFILE.role !== 'teacher' && MY_PROFILE.role !== 'curator')) return;
@@ -3277,6 +3281,53 @@ async function loadPaymentSuggestionsFromDb(){
   } catch(e){
     console.warn('payment_suggestions load:', e.message);
   }
+}
+
+async function loadPaymentsFromDb(){
+  if(!sb) return;
+  if(!MY_PROFILE) return;
+  try {
+    // Учитель/куратор видит всё. Ученик/родитель — только свои (по RLS).
+    const arr = await restRequest('GET',
+      '/payments?select=id,student_id,intensive_id,amount,status,method,paid_at,note,created_at&order=paid_at.desc.nullslast,created_at.desc');
+    if(Array.isArray(arr)){
+      PAYMENTS = arr;
+      PAYMENTS_LOADED = true;
+      // Прокидываем агрегат в STUDENTS — чтобы badge «оплачено» в карточках работал
+      if(STUDENTS && STUDENTS.length){
+        const byStudent = {};
+        for(const p of arr){
+          if(!p.student_id) continue;
+          if(!byStudent[p.student_id]) byStudent[p.student_id] = { sum:0, last:null };
+          byStudent[p.student_id].sum += Number(p.amount) || 0;
+          const d = p.paid_at || p.created_at;
+          if(d && (!byStudent[p.student_id].last || d > byStudent[p.student_id].last)){
+            byStudent[p.student_id].last = d;
+          }
+        }
+        for(const s of STUDENTS){
+          const b = byStudent[s.id];
+          if(b){
+            s.paid = true;
+            s.paidAmount = b.sum;
+            s.paidDate = b.last ? new Date(b.last).toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'}) : '';
+            s.paidMethod = (arr.find(p => p.student_id === s.id) || {}).method || '';
+          }
+        }
+      }
+    }
+  } catch(e){
+    console.warn('payments load:', e.message);
+  }
+}
+
+/* Удобный форматтер «период» по дате paid_at: «май 2026», «июнь 2026». */
+const _MONTHS_RU = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+function _periodLabel(dateStr){
+  if(!dateStr) return 'без даты';
+  const d = new Date(dateStr);
+  if(isNaN(d.getTime())) return 'без даты';
+  return _MONTHS_RU[d.getMonth()] + ' ' + d.getFullYear();
 }
 
 /* Модал просмотра/привязки одного предложения. */
@@ -3389,6 +3440,18 @@ function modalPaymentSuggestion(sugg){
           },
           { prefer:'return=minimal' });
         PAYMENT_SUGGESTIONS = PAYMENT_SUGGESTIONS.filter(p => p.id !== sugg.id);
+        // Добавляем платёж в локальный PAYMENTS и обновляем агрегат у ученика
+        if(Array.isArray(payRows) && payRows[0]){
+          PAYMENTS.unshift(payRows[0]);
+          const stu = STUDENTS.find(s => s.id === studentId);
+          if(stu){
+            stu.paid = true;
+            stu.paidAmount = (stu.paidAmount || 0) + Number(sugg.amount);
+            stu.paidDate = new Date(payRows[0].paid_at || payRows[0].created_at)
+              .toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'});
+            stu.paidMethod = payRows[0].method || stu.paidMethod || '';
+          }
+        }
         showToast('✅ Платёж привязан');
         document.body.removeChild(ov);
         render();
@@ -11655,6 +11718,55 @@ function modalStudentDetail(){
     el('div', { style:{ marginTop:'8px' }}, commentBtn));
   body.append(commentCard);
 
+  /* 💰 История оплат этого ученика */
+  if(PAYMENTS_LOADED){
+    const myPayments = PAYMENTS.filter(p => p.student_id === s.id);
+    const paySum = myPayments.reduce((a, p) => a + (Number(p.amount) || 0), 0);
+
+    const payCard = el('div', { class:'card', style:{ marginBottom:'14px' }});
+    payCard.append(el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px', marginBottom:'8px' }},
+      el('h4', null, '💰 История оплат'),
+      el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
+        el('span', { style:{ fontSize:'13px', color:'var(--ink-2)' }},
+          myPayments.length
+            ? 'Всего: ' + paySum.toLocaleString('ru-RU') + ' ₽ · ' + myPayments.length + ' ' + pluralRu(myPayments.length, ['платёж','платежа','платежей'])
+            : 'нет платежей'),
+        el('button', { class:'btn btn-y btn-sm',
+          onclick: () => modalAddPaymentManualForStudent(s.id)
+        }, '+ Добавить'))));
+
+    if(myPayments.length){
+      const payTable = el('table', { class:'table', style:{ fontSize:'13px' }});
+      payTable.append(el('thead', null, el('tr', null,
+        el('th', null, 'Дата'),
+        el('th', null, 'Сумма'),
+        el('th', null, 'Назначение'),
+        el('th', null, 'Период'),
+        el('th', null, 'Способ'),
+        el('th', { style:{ textAlign:'right' }}, ''))));
+      const tb = el('tbody');
+      myPayments.forEach(p => {
+        const date = p.paid_at || (p.created_at ? p.created_at.slice(0,10) : '');
+        tb.append(el('tr', null,
+          el('td', null, date ? new Date(date).toLocaleDateString('ru-RU') : '—'),
+          el('td', null, el('b', null, Number(p.amount).toLocaleString('ru-RU') + ' ₽')),
+          el('td', null, p.note || '—'),
+          el('td', null, _periodLabel(date)),
+          el('td', null, p.method || '—'),
+          el('td', { style:{ textAlign:'right' }},
+            el('button', { class:'btn-icon', title:'Редактировать',
+              onclick: () => modalEditPayment(p)
+            }, '✏️'))));
+      });
+      payTable.append(tb);
+      payCard.append(el('div', { style:{ overflowX:'auto' }}, payTable));
+    } else {
+      payCard.append(el('div', { style:{ color:'var(--ink-3)', fontStyle:'italic', fontSize:'13px' }},
+        'Ученик пока не оплачивал. Можно добавить вручную или дождаться, когда оплата придёт в Telegram-бота.'));
+    }
+    body.append(payCard);
+  }
+
   /* 🧳 Чемодан без ручки — личный банк ошибок ученика (видим всё, что
      ученик не смог освоить за 3 разных дня). Загружается лениво. */
   if(/^[0-9a-f-]{36}$/i.test(sid)){
@@ -12985,100 +13097,360 @@ function viewTeacherAttendance(){
    УЧИТЕЛЬ · ОПЛАТЫ
    ======================================================================= */
 function viewTeacherPayments(){
-  const total = STUDENTS.filter(s => s.status !== 'pending' || s.paid).length * 5000;
-  const collected = STUDENTS.filter(s => s.paid).reduce((a, s) => a + (s.paidAmount || 0), 0);
-  const pending = STUDENTS.filter(s => !s.paid && s.status !== 'pending').length;
+  /* Состояние фильтра — храним в STATE для сохранения между рендерами. */
+  if(!STATE.payFilter) STATE.payFilter = { period:'all', studentId:'all' };
 
   const wrap = el('div', { class:'fade-in' });
+
+  /* === Шапка === */
   wrap.append(
     el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'14px', flexWrap:'wrap', gap:'10px' }},
       el('div', null,
         el('h1', null, '💰 Оплаты'),
         el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }},
-          'Кто заплатил, кто ждёт, кому написать.')),
-      el('button', { class:'btn btn-secondary',
-        onclick: () => showToast('Выгрузка в CSV')
-      }, '⬇ Выгрузить')),
+          'Все поступления — от Telegram-бота и вручную добавленные.')),
+      el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' }},
+        el('button', { class:'btn btn-y',
+          onclick: () => modalAddPaymentManual()
+        }, '+ Добавить вручную'),
+        el('button', { class:'btn btn-secondary',
+          onclick: () => _exportPaymentsCsv()
+        }, '⬇ CSV'))));
 
-    el('div', { class:'card' },
-      el('div', { style:{ display:'flex', justifyContent:'space-between', flexWrap:'wrap', gap:'10px' }},
-        el('div', null,
-          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }}, 'Собрано'),
-          el('h2', { style:{ fontSize:'28px', color:'var(--green)' }}, collected.toLocaleString('ru-RU') + ' ₽')),
-        el('div', null,
-          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }}, 'Ожидается'),
-          el('h2', { style:{ fontSize:'28px', color:'var(--red)' }}, ((total - collected) || 0).toLocaleString('ru-RU') + ' ₽')),
-        el('div', null,
-          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }}, 'Должников'),
-          el('h2', { style:{ fontSize:'28px', color: pending ? 'var(--warn)' : 'var(--green)' }}, pending))),
-      el('div', { class:'pay-bar' },
-        el('div', { class:'seg paid', style:{ width: (collected/total*100) + '%' }}, '✓ оплачено'),
-        el('div', { class:'seg pending', style:{ width: ((total-collected)/total*100) + '%' }}, 'ждём'))),
+  /* === Загрузка ещё идёт? === */
+  if(!PAYMENTS_LOADED){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-2)' }},
+      el('div', { style:{ fontSize:'28px', marginBottom:'8px' }}, '⏳'),
+      'Загружаю оплаты…'));
+    return wrap;
+  }
 
-    el('div', { style:{ height:'18px' }}),
+  /* === Pending suggestions сверху — призыв к действию === */
+  const paySuggCard = paymentSuggestionsCard();
+  if(paySuggCard) wrap.append(paySuggCard);
 
-    el('div', { class:'card', style:{ padding:0, overflowX:'auto', overflowY:'hidden', WebkitOverflowScrolling:'touch' }},
-      el('table', { class:'table' },
-        el('thead', null, el('tr', null,
-          el('th', null, 'Ученик'),
-          el('th', null, 'Тип'),
-          el('th', null, 'Статус'),
-          el('th', null, 'Сумма'),
-          el('th', null, 'Дата'),
-          el('th', null, 'Способ'),
-          el('th', { style:{ textAlign:'right' }}, ''))),
-        el('tbody', null,
-          STUDENTS.filter(s => s.status !== 'pending').map(s =>
-            el('tr', null,
-              el('td', null, el('div', { style:{ display:'flex', gap:'10px', alignItems:'center' }},
-                avatarChip(s.name, s.color, 30),
-                el('span', { style:{ fontWeight:'700' }}, s.name))),
-              el('td', null, s.type === 'свой' ? chip('🐝 свой', 'y') : chip('⭐ гость', 'grey')),
-              el('td', null, s.paid ? chip('✓ оплачено', 'green') : chip('⚠ ждём', 'warn')),
-              el('td', null, s.paid ? el('b', null, (s.paidAmount || 0).toLocaleString('ru-RU') + ' ₽') : '—'),
-              el('td', null, s.paid ? s.paidDate || '—' : '—'),
-              el('td', null, s.paid ? s.paidMethod || '—' : '—'),
-              el('td', { style:{ textAlign:'right' }},
-                s.paid
-                  ? el('div', { style:{ display:'flex', gap:'4px', justifyContent:'flex-end' }},
-                      el('button', { class:'btn-icon', title:'Редактировать оплату',
-                        onclick: () => {
-                          const amount = prompt('Сумма оплаты, ₽:', String(s.paidAmount || 0));
-                          if(amount === null) return;
-                          if(!/^\d+$/.test(amount.trim())){ showToast('Сумма должна быть числом'); return; }
-                          s.paidAmount = parseInt(amount.trim());
-                          const date = prompt('Дата (например, «28.05» или «28 мая»):', s.paidDate || '');
-                          if(date !== null) s.paidDate = date.trim();
-                          const method = prompt('Способ оплаты (СБП / карта / наличные / перевод):', s.paidMethod || 'СБП');
-                          if(method !== null) s.paidMethod = method.trim();
-                          showToast('✓ Оплата обновлена');
-                          render();
-                        }
-                      }, '✏️'),
-                      el('button', { class:'btn-icon', title:'Отметить как неоплачено', style:{ color:'var(--red)' },
-                        onclick: () => {
-                          if(!confirm('Снять отметку об оплате с ' + s.name + '?')) return;
-                          s.paid = false; delete s.paidAmount; delete s.paidDate; delete s.paidMethod;
-                          showToast('Оплата снята');
-                          render();
-                        }
-                      }, '✕'))
-                  : el('button', { class:'btn btn-y btn-sm',
-                      onclick: () => {
-                        const amount = prompt('Сумма оплаты, ₽:', '5000');
-                        if(amount === null) return;
-                        if(!/^\d+$/.test(amount.trim())){ showToast('Сумма должна быть числом'); return; }
-                        const method = prompt('Способ оплаты:', 'СБП');
-                        if(method === null) return;
-                        s.paid = true;
-                        s.paidAmount = parseInt(amount.trim());
-                        s.paidDate = new Date().toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'});
-                        s.paidMethod = method.trim() || 'СБП';
-                        showToast('✓ Оплата зафиксирована');
-                        render();
-                      }
-                    }, 'Зафиксировать'))))))));
+  /* === Подсчёт по месяцам === */
+  const byPeriod = {};   // 'май 2026' → { sum, count }
+  let totalSum = 0;
+  for(const p of PAYMENTS){
+    const period = _periodLabel(p.paid_at || p.created_at);
+    if(!byPeriod[period]) byPeriod[period] = { sum:0, count:0 };
+    byPeriod[period].sum += Number(p.amount) || 0;
+    byPeriod[period].count += 1;
+    totalSum += Number(p.amount) || 0;
+  }
+  const periods = Object.keys(byPeriod).sort((a,b) => {
+    // последний месяц вверху — сортируем по реальной дате первого платежа в группе
+    const ad = PAYMENTS.find(p => _periodLabel(p.paid_at || p.created_at) === a);
+    const bd = PAYMENTS.find(p => _periodLabel(p.paid_at || p.created_at) === b);
+    return new Date(bd?.paid_at || bd?.created_at) - new Date(ad?.paid_at || ad?.created_at);
+  });
+
+  /* === Сводка сверху === */
+  wrap.append(el('div', { class:'card' },
+    el('div', { style:{ display:'flex', justifyContent:'space-between', flexWrap:'wrap', gap:'10px' }},
+      el('div', null,
+        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }}, 'Собрано всего'),
+        el('h2', { style:{ fontSize:'28px', color:'var(--green)' }}, totalSum.toLocaleString('ru-RU') + ' ₽')),
+      el('div', null,
+        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }}, 'Платежей'),
+        el('h2', { style:{ fontSize:'28px' }}, PAYMENTS.length)),
+      el('div', null,
+        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }}, 'Учеников оплатили'),
+        el('h2', { style:{ fontSize:'28px' }}, new Set(PAYMENTS.map(p => p.student_id).filter(Boolean)).size)))));
+
+  /* === Плашки по месяцам === */
+  if(periods.length){
+    const tilesWrap = el('div', { style:{ display:'flex', gap:'10px', flexWrap:'wrap', marginTop:'12px', marginBottom:'12px' }});
+    tilesWrap.append(
+      el('div', {
+        class:'card',
+        style:{
+          padding:'10px 14px', minWidth:'140px', cursor:'pointer',
+          background: STATE.payFilter.period === 'all' ? 'var(--y-soft)' : 'var(--bg-soft)',
+          border: STATE.payFilter.period === 'all' ? '1px solid var(--y)' : '1px solid var(--border-2)'
+        },
+        onclick: () => { STATE.payFilter.period = 'all'; render(); }
+      },
+        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', fontWeight:'700' }}, 'ВСЕ ПЕРИОДЫ'),
+        el('div', { style:{ fontSize:'18px', fontWeight:'700' }}, totalSum.toLocaleString('ru-RU') + ' ₽'),
+        el('div', { style:{ fontSize:'12px', color:'var(--ink-2)' }}, PAYMENTS.length + ' ' + pluralRu(PAYMENTS.length, ['платёж','платежа','платежей']))));
+    periods.forEach(p => {
+      tilesWrap.append(el('div', {
+        class:'card',
+        style:{
+          padding:'10px 14px', minWidth:'140px', cursor:'pointer',
+          background: STATE.payFilter.period === p ? 'var(--y-soft)' : 'var(--bg-soft)',
+          border: STATE.payFilter.period === p ? '1px solid var(--y)' : '1px solid var(--border-2)'
+        },
+        onclick: () => { STATE.payFilter.period = p; render(); }
+      },
+        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', fontWeight:'700' }}, p.toUpperCase()),
+        el('div', { style:{ fontSize:'18px', fontWeight:'700' }}, byPeriod[p].sum.toLocaleString('ru-RU') + ' ₽'),
+        el('div', { style:{ fontSize:'12px', color:'var(--ink-2)' }}, byPeriod[p].count + ' ' + pluralRu(byPeriod[p].count, ['платёж','платежа','платежей']))));
+    });
+    wrap.append(tilesWrap);
+  }
+
+  /* === Фильтр по ученику === */
+  const filtered = PAYMENTS.filter(p => {
+    if(STATE.payFilter.period !== 'all' && _periodLabel(p.paid_at || p.created_at) !== STATE.payFilter.period) return false;
+    if(STATE.payFilter.studentId !== 'all' && p.student_id !== STATE.payFilter.studentId) return false;
+    return true;
+  });
+
+  const filterRow = el('div', { style:{ display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap', marginBottom:'10px' }});
+  filterRow.append(el('div', { style:{ fontSize:'13px', color:'var(--ink-2)' }}, 'Ученик:'));
+  const studSel = el('select', { class:'input', style:{ minWidth:'200px' },
+    onchange: (e) => { STATE.payFilter.studentId = e.target.value; render(); }
+  });
+  studSel.append(el('option', { value:'all' }, '— все —'));
+  STUDENTS.forEach(s => {
+    const opt = el('option', { value:s.id }, s.name);
+    if(STATE.payFilter.studentId === s.id) opt.selected = true;
+    studSel.append(opt);
+  });
+  filterRow.append(studSel);
+  filterRow.append(el('div', { style:{ marginLeft:'auto', fontSize:'13px', color:'var(--ink-2)' }},
+    'Показано: ' + filtered.length + ' из ' + PAYMENTS.length));
+  wrap.append(filterRow);
+
+  /* === Таблица === */
+  if(!filtered.length){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-2)', padding:'30px' }},
+      el('div', { style:{ fontSize:'28px', marginBottom:'8px' }}, '💸'),
+      'Платежей в этом фильтре нет.'));
+    return wrap;
+  }
+
+  const table = el('table', { class:'table' });
+  table.append(el('thead', null, el('tr', null,
+    el('th', null, 'Дата'),
+    el('th', null, 'Ученик'),
+    el('th', null, 'Сумма'),
+    el('th', null, 'Назначение'),
+    el('th', null, 'Способ'),
+    el('th', null, 'Период'),
+    el('th', { style:{ textAlign:'right' }}, ''))));
+
+  const tbody = el('tbody');
+  filtered.forEach(p => {
+    const stu = p.student_id ? STUDENTS.find(s => s.id === p.student_id) : null;
+    const date = p.paid_at || (p.created_at ? p.created_at.slice(0,10) : '');
+    tbody.append(el('tr', null,
+      el('td', null, date ? new Date(date).toLocaleDateString('ru-RU') : '—'),
+      el('td', null, stu
+        ? el('div', { style:{ display:'flex', gap:'10px', alignItems:'center', cursor:'pointer' },
+            onclick: () => { STATE.studentDetailOpen = stu.id; render(); }
+          },
+            avatarChip(stu.name, stu.color, 28),
+            el('span', { style:{ fontWeight:'700' }}, stu.name))
+        : el('span', { style:{ color:'var(--ink-3)' }}, '— не привязан —')),
+      el('td', null, el('b', null, Number(p.amount).toLocaleString('ru-RU') + ' ₽')),
+      el('td', null, el('div', { style:{ maxWidth:'260px', fontSize:'13px', color:'var(--ink-2)' }}, p.note || '—')),
+      el('td', null, p.method || '—'),
+      el('td', null, _periodLabel(date)),
+      el('td', { style:{ textAlign:'right' }},
+        el('div', { style:{ display:'flex', gap:'4px', justifyContent:'flex-end' }},
+          el('button', { class:'btn-icon', title:'Редактировать',
+            onclick: () => modalEditPayment(p)
+          }, '✏️'),
+          el('button', { class:'btn-icon', title:'Удалить', style:{ color:'var(--red)' },
+            onclick: async () => {
+              if(!confirm('Удалить этот платёж навсегда?')) return;
+              try {
+                await restRequest('DELETE', '/payments?id=eq.' + p.id, null, { prefer:'return=minimal' });
+                PAYMENTS = PAYMENTS.filter(x => x.id !== p.id);
+                showToast('Платёж удалён');
+                render();
+              } catch(e){ showToast('⚠ ' + e.message); }
+            }
+          }, '✕')))));
+  });
+  table.append(tbody);
+
+  wrap.append(el('div', { class:'card', style:{ padding:0, overflowX:'auto', WebkitOverflowScrolling:'touch' }}, table));
+
   return wrap;
+}
+
+/* === МОДАЛ: добавить платёж вручную === */
+function modalAddPaymentManual(){
+  const ov = el('div', { class:'modal-overlay', onclick: (e) => { if(e.target === ov) document.body.removeChild(ov); } });
+  const m  = el('div', { class:'modal', style:{ maxWidth:'480px' }});
+  m.append(el('h2', { style:{ marginBottom:'12px' }}, '+ Новый платёж'));
+
+  const sel = el('select', { class:'input', style:{ width:'100%', marginBottom:'10px' }});
+  sel.append(el('option', { value:'' }, '— выбери ученика —'));
+  STUDENTS.forEach(s => sel.append(el('option', { value:s.id }, s.name)));
+
+  const amount = el('input', { class:'input', type:'number', placeholder:'Сумма, ₽', style:{ width:'100%', marginBottom:'10px' }});
+  const note   = el('input', { class:'input', type:'text', placeholder:'Назначение (например, «за май» или «Краш-тест 2026»)', style:{ width:'100%', marginBottom:'10px' }});
+  const method = el('input', { class:'input', type:'text', value:'СБП', placeholder:'Способ', style:{ width:'100%', marginBottom:'10px' }});
+  const date   = el('input', { class:'input', type:'date', value: new Date().toISOString().slice(0,10), style:{ width:'100%', marginBottom:'14px' }});
+
+  m.append(
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'4px' }}, 'Ученик'), sel,
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'4px' }}, 'Сумма'), amount,
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'4px' }}, 'Назначение'), note,
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'4px' }}, 'Способ'), method,
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'4px' }}, 'Дата платежа'), date);
+
+  const btnRow = el('div', { style:{ display:'flex', gap:'10px', justifyContent:'flex-end' }});
+  btnRow.append(
+    el('button', { class:'btn btn-secondary', onclick: () => document.body.removeChild(ov) }, 'Отмена'),
+    el('button', { class:'btn btn-primary',
+      onclick: async (ev) => {
+        const studentId = sel.value;
+        if(!studentId){ showToast('Выбери ученика'); return; }
+        const a = parseInt((amount.value || '').trim());
+        if(!a || a < 1){ showToast('Введи сумму'); return; }
+        ev.target.disabled = true;
+        ev.target.textContent = '⏳ Сохраняем…';
+        try {
+          const rows = await restRequest('POST', '/payments',
+            {
+              student_id: studentId,
+              amount: a,
+              status: 'paid',
+              method: (method.value || '').trim() || 'СБП',
+              paid_at: date.value || new Date().toISOString().slice(0,10),
+              note: (note.value || '').trim() || null
+            },
+            { prefer:'return=representation' });
+          if(Array.isArray(rows) && rows[0]) PAYMENTS.unshift(rows[0]);
+          const stu = STUDENTS.find(s => s.id === studentId);
+          if(stu){
+            stu.paid = true;
+            stu.paidAmount = (stu.paidAmount || 0) + a;
+            stu.paidDate = new Date(date.value).toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'});
+            stu.paidMethod = (method.value || '').trim() || 'СБП';
+          }
+          showToast('✅ Платёж добавлен');
+          document.body.removeChild(ov);
+          render();
+        } catch(e){
+          ev.target.disabled = false;
+          ev.target.textContent = '☑ Сохранить';
+          showToast('⚠ ' + e.message);
+        }
+      }
+    }, '☑ Сохранить'));
+  m.append(btnRow);
+
+  ov.append(m);
+  document.body.appendChild(ov);
+}
+
+/* === МОДАЛ: редактировать платёж === */
+function modalEditPayment(pay){
+  const ov = el('div', { class:'modal-overlay', onclick: (e) => { if(e.target === ov) document.body.removeChild(ov); } });
+  const m  = el('div', { class:'modal', style:{ maxWidth:'480px' }});
+  m.append(el('h2', { style:{ marginBottom:'12px' }}, '✏️ Платёж #' + pay.id));
+
+  const sel = el('select', { class:'input', style:{ width:'100%', marginBottom:'10px' }});
+  sel.append(el('option', { value:'' }, '— не привязан —'));
+  STUDENTS.forEach(s => {
+    const o = el('option', { value:s.id }, s.name);
+    if(s.id === pay.student_id) o.selected = true;
+    sel.append(o);
+  });
+
+  const amount = el('input', { class:'input', type:'number', value: pay.amount, style:{ width:'100%', marginBottom:'10px' }});
+  const note   = el('input', { class:'input', type:'text', value: pay.note || '', placeholder:'Назначение', style:{ width:'100%', marginBottom:'10px' }});
+  const method = el('input', { class:'input', type:'text', value: pay.method || '', placeholder:'Способ', style:{ width:'100%', marginBottom:'10px' }});
+  const date   = el('input', { class:'input', type:'date', value: pay.paid_at || '', style:{ width:'100%', marginBottom:'14px' }});
+
+  m.append(
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'4px' }}, 'Ученик'), sel,
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'4px' }}, 'Сумма'), amount,
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'4px' }}, 'Назначение'), note,
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'4px' }}, 'Способ'), method,
+    el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'4px' }}, 'Дата платежа'), date);
+
+  const btnRow = el('div', { style:{ display:'flex', gap:'10px', justifyContent:'flex-end' }});
+  btnRow.append(
+    el('button', { class:'btn btn-secondary', onclick: () => document.body.removeChild(ov) }, 'Отмена'),
+    el('button', { class:'btn btn-primary',
+      onclick: async (ev) => {
+        const a = parseInt((amount.value || '').trim());
+        if(!a || a < 1){ showToast('Введи сумму'); return; }
+        ev.target.disabled = true;
+        ev.target.textContent = '⏳ Сохраняем…';
+        try {
+          await restRequest('PATCH', '/payments?id=eq.' + pay.id,
+            {
+              student_id: sel.value || null,
+              amount: a,
+              method: (method.value || '').trim() || null,
+              paid_at: date.value || null,
+              note: (note.value || '').trim() || null
+            },
+            { prefer:'return=minimal' });
+          // Обновляем локально
+          const idx = PAYMENTS.findIndex(p => p.id === pay.id);
+          if(idx >= 0){
+            PAYMENTS[idx] = { ...pay,
+              student_id: sel.value || null,
+              amount: a,
+              method: (method.value || '').trim() || null,
+              paid_at: date.value || null,
+              note: (note.value || '').trim() || null
+            };
+          }
+          showToast('✓ Платёж обновлён');
+          document.body.removeChild(ov);
+          render();
+        } catch(e){
+          ev.target.disabled = false;
+          ev.target.textContent = '☑ Сохранить';
+          showToast('⚠ ' + e.message);
+        }
+      }
+    }, '☑ Сохранить'));
+  m.append(btnRow);
+
+  ov.append(m);
+  document.body.appendChild(ov);
+}
+
+/* Добавить платёж конкретному ученику (из его карточки) — wrapper над общим модалом */
+function modalAddPaymentManualForStudent(studentId){
+  modalAddPaymentManual();
+  // На следующий тик подставим ученика в select
+  setTimeout(() => {
+    const ovs = document.querySelectorAll('.modal-overlay');
+    const last = ovs[ovs.length - 1];
+    if(!last) return;
+    const sel = last.querySelector('select.input');
+    if(sel) sel.value = studentId;
+  }, 0);
+}
+
+/* CSV-экспорт всех платежей */
+function _exportPaymentsCsv(){
+  if(!PAYMENTS.length){ showToast('Нет платежей'); return; }
+  const head = ['Дата','Ученик','Сумма','Назначение','Способ','Период'];
+  const lines = [head.join(';')];
+  for(const p of PAYMENTS){
+    const stu = p.student_id ? STUDENTS.find(s => s.id === p.student_id) : null;
+    const date = p.paid_at || (p.created_at ? p.created_at.slice(0,10) : '');
+    lines.push([
+      date ? new Date(date).toLocaleDateString('ru-RU') : '',
+      stu ? stu.name : '',
+      p.amount,
+      (p.note || '').replace(/;/g, ','),
+      p.method || '',
+      _periodLabel(date)
+    ].join(';'));
+  }
+  const blob = new Blob(['﻿' + lines.join('\n')], { type:'text/csv;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'payments_' + new Date().toISOString().slice(0,10) + '.csv';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 /* =======================================================================
