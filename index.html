@@ -3736,6 +3736,153 @@ function renderEssayWithMarks(text, comments, opts){
    opts.readonly: false → клик по фото ставит новый пин (учитель), клик по пину — редакт/удаление
                  true  → только просмотр (ученик) */
 /* =========================================================
+   МОДАЛ БЫСТРОГО РЕДАКТИРОВАНИЯ ВОПРОСА (теории/тренажёров)
+   Заменяет серию prompt() — большая textarea для пояснения,
+   все поля видны одновременно, scroll работает.
+   ========================================================= */
+function modalQuickEditQuestion(){
+  const ctx = STATE.quickEditQuestion;
+  if(!ctx) return null;
+  const { q, taskN } = ctx;
+  const close = () => { STATE.quickEditQuestion = null; render(); };
+
+  /* Текст вопроса */
+  const qInput = el('textarea', {
+    rows:3,
+    style:{ width:'100%', padding:'10px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'14px', fontFamily:'inherit', resize:'vertical', minHeight:'70px', boxSizing:'border-box' }
+  });
+  qInput.value = q.q || '';
+
+  /* Правильный ответ — зависит от типа */
+  const ansLabel = el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px', marginTop:'14px' }}, '');
+  let ansInput, ansHint;
+  if(q.match){
+    ansLabel.textContent = 'Правильная последовательность цифр (например 81963):';
+    ansInput = el('input', { type:'text', value: String(q.a || ''),
+      style:{ width:'100%', padding:'10px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'14px', boxSizing:'border-box' }});
+    ansHint = 'Ровно 5 цифр.';
+  } else if(q.text){
+    const accept = (Array.isArray(q.a) ? q.a : [q.a]).join(' / ');
+    ansLabel.textContent = 'Правильный ответ:';
+    ansInput = el('input', { type:'text', value: accept,
+      style:{ width:'100%', padding:'10px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'14px', boxSizing:'border-box' }});
+    ansHint = 'Несколько вариантов разделяй через «/» — например «постоянная / неизменная».';
+  } else if(q.commaPick){
+    const cur = (q.a || []).map(x => x+1).join('');
+    ansLabel.textContent = 'Номера предложений с ОДНОЙ запятой:';
+    ansInput = el('input', { type:'text', value: cur,
+      style:{ width:'100%', padding:'10px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'14px', boxSizing:'border-box' }});
+    ansHint = 'Например 35 — значит правильные предложения №3 и №5.';
+  } else if(q.multi){
+    const cur = (q.a || []).map(x => x+1).join('');
+    ansLabel.textContent = 'Номера правильных вариантов:';
+    ansInput = el('input', { type:'text', value: cur,
+      style:{ width:'100%', padding:'10px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'14px', boxSizing:'border-box' }});
+    ansHint = 'Например 134 — значит правильные варианты №1, №3, №4.';
+  } else if(typeof q.a === 'number'){
+    ansLabel.textContent = 'Номер правильного варианта:';
+    ansInput = el('input', { type:'text', value: String(q.a + 1),
+      style:{ width:'100%', padding:'10px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'14px', boxSizing:'border-box' }});
+    ansHint = 'Один номер: 1, 2, 3, …';
+  } else if(q.letterGap){
+    ansLabel.textContent = 'Слово с пропуском + правильная буква:';
+    const wordEl = el('input', { type:'text', value: q.word || '', placeholder:'пр_пятствие',
+      style:{ width:'60%', padding:'10px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'14px', boxSizing:'border-box', marginRight:'8px' }});
+    const corrEl = el('input', { type:'text', value: q.correct || '', maxlength:'3',
+      style:{ width:'30%', padding:'10px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'14px', boxSizing:'border-box', textAlign:'center', fontWeight:'700' }});
+    ansInput = el('div', { style:{ display:'flex', gap:'4px' }}, wordEl, corrEl);
+    ansInput.__wordEl = wordEl;
+    ansInput.__corrEl = corrEl;
+    ansHint = 'Вместо пропущенной буквы — «_». Если две буквы (Н/НН), ставь «__».';
+  } else {
+    ansLabel.textContent = 'Ответ:';
+    ansInput = el('div', { style:{ padding:'10px 12px', background:'var(--surface-soft)', borderRadius:'10px', color:'var(--ink-3)', fontSize:'13px' }},
+      '(для этого типа вопроса правка ответа недоступна)');
+    ansHint = null;
+  }
+
+  /* Пояснение — большая textarea */
+  const explLabel = el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px', marginTop:'14px' }},
+    '💡 Пояснение (ученик увидит после проверки):');
+  const explInput = el('textarea', {
+    rows:8,
+    style:{ width:'100%', padding:'10px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'14px', fontFamily:'inherit', resize:'vertical', minHeight:'160px', boxSizing:'border-box', lineHeight:'1.5' }
+  });
+  explInput.value = q.expl || '';
+
+  const status = el('div', { style:{ fontSize:'12px', minHeight:'18px', color:'var(--ink-3)' }}, '');
+
+  const save = async () => {
+    /* Текст вопроса */
+    const newQ = (qInput.value || '').trim();
+    if(newQ) q.q = newQ;
+    /* Ответ — зависит от типа */
+    if(q.match){
+      const v = (ansInput.value || '').trim();
+      if(/^\d{5}$/.test(v)) q.a = v;
+    } else if(q.text){
+      const v = (ansInput.value || '').trim();
+      if(v) q.a = v.split('/').map(s => s.trim()).filter(Boolean);
+    } else if(q.commaPick){
+      const v = (ansInput.value || '').trim();
+      if(/^\d+$/.test(v)) q.a = v.split('').map(d => parseInt(d) - 1);
+    } else if(q.multi){
+      const v = (ansInput.value || '').trim();
+      if(/^\d+$/.test(v)) q.a = v.split('').map(d => parseInt(d) - 1);
+    } else if(typeof q.a === 'number'){
+      const v = (ansInput.value || '').trim();
+      if(/^\d+$/.test(v)) q.a = parseInt(v) - 1;
+    } else if(q.letterGap){
+      const w = (ansInput.__wordEl.value || '').trim();
+      const c = (ansInput.__corrEl.value || '').trim();
+      if(w.includes('_')) q.word = w;
+      if(c) q.correct = c.toLowerCase();
+    }
+    /* Пояснение */
+    const newExpl = (explInput.value || '').trim();
+    q.expl = newExpl || undefined;
+
+    status.style.color = 'var(--ink-3)'; status.textContent = '⏳ Сохраняем…';
+    try {
+      const ok = await persistTaskBank(taskN);
+      if(ok){
+        showToast('✏️ Изменения сохранены');
+        close();
+      } else {
+        status.style.color = 'var(--red)';
+        status.textContent = '⚠ Не удалось сохранить';
+      }
+    } catch(e){
+      status.style.color = 'var(--red)';
+      status.textContent = '⚠ ' + e.message;
+    }
+  };
+
+  return el('div', { class:'modal-bg modal-bg-nested',
+    onclick: (e) => { if(e.target.classList.contains('modal-bg')) close(); }},
+    el('div', { class:'modal', style:{ maxWidth:'620px' }},
+      el('div', { class:'modal-head' },
+        el('div', null,
+          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+            'Задание ' + taskN + (q.src ? ' · ' + q.src : '')),
+          el('h2', { style:{ marginTop:'4px' }}, '✏️ Редактирование вопроса')),
+        el('button', { class:'x', onclick: close }, '×')),
+      el('div', { class:'modal-body' },
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }}, 'Текст вопроса:'),
+        qInput,
+        ansLabel, ansInput,
+        ansHint ? el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'4px' }}, ansHint) : null,
+        explLabel, explInput,
+        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'4px' }},
+          'Можно использовать **жирный** и обычные переносы строк.')),
+      el('div', { class:'modal-foot' },
+        status,
+        el('div', { style:{ display:'flex', gap:'8px' }},
+          el('button', { class:'btn btn-secondary', onclick: close }, 'Отмена'),
+          el('button', { class:'btn btn-y', onclick: save }, '💾 Сохранить')))));
+}
+
+/* =========================================================
    ПОВОРОТ ФОТО СОЧИНЕНИЙ
    Угол хранится прямо в URL фрагменте (#rot=90/180/270).
    Это не ломает запрос файла (фрагмент не отправляется на сервер)
@@ -14415,40 +14562,9 @@ function questionPreview(q, idx, taskN){
       el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, '#' + (idx+1))),
     el('div', { style:{ display:'flex', gap:'4px' }},
       el('button', { class:'btn-icon', title:'Редактировать вопрос',
-        onclick: async () => {
-          /* Базовое редактирование: меняем текст вопроса и/или правильный ответ.
-             После — сохраняем в БД через persistTaskBank, чтобы переживало
-             перезагрузку и было видно всем. */
-          const newQ = prompt('Текст вопроса:', q.q || '');
-          if(newQ === null) return;
-          q.q = newQ.trim() || q.q;
-          if(q.match){
-            const newA = prompt('Правильная последовательность цифр (например 81963):', String(q.a || ''));
-            if(newA !== null && /^\d{5}$/.test(newA.trim())) q.a = newA.trim();
-          } else if(q.text){
-            const accept = (Array.isArray(q.a) ? q.a : [q.a]).join(' / ');
-            const newA = prompt('Правильный ответ (несколько через «/»):', accept);
-            if(newA !== null && newA.trim()) q.a = newA.split('/').map(s => s.trim()).filter(Boolean);
-          } else if(q.multi){
-            const cur = (q.a || []).map(x => x+1).join('');
-            const newA = prompt('Номера правильных вариантов (например 134):', cur);
-            if(newA !== null && /^\d+$/.test(newA.trim())) q.a = newA.split('').map(d => parseInt(d) - 1);
-          } else if(typeof q.a === 'number'){
-            const newA = prompt('Номер правильного ответа (1, 2, 3…):', String(q.a + 1));
-            if(newA !== null && /^\d+$/.test(newA.trim())) q.a = parseInt(newA.trim()) - 1;
-          } else if(q.letterGap){
-            const newW = prompt('Слово с пропуском (вместо буквы поставь "_"). Например пр_пятствие:', q.word || '');
-            if(newW !== null && newW.includes('_')) q.word = newW.trim();
-            const newC = prompt('Какая буква пропущена? (одна буква):', q.correct || '');
-            if(newC !== null && newC.trim().length === 1) q.correct = newC.trim().toLowerCase();
-          }
-          /* Пояснение — ученик увидит после проверки */
-          const newExpl = prompt('💡 Пояснение (почему такой ответ). Ученик увидит после проверки. Пусто = убрать:', q.expl || '');
-          if(newExpl !== null){
-            q.expl = newExpl.trim() || undefined;
-          }
-          const ok = await persistTaskBank(taskN);
-          if(ok) showToast('✏️ Изменения сохранены в БД');
+        onclick: () => {
+          /* Открываем удобный модал-редактор с textarea вместо серии prompt(). */
+          STATE.quickEditQuestion = { q, taskN };
           render();
         }
       }, '✏️'),
@@ -14550,8 +14666,10 @@ function questionPreview(q, idx, taskN){
 
   /* Предложения (для задания 5).
      Для match-вопросов (8, 22) sentences — это правый столбец таблицы, его рендерим ниже,
-     поэтому здесь как самостоятельный список НЕ показываем (был дубль). */
-  if(q.sentences && !q.match){
+     поэтому здесь как самостоятельный список НЕ показываем (был дубль).
+     Для commaPick (задание 16) — те же предложения рендерятся ниже с кликабельными
+     запятыми, верхний дубль тоже не нужен. */
+  if(q.sentences && !q.match && !q.commaPick){
     const sentList = el('div', { style:{ marginBottom:'10px', display:'flex', flexDirection:'column', gap:'6px' }});
     q.sentences.forEach((s, si) => {
       const html = s.replace(/[А-ЯЁ]{2,}/g, m => '<b style="background:#FEF9C3;padding:1px 4px;border-radius:3px">' + m + '</b>');
@@ -19359,6 +19477,7 @@ function _renderNow(){
   if(STATE.archiveOpen) root.append(modalArchive());
   if(STATE.essayOpen) root.append(modalEssayReview(STATE.essayOpen));
   if(STATE.lightbox) root.append(modalLightbox());
+  if(STATE.quickEditQuestion) root.append(modalQuickEditQuestion());
   if(STATE.newStudentForm) root.append(modalNewStudent());
   if(STATE.curatorPermsFor) root.append(modalCuratorPerms());
   if(STATE.studentDetailOpen) root.append(modalStudentDetail());
