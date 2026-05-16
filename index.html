@@ -12727,12 +12727,14 @@ function modalAttemptDetail(){
       }
 
       /* letterGap: показываем само слово с пропуском, букву ученика и правильную.
-         item.word — это слово вида «пр_пятствие», сохранённое при saveAttempt. */
+         item.word — это слово вида «пр_пятствие» (1 буква) или «оторва__ых» (НН).
+         Важно: пропуск может быть из нескольких подряд `_` (для задания 15),
+         поэтому забираем ВЕСЬ блок подчёркиваний, а не только первый символ. */
       if(item.word){
         const w = String(item.word);
-        const gapIdx = w.indexOf('_');
-        const before = gapIdx >= 0 ? w.slice(0, gapIdx) : w;
-        const after  = gapIdx >= 0 ? w.slice(gapIdx + 1) : '';
+        const gapMatch = w.match(/^([^_]*)(_+)([^_]*)$/);
+        const before = gapMatch ? gapMatch[1] : w;
+        const after  = gapMatch ? gapMatch[3] : '';
         const userL = item.user != null ? String(item.user).toLowerCase() : '?';
         const corrL = item.expected != null ? String(item.expected).toLowerCase() : '?';
         const inkColor = ok ? '#065F46' : '#991B1B';
