@@ -12,3 +12,4 @@
 - [TODO AI-рекомендации](todo_ai_recommendations.md) — колонка с автоматическими рекомендациями ученикам по ошибкам через YandexGPT через Supabase Edge Function
 - [TODO пересчёт баллов в тренажёрах](todo_quiz_recalc.md) — после редактирования вопроса в QUIZ_BANK не пересчитываются старые попытки; делаем после интенсива
 - [TODO задание 14 — формат ЕГЭ](todo_task14_full_ege_format.md) — 5 предложений + ответ цифрами (как на реальном ЕГЭ); делаем после интенсива
+- [DONE+TODO Telegram-бот оплат](todo_email_payment_channel.md) — tg-payment-webhook работает; после 4 июня добавить Email→Albato→Edge Function как страховку
