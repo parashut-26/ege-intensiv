@@ -1840,6 +1840,10 @@ async function demoteCurator(curatorId){
 /* === РЕАЛЬНАЯ СТАТИСТИКА УЧЕНИКА (из attempts) === */
 let MY_STATS = { done: 0, total: 26, avg: null, streak: 0 };
 
+/* Полный массив моих попыток — для дашборда ученика. Заполняется в loadMyStats. */
+let MY_ATTEMPTS = [];
+let MY_ATTEMPTS_LOADED = false;
+
 async function loadMyStats(){
   if(!sb || !MY_PROFILE) return;
   /* Учитель/куратор не решает задания — у них нет своих попыток. Не дёргаем
@@ -1848,8 +1852,10 @@ async function loadMyStats(){
   if(MY_PROFILE.role && MY_PROFILE.role !== 'student') return;
   try {
     const arr = await restRequest('GET', '/attempts?student_id=eq.' + encodeURIComponent(MY_PROFILE.id) +
-      '&select=ege_task_n,score,max_score,created_at&order=created_at.desc&limit=200');
+      '&select=id,ege_task_n,score,max_score,bee_earned,answers,created_at&order=created_at.desc&limit=500');
     if(!Array.isArray(arr)) return;
+    MY_ATTEMPTS = arr;
+    MY_ATTEMPTS_LOADED = true;
     const tasks = new Set(arr.map(a => a.ege_task_n));
     MY_STATS.done = tasks.size;
     if(arr.length){
@@ -3371,7 +3377,7 @@ async function loadStudentsFromDb(){
      В демо-режиме (без sb) сюда не заходим — моки остаются. */
   STUDENTS = [];
   try {
-    const arr = await restRequest('GET', '/profiles?role=eq.student&select=id,full_name,email,s_type,s_status,bee,avatar_color,avatar_url,teacher_comment,last_seen_at&order=full_name.asc');
+    const arr = await restRequest('GET', '/profiles?role=eq.student&select=id,full_name,email,s_type,s_status,bee,avatar_color,avatar_url,teacher_comment,student_visible_comment,last_seen_at&order=full_name.asc');
     if(!Array.isArray(arr)){ console.warn('students load: не массив'); return; }
     STUDENTS = arr.map((p, i) => ({
       id: p.id,
@@ -3387,6 +3393,7 @@ async function loadStudentsFromDb(){
       paid: false,      // отдельная таблица payments — подтянем позже
       paidAmount: 0,
       teacher_comment: p.teacher_comment || '',
+      student_visible_comment: p.student_visible_comment || '',
       lastSeenAt: p.last_seen_at || null
     }));
     STUDENTS_LOADED = true;
@@ -10621,18 +10628,234 @@ function studentEssaysCard(){
   return card;
 }
 
+/* =======================================================================
+   ДАШБОРД УЧЕНИКА — зеркало карточки из кабинета учителя.
+   Показывается в его «Достижениях» сверху, перед пчёлками.
+   ======================================================================= */
+function studentSelfDashboardCard(){
+  if(!MY_PROFILE) return null;
+
+  const wrap = el('div', { style:{ marginBottom:'18px' }});
+
+  /* ---- 1. Комментарий учителя (если есть) ---- */
+  const svc = MY_PROFILE.student_visible_comment;
+  if(svc && svc.trim()){
+    wrap.append(el('div', { class:'card', style:{ marginBottom:'14px', background:'var(--teal-soft)', border:'1px solid #5EEAD4' }},
+      el('div', { style:{ display:'flex', gap:'10px', alignItems:'flex-start' }},
+        el('span', { style:{ fontSize:'24px', flexShrink:0 }}, '💬'),
+        el('div', { style:{ flex:1 }},
+          el('h4', { style:{ marginBottom:'4px' }}, 'Комментарий учителя'),
+          el('div', { style:{ whiteSpace:'pre-wrap', fontSize:'14px', lineHeight:'1.55' }}, svc)))));
+  }
+
+  /* ---- 2. Подсчёт по моим попыткам ---- */
+  const list = MY_ATTEMPTS_LOADED ? MY_ATTEMPTS : null;
+  if(list === null){
+    wrap.append(el('div', { class:'card', style:{ marginBottom:'14px', color:'var(--ink-3)' }},
+      '⏳ Загружаю мою историю…'));
+    return wrap;
+  }
+
+  const byTask = {};
+  let totalScore = 0, totalMax = 0;
+  for(const a of list){
+    const t = a.ege_task_n;
+    if(!byTask[t]) byTask[t] = { attempts: [], score: 0, max: 0 };
+    byTask[t].attempts.push(a);
+    byTask[t].score += a.score || 0;
+    byTask[t].max += a.max_score || 0;
+    totalScore += a.score || 0;
+    totalMax += a.max_score || 0;
+  }
+  const totalAvg = totalMax ? Math.round(totalScore / totalMax * 100) : null;
+
+  /* Слабые темы: < 70%, минимум 1 попытка */
+  const weak = Object.entries(byTask)
+    .filter(([_, b]) => b.attempts.length >= 1 && b.max > 0 && b.score / b.max < 0.7)
+    .sort((a, b) => (a[1].score / a[1].max) - (b[1].score / b[1].max))
+    .slice(0, 5);
+
+  /* ---- 3. KPI grid ---- */
+  wrap.append(el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(140px, 1fr))', gap:'10px', marginBottom:'14px' }},
+    kpiCard('Всего попыток', list.length, '', '🎯', 'var(--p-soft)'),
+    kpiCard('Средний балл', totalAvg != null ? totalAvg + '%' : '—', list.length ? 'по всем попыткам' : 'нет данных', '📊', 'var(--y-soft)'),
+    kpiCard('Заданий охвачено', Object.keys(byTask).length || '—', 'из 26', '📚', 'var(--green-soft)'),
+    kpiCard('Слабые темы', weak.length, weak.length ? '< 70% точности' : 'всё ровно', '⚠', '#FEF3C7')));
+
+  /* ---- 4. Слабые темы (если есть) ---- */
+  if(weak.length){
+    const wk = el('div', { class:'card', style:{ marginBottom:'14px' }});
+    wk.append(el('h4', { style:{ marginBottom:'8px' }}, '⚠ На что обратить внимание'));
+    wk.append(el('p', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'10px' }},
+      'Темы, где средний балл ниже 70%. Можно вернуться к тренажёру или разобрать с учителем.'));
+    weak.forEach(([taskN, b]) => {
+      const pct = Math.round(b.score / b.max * 100);
+      const topic = (EGE_TASKS.find(t => t.n == taskN) || {}).topic || '';
+      wk.append(el('div', {
+        style:{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                padding:'8px 10px', marginBottom:'4px',
+                background: pct < 50 ? 'var(--red-soft)' : 'var(--y-soft)',
+                borderRadius:'8px' }
+      },
+        el('span', { style:{ fontSize:'13px' }}, el('b', null, '№' + taskN), ' · ' + topic),
+        el('span', { style:{ fontWeight:'700', color: pct < 50 ? 'var(--red)' : 'var(--warn)' }},
+          pct + '% · ' + b.attempts.length + ' ' + pluralRu(b.attempts.length, ['попытка','попытки','попыток']))));
+    });
+    wrap.append(wk);
+  }
+
+  /* ---- 5. История попыток по заданиям (collapsible) ---- */
+  if(Object.keys(byTask).length){
+    const histCard = el('div', { class:'card', style:{ marginBottom:'14px' }});
+    const histDet = el('details', null,
+      el('summary', { style:{ cursor:'pointer', fontWeight:'700' }},
+        '📈 История моих попыток по заданиям (' + Object.keys(byTask).length + ' заданий, ' + list.length + ' попыт.)'));
+    const histBody = el('div', { style:{ marginTop:'12px' }});
+    histDet.append(histBody);
+    Object.entries(byTask).sort((a, b) => +a[0] - +b[0]).forEach(([taskN, b]) => {
+      const avg = Math.round(b.score / b.max * 100);
+      const topic = (EGE_TASKS.find(t => t.n == taskN) || {}).topic || '';
+      const block = el('div', { style:{ marginBottom:'12px', borderBottom:'1px solid var(--border)', paddingBottom:'10px' }});
+      block.append(el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }},
+        el('div', null, el('b', null, 'Задание ' + taskN), ' · ',
+          el('span', { style:{ color:'var(--ink-2)' }}, topic)),
+        el('div', null,
+          el('span', { style:{ fontWeight:'700',
+            color: avg >= 80 ? 'var(--green)' : avg >= 60 ? 'var(--ink)' : 'var(--red)' }}, avg + '%'),
+          el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'8px' }},
+            b.attempts.length + ' попыт.'))));
+      const fmt = ts => {
+        const d = new Date(ts);
+        return d.toLocaleDateString('ru-RU', { day:'numeric', month:'short' }) + ' · ' + d.toTimeString().slice(0, 5);
+      };
+      const aList = el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }});
+      b.attempts.slice(0, 10).forEach(a => {
+        const pct = a.max_score ? Math.round(a.score / a.max_score * 100) : 0;
+        const bg = pct >= 80 ? 'var(--green-soft)' : pct >= 60 ? 'var(--y-soft)' : 'var(--red-soft)';
+        aList.append(el('span', {
+          style:{ fontSize:'11px', padding:'3px 8px', background:bg, borderRadius:'6px',
+                  color:'var(--ink)', cursor:'pointer', border:'1px solid transparent' },
+          title: 'Открыть подробности',
+          onclick: () => {
+            /* Кладём в кэш attemptsByTask, чтобы modalAttemptDetail её нашла */
+            if(!STATE.attemptsByTask) STATE.attemptsByTask = {};
+            if(!STATE.attemptsByTask[a.ege_task_n]) STATE.attemptsByTask[a.ege_task_n] = [];
+            if(!STATE.attemptsByTask[a.ege_task_n].find(x => x.id === a.id)){
+              STATE.attemptsByTask[a.ege_task_n].push(a);
+            }
+            STATE.attemptDetailOpen = a.id;
+            render();
+            try { window.scrollTo({ top: 0, behavior:'smooth' }); } catch(_){ window.scrollTo(0, 0); }
+          }
+        }, fmt(a.created_at) + ' · ' + a.score + '/' + a.max_score));
+      });
+      if(b.attempts.length > 10) aList.append(el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, '…и ещё ' + (b.attempts.length - 10)));
+      block.append(aList);
+      histBody.append(block);
+    });
+    histCard.append(histDet);
+    wrap.append(histCard);
+  }
+
+  /* ---- 6. Пробники (если есть попытки вариантов) ---- */
+  const varAtts = STATE.myVariantAttempts || [];
+  if(Array.isArray(varAtts) && varAtts.length){
+    const vCard = el('div', { class:'card', style:{ marginBottom:'14px' }});
+    const vDet = el('details', null,
+      el('summary', { style:{ cursor:'pointer', fontWeight:'700' }},
+        '📋 Мои пробники (' + varAtts.length + ')'));
+    const vBody = el('div', { style:{ marginTop:'10px' }});
+    vDet.append(vBody);
+    varAtts.slice(0, 10).forEach(a => {
+      const total = a.total_score != null && a.total_max_score
+        ? a.total_score + '/' + a.total_max_score
+        : '—';
+      const pct = a.total_max_score ? Math.round((a.total_score || 0) / a.total_max_score * 100) : null;
+      const title = (a.variant && a.variant.title) || ('Вариант #' + a.variant_id);
+      const date = a.finished_at || a.imported_at || a.created_at;
+      vBody.append(el('div', {
+        style:{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap',
+                padding:'8px 12px', marginBottom:'6px',
+                background:'var(--bg-soft)', borderRadius:'8px', fontSize:'13px' }
+      },
+        el('div', { style:{ flex:1, minWidth:'180px' }},
+          el('b', null, title),
+          date ? el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }},
+            new Date(date).toLocaleDateString('ru-RU')) : null),
+        el('span', { style:{ fontWeight:'700',
+          color: pct == null ? 'var(--ink-3)' : pct >= 80 ? 'var(--green)' : pct >= 60 ? 'var(--warn)' : 'var(--red)' }},
+          total + (pct != null ? ' · ' + pct + '%' : ''))));
+    });
+    vCard.append(vDet);
+    wrap.append(vCard);
+  }
+
+  /* ---- 7. История оплат (только если есть) ---- */
+  if(PAYMENTS_LOADED && Array.isArray(PAYMENTS) && PAYMENTS.length){
+    const mine = PAYMENTS.filter(p => p.student_id === MY_PROFILE.id);
+    if(mine.length){
+      const paySum = mine.reduce((a, p) => a + (Number(p.amount) || 0), 0);
+      const pCard = el('div', { class:'card', style:{ marginBottom:'14px' }});
+      const pDet = el('details', null,
+        el('summary', { style:{ cursor:'pointer', fontWeight:'700' }},
+          '💰 История моих оплат — всего ' + paySum.toLocaleString('ru-RU') + ' ₽ за ' + mine.length + ' ' +
+          pluralRu(mine.length, ['платёж','платежа','платежей'])));
+      const pBody = el('div', { style:{ marginTop:'10px' }});
+      pDet.append(pBody);
+      const tbl = el('table', { class:'table', style:{ fontSize:'13px' }});
+      tbl.append(el('thead', null, el('tr', null,
+        el('th', null, 'Дата'),
+        el('th', null, 'Сумма'),
+        el('th', null, 'Назначение'),
+        el('th', null, 'Способ'))));
+      const tb = el('tbody');
+      mine.forEach(p => {
+        const date = p.paid_at || (p.created_at ? p.created_at.slice(0,10) : '');
+        tb.append(el('tr', null,
+          el('td', null, date ? new Date(date).toLocaleDateString('ru-RU') : '—'),
+          el('td', null, el('b', null, Number(p.amount).toLocaleString('ru-RU') + ' ₽')),
+          el('td', null, p.note || '—'),
+          el('td', null, p.method || '—')));
+      });
+      tbl.append(tb);
+      pBody.append(el('div', { style:{ overflowX:'auto' }}, tbl));
+      pCard.append(pDet);
+      wrap.append(pCard);
+    }
+  }
+
+  /* ---- 8. Чемодан без ручки — уже отдельный компонент ---- */
+  const mb = mistakeBankCard();
+  if(mb) wrap.append(mb);
+
+  return wrap;
+}
+
 function viewStudentAchievements(){
   const wrap = el('div', { class:'fade-in' });
+
+  /* Тригерим загрузку моих попыток, если ещё не было */
+  if(!MY_ATTEMPTS_LOADED && MY_PROFILE && MY_PROFILE.role === 'student'){
+    /* Используем существующий loadMyStats — он же грузит attempts и заодно сохраняет в MY_ATTEMPTS */
+    setTimeout(() => { loadMyStats().then(() => render()).catch(() => {}); }, 0);
+  }
+
   const unlockedCount = ACHIEVEMENTS.filter(a => a.unlocked).length;
 
   wrap.append(
     el('h1', null, '🏆 Достижения'),
-    el('p', { style:{ color:'var(--ink-2)', marginBottom:'8px' }},
-      'Открыто ' + unlockedCount + ' из ' + ACHIEVEMENTS.length + ' достижений. Каждое можно открыть — это не топ, а твой собственный путь.'),
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'14px' }},
+      'Твоя сводка — слева. Открыто ' + unlockedCount + ' из ' + ACHIEVEMENTS.length + ' достижений ниже.'));
+
+  /* === Дашборд: зеркало карточки учителя === */
+  const dash = studentSelfDashboardCard();
+  if(dash) wrap.append(dash);
+
+  wrap.append(
     el('div', { class:'card', style:{ marginBottom:'18px', background:'var(--y-soft)', border:'1px solid var(--y-2)' }},
       el('h4', null, '🐝 Как работают пчёлки'),
       el('p', { style:{ marginTop:'6px', fontSize:'13px' }},
-        'Пчёлки даются за конкретные действия: посещение, сдачу заданий, помощь одноклассникам в чате. Ниже — все 14 достижений с условиями. Никаких «топов» — каждое реально получить.')));
+        'Пчёлки даются за конкретные действия: посещение, сдачу заданий, помощь одноклассникам в чате. Ниже — все ' + ACHIEVEMENTS.length + ' достижений с условиями. Никаких «топов» — каждое реально получить.')));
 
   for(const cat in ACT_CAT){
     const items = ACHIEVEMENTS.filter(a => a.cat === cat);
@@ -11821,8 +12044,11 @@ function modalStudentDetail(){
   }
   const totalAvg = totalMax ? Math.round(totalScore / totalMax * 100) : null;
   /* Слабые темы: где средний балл < 70% и есть хотя бы 2 попытки */
+  /* Слабые темы: где средний балл < 70%. Раньше требовали ≥2 попыток —
+     но во время интенсива у ученика часто всего 1 попытка на задание,
+     и она с низким баллом — это уже сигнал, нужно показывать. */
   const weakTopics = Object.entries(byTask)
-    .filter(([_, b]) => b.attempts.length >= 2 && b.score / b.max < 0.7)
+    .filter(([_, b]) => b.attempts.length >= 1 && b.max > 0 && b.score / b.max < 0.7)
     .sort((a, b) => (a[1].score / a[1].max) - (b[1].score / b[1].max))
     .slice(0, 5);
 
@@ -11885,12 +12111,45 @@ function modalStudentDetail(){
     }
   }, '💾 Сохранить заметку');
   const commentCard = el('div', { class:'card', style:{ marginBottom:'14px' }},
-    el('h4', { style:{ marginBottom:'8px' }}, '📝 Заметка учителя'),
+    el('h4', { style:{ marginBottom:'8px' }}, '📝 Заметка учителя (приватная)'),
     el('p', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'6px' }},
       'Приватная — ученик и родители её не видят. Удобно использовать как черновик для отчётов.'),
     commentTa,
     el('div', { style:{ marginTop:'8px' }}, commentBtn));
   body.append(commentCard);
+
+  /* Видимый ученику комментарий — отдельное поле profiles.student_visible_comment */
+  const svcInitial = s.student_visible_comment || '';
+  const svcTa = el('textarea', { rows:3,
+    placeholder: 'Сообщение, которое увидит ученик в своём кабинете (раздел «Достижения»): подсказки, цели, что подтянуть, поддержка…',
+    style:{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'13px', resize:'vertical', fontFamily:'inherit', boxSizing:'border-box' }
+  });
+  svcTa.value = svcInitial;
+  const svcBtn = el('button', { class:'btn btn-teal btn-sm',
+    onclick: async () => {
+      const txt = svcTa.value.trim();
+      if(!/^[0-9a-f-]{36}$/i.test(s.id)){
+        s.student_visible_comment = txt;
+        showToast('Сохранено локально');
+        return;
+      }
+      svcBtn.disabled = true;
+      try {
+        await restRequest('PATCH', '/profiles?id=eq.' + s.id,
+          { student_visible_comment: txt || null }, { prefer: 'return=minimal' });
+        s.student_visible_comment = txt;
+        showToast('💬 Комментарий ученику сохранён');
+      } catch(e){ showToast('⚠ ' + e.message); }
+      svcBtn.disabled = false;
+    }
+  }, '💾 Сохранить комментарий');
+  const svcCard = el('div', { class:'card', style:{ marginBottom:'14px', background:'var(--teal-soft)', border:'1px solid #5EEAD4' }},
+    el('h4', { style:{ marginBottom:'8px' }}, '💬 Комментарий ученику'),
+    el('p', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'6px' }},
+      'Виден ученику в его кабинете → «Достижения». Подходит для индивидуальных подсказок, целей, поддержки.'),
+    svcTa,
+    el('div', { style:{ marginTop:'8px' }}, svcBtn));
+  body.append(svcCard);
 
   /* 💰 История оплат этого ученика — только учитель, кураторы не видят */
   if(PAYMENTS_LOADED && MY_PROFILE && MY_PROFILE.role === 'teacher'){
