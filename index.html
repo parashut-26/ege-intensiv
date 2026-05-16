@@ -8857,12 +8857,14 @@ function modalTest(taskN){
       const normEY = s => String(s || '').toLowerCase().replace(/ё/g, 'е');
       const isRight = normEY(sel) === normEY(q.correct);
       const idx = q.word.indexOf('_');
-      /* Считаем длину пропуска (число '_' подряд в q.word, иначе по длине q.correct) */
+      /* Считаем длину пропуска (число '_' подряд в q.word, иначе по длине q.correct).
+         Дополнительно: gapLen НЕ МЕНЬШЕ длины правильного ответа — иначе если
+         в слове только один «_», а ответ «НН» (2 буквы), вторая буква не влезет. */
       let gapLen = 0;
       if(idx >= 0){
         while(idx + gapLen < q.word.length && q.word[idx + gapLen] === '_') gapLen++;
       }
-      if(gapLen < 1) gapLen = Math.max(1, String(q.correct || '').length);
+      gapLen = Math.max(gapLen, String(q.correct || '').length, 1);
       const before = idx >= 0 ? q.word.slice(0, idx) : q.word;
       const after  = idx >= 0 ? q.word.slice(idx + gapLen) : '';
       const inpBg = !showResult ? '#fff'
@@ -8887,10 +8889,23 @@ function modalTest(taskN){
         ev.target.value = v;
         STATE.testAnswers[i] = v;
         /* Для letterGap ВСЕГДА ждём нажатия «Ответить» (даже в instant-режиме).
-           Раньше для одной буквы делали авто-проверку — но это сбивало:
-           кнопка пропадала и ученик не понимал, как «зафиксировать» ответ.
-           Просто перерисуем, чтобы кнопка «Ответить» стала активной. */
+           Перерисуем, чтобы кнопка «Ответить» стала активной — НО
+           возвращаем фокус на тот же input + ставим курсор в конец,
+           чтобы клавиатура на телефоне не закрылась после первой буквы. */
+        const myIdx = i;
+        const caretPos = v.length;
         render();
+        requestAnimationFrame(() => {
+          const same = document.querySelector('input[data-letter-i="' + myIdx + '"]:not([disabled])');
+          if(same){
+            try {
+              same.focus({ preventScroll: true });
+              if(typeof same.setSelectionRange === 'function'){
+                same.setSelectionRange(caretPos, caretPos);
+              }
+            } catch(_){}
+          }
+        });
       };
       const row = el('div', { style:{ padding:'18px 16px', background:'#FFFCF2', borderRadius:'10px', textAlign:'center', border:'1px solid var(--border)' }},
         el('div', { style:{ fontSize:'10px', color:'#854D0E', textTransform:'uppercase', fontWeight:'700', letterSpacing:'.08em', marginBottom:'12px' }},
