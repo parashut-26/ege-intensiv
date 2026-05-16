@@ -8860,13 +8860,18 @@ function modalTest(taskN){
       const isRight = normEY(sel) === normEY(q.correct);
       const idx = q.word.indexOf('_');
       /* Считаем длину пропуска (число '_' подряд в q.word, иначе по длине q.correct).
-         Дополнительно: gapLen НЕ МЕНЬШЕ длины правильного ответа — иначе если
-         в слове только один «_», а ответ «НН» (2 буквы), вторая буква не влезет. */
+         Дополнительно: gapLen НЕ МЕНЬШЕ длины правильного ответа. */
       let gapLen = 0;
       if(idx >= 0){
         while(idx + gapLen < q.word.length && q.word[idx + gapLen] === '_') gapLen++;
       }
       gapLen = Math.max(gapLen, String(q.correct || '').length, 1);
+      /* Для тренажёра -Н-/-НН- (задание 15): чтобы поле НЕ подсказывало ответ
+         своей шириной, делаем его одинаковым для «Н» и «НН» — всегда 2 символа.
+         Так ученик сам решает: писать Н или НН — без визуальной подсказки.
+         Проверка идёт по точному совпадению строки, как и раньше. */
+      const isNNTrainer = (taskN === 15) || /^нн?$/i.test(String(q.correct || ''));
+      if(isNNTrainer) gapLen = 2;
       const before = idx >= 0 ? q.word.slice(0, idx) : q.word;
       const after  = idx >= 0 ? q.word.slice(idx + gapLen) : '';
       const inpBg = !showResult ? '#fff'
