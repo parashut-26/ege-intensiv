@@ -8637,10 +8637,11 @@ function modalTest(taskN){
         && ans.every(v => typeof v === 'number');
     }
     if(q.letterGap){
-      /* Считается «отвеченным» только когда введены ВСЕ символы пропуска.
-         Для одной буквы — любая буква, для НН — обе буквы. */
-      const want = Math.max(1, String(q.correct || '').length);
-      return ans != null && String(ans).trim().length >= want;
+      /* «Отвечено» = введён хотя бы один символ. Раньше требовали
+         длину = correct.length, но это мешало: правильный ответ НН,
+         ученик вводит Н — кнопка disabled, ученик в ловушке. Теперь
+         любая буква активирует кнопку «Ответить» (может быть и неверным). */
+      return ans != null && String(ans).trim().length >= 1;
     }
     if(q.text) return ans != null && String(ans).trim().length > 0;
     if(q.multi) return Array.isArray(ans) && ans.length > 0;
@@ -8654,11 +8655,12 @@ function modalTest(taskN){
   const instantMode = !!STATE.testInstant;
   /* Типы, требующие подтверждения «Ответить» в instant-режиме.
      Single (q.opts + не multi + числовой q.a) проверяется сразу после клика.
-     Для letterGap длиной 2+ (например, Н/НН) тоже требуем кнопку, чтобы
-     ученик не подбирал ответ методом перебора. */
+     Для letterGap — ВСЕГДА требуем кнопку (раньше для 1 буквы авто-проверяли,
+     но это путало: ученик вводил Н, а в правильном ответе ждали НН → кнопка
+     была disabled и ученик не мог понять что делать). Теперь явный submit. */
   const needsSubmit = (q) => !!(
     q.multi || q.fillNn || q.match || q.commaPick || q.text || q.inlineChoice ||
-    (q.letterGap && String(q.correct || '').length >= 2)
+    q.letterGap
   );
   const isInstantSubmitted = (i) => !!(STATE.testInstantSubmitted && STATE.testInstantSubmitted[i]);
   const isCheckedFor = (q, i) => {
@@ -8884,18 +8886,11 @@ function modalTest(taskN){
         const v = String(ev.target.value || '').slice(0, gapLen).toLowerCase();
         ev.target.value = v;
         STATE.testAnswers[i] = v;
-        /* Для коротких пропусков (1 буква) — instant-проверка с фокусом на следующее.
-           Для НН и других длинных пропусков ждём нажатия «Ответить», иначе можно
-           перебрать варианты («н» не подошло — попробую «нн»). */
-        const isLongGap = gapLen >= 2;
-        if(instantMode && v.length >= gapLen && !isLongGap){
-          const nextI = i + 1;
-          render();
-          requestAnimationFrame(() => {
-            const next = document.querySelector('input[data-letter-i="' + nextI + '"]:not([disabled])');
-            if(next) next.focus();
-          });
-        }
+        /* Для letterGap ВСЕГДА ждём нажатия «Ответить» (даже в instant-режиме).
+           Раньше для одной буквы делали авто-проверку — но это сбивало:
+           кнопка пропадала и ученик не понимал, как «зафиксировать» ответ.
+           Просто перерисуем, чтобы кнопка «Ответить» стала активной. */
+        render();
       };
       const row = el('div', { style:{ padding:'18px 16px', background:'#FFFCF2', borderRadius:'10px', textAlign:'center', border:'1px solid var(--border)' }},
         el('div', { style:{ fontSize:'10px', color:'#854D0E', textTransform:'uppercase', fontWeight:'700', letterSpacing:'.08em', marginBottom:'12px' }},
@@ -9315,7 +9310,20 @@ function modalTest(taskN){
             : null,
           STATE.testChecked
             ? el('button', { class:'btn btn-y',
-                onclick: async () => {
+                disabled: STATE.testSaving || undefined,
+                style: STATE.testSaving ? { opacity:'.6', cursor:'wait' } : null,
+                onclick: async (ev) => {
+                  /* Защита от двойного клика: пока идёт сохранение — игнорируем
+                     повторные нажатия (раньше из-за этого записывались 2 попытки). */
+                  if(STATE.testSaving) return;
+                  STATE.testSaving = true;
+                  /* Сразу отключаем кнопку визуально, не дожидаясь render() */
+                  if(ev && ev.currentTarget){
+                    ev.currentTarget.disabled = true;
+                    ev.currentTarget.style.opacity = '.6';
+                    ev.currentTarget.style.cursor = 'wait';
+                    ev.currentTarget.textContent = '⏳ Сохраняем…';
+                  }
                   const beeEarned = correct * 2;
                   ME_STUDENT.bee += beeEarned;          /* мгновенный фидбек в UI */
                   /* Сохраняем попытку в БД (если онлайн с реальным профилем). Не блокируем UI ошибкой. */
@@ -9364,10 +9372,11 @@ function modalTest(taskN){
                   STATE.testShuffle = null;
                   STATE.testLimit = null;
                   STATE.shuffledBank = null;
+                  STATE.testSaving = false;
                   showToast('Сохранено · +' + beeEarned + ' 🐝 на счёт');
                   render();
                 }
-              }, 'Сохранить и закрыть')
+              }, STATE.testSaving ? '⏳ Сохраняем…' : 'Сохранить и закрыть')
             : el('button', { class:'btn btn-p',
                 onclick: () => {
                   /* Берём свежее состояние — на случай если ввод текста не вызвал ререндер */
