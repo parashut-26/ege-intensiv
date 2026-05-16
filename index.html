@@ -3709,6 +3709,62 @@ function renderEssayWithMarks(text, comments, opts){
    opts.readonly: false → клик по фото ставит новый пин (учитель), клик по пину — редакт/удаление
                  true  → только просмотр (ученик) */
 /* =========================================================
+   ПОВОРОТ ФОТО СОЧИНЕНИЙ
+   Угол хранится прямо в URL фрагменте (#rot=90/180/270).
+   Это не ломает запрос файла (фрагмент не отправляется на сервер)
+   и не требует менять схему БД — photo_urls остаётся TEXT[].
+   ========================================================= */
+function getPhotoRotation(url){
+  const m = String(url || '').match(/#rot=(\d+)/);
+  if(!m) return 0;
+  const n = parseInt(m[1], 10) || 0;
+  return ((n % 360) + 360) % 360;
+}
+function stripPhotoRotation(url){
+  return String(url || '').split('#')[0];
+}
+function setPhotoRotation(url, deg){
+  const base = stripPhotoRotation(url);
+  const norm = ((deg % 360) + 360) % 360;
+  return norm === 0 ? base : (base + '#rot=' + norm);
+}
+
+/* Сохранить новый поворот в БД. Также обновляем локальный кэш essay.photoUrls,
+   чтобы UI сразу подхватил. */
+async function rotateEssayPhoto(essayId, photoIdx, clockwise){
+  /* Найдём текущий список URL: либо из DB_ESSAYS (свежий), либо подгрузим */
+  let urls = null;
+  const dbE = DB_ESSAYS.find(e => e.id === essayId);
+  if(dbE && Array.isArray(dbE.photoUrls)) urls = dbE.photoUrls.slice();
+  if(!urls){
+    try {
+      const arr = await restRequest('GET',
+        '/essays?id=eq.' + encodeURIComponent(essayId) + '&select=photo_urls');
+      if(Array.isArray(arr) && arr[0] && Array.isArray(arr[0].photo_urls)){
+        urls = arr[0].photo_urls.slice();
+      }
+    } catch(e){ console.warn('rotateEssayPhoto load:', e.message); }
+  }
+  if(!urls || !urls[photoIdx]) return;
+  const cur = getPhotoRotation(urls[photoIdx]);
+  const next = clockwise ? cur + 90 : cur - 90;
+  urls[photoIdx] = setPhotoRotation(urls[photoIdx], next);
+  try {
+    await restRequest('PATCH', '/essays?id=eq.' + encodeURIComponent(essayId),
+      { photo_urls: urls }, { prefer: 'return=minimal' });
+    /* Локально обновляем, чтобы render не моргал */
+    if(dbE) dbE.photoUrls = urls;
+    /* Также обновим lightbox, если он сейчас по этой работе */
+    if(STATE.lightbox && Array.isArray(STATE.lightbox.photos) && STATE.lightbox.photos.length > photoIdx){
+      STATE.lightbox.photos[photoIdx] = urls[photoIdx];
+    }
+    return urls[photoIdx];
+  } catch(e){
+    showToast('⚠ Не сохранилось: ' + e.message);
+  }
+}
+
+/* =========================================================
    ЛАЙТБОКС: фото на весь экран с навигацией
    ========================================================= */
 function modalLightbox(){
@@ -3748,6 +3804,7 @@ function modalLightbox(){
   }, 0);
 
   const url = photos[idx];
+  const rotation = getPhotoRotation(url);
 
   const backdrop = el('div', {
     style:{
@@ -3761,28 +3818,52 @@ function modalLightbox(){
     }
   });
 
-  /* Верхняя панель */
+  /* Верхняя панель: страницу + поворот + закрытие */
+  const essayId = STATE.lightbox.essayId;  /* установим при открытии — для save в БД */
+  const canRotate = !!essayId;
+  const rotateBtn = (dirCw, title, label) => el('button', {
+    style:{
+      background:'rgba(255,255,255,0.15)', color:'#fff', border:'none',
+      width:'40px', height:'40px', borderRadius:'50%', fontSize:'18px',
+      cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center'
+    },
+    onclick: async (ev) => {
+      ev.stopPropagation();
+      if(!canRotate){ showToast('Поворот доступен только в открытой работе'); return; }
+      await rotateEssayPhoto(essayId, idx, dirCw);
+      render();
+    },
+    title
+  }, label);
+
   const topBar = el('div', {
     style:{
       position:'absolute', top:'0', left:'0', right:'0', padding:'14px 20px',
       display:'flex', justifyContent:'space-between', alignItems:'center',
-      background:'linear-gradient(180deg, rgba(0,0,0,0.6), transparent)'
+      background:'linear-gradient(180deg, rgba(0,0,0,0.6), transparent)',
+      gap:'10px', flexWrap:'wrap'
     }
   },
     el('div', { style:{ color:'#fff', fontWeight:'700', fontSize:'14px' }},
-      'Страница ' + (idx + 1) + ' из ' + photos.length),
-    el('button', {
-      style:{
-        background:'rgba(255,255,255,0.15)', color:'#fff', border:'none',
-        width:'40px', height:'40px', borderRadius:'50%', fontSize:'20px',
-        cursor:'pointer'
-      },
-      onclick: close, title:'Закрыть (Esc)'
-    }, '×')
+      'Страница ' + (idx + 1) + ' из ' + photos.length +
+      (rotation ? '  ·  повёрнуто ' + rotation + '°' : '')),
+    el('div', { style:{ display:'flex', gap:'6px', alignItems:'center' }},
+      canRotate ? rotateBtn(false, 'Повернуть против часовой', '⟲') : null,
+      canRotate ? rotateBtn(true,  'Повернуть по часовой',     '⟳') : null,
+      el('button', {
+        style:{
+          background:'rgba(255,255,255,0.15)', color:'#fff', border:'none',
+          width:'40px', height:'40px', borderRadius:'50%', fontSize:'20px',
+          cursor:'pointer'
+        },
+        onclick: close, title:'Закрыть (Esc)'
+      }, '×'))
   );
   backdrop.append(topBar);
 
-  /* Фото — overflow:auto чтобы можно было прокручивать большое изображение */
+  /* Фото — overflow:auto чтобы можно было прокручивать большое изображение.
+     Для 90°/270° свапаем max-width ↔ max-height — иначе картинка обрежется. */
+  const isSideways = (rotation % 180) !== 0;
   const imgWrap = el('div', {
     style:{
       flex:'1', display:'flex', alignItems:'center', justifyContent:'center',
@@ -3791,11 +3872,15 @@ function modalLightbox(){
     }
   });
   imgWrap.append(el('img', {
-    src: proxifyUrl(url),
+    src: proxifyUrl(stripPhotoRotation(url)),
     alt: 'страница ' + (idx + 1),
     style:{
-      maxWidth:'100%', maxHeight:'90vh', objectFit:'contain',
-      boxShadow:'0 10px 40px rgba(0,0,0,0.5)'
+      maxWidth: isSideways ? '90vh' : '100%',
+      maxHeight: isSideways ? '90vw' : '90vh',
+      objectFit:'contain',
+      boxShadow:'0 10px 40px rgba(0,0,0,0.5)',
+      transform: rotation ? ('rotate(' + rotation + 'deg)') : 'none',
+      transition:'transform 0.2s ease'
     }
   }));
   backdrop.append(imgWrap);
@@ -3860,8 +3945,29 @@ function renderPhotosWithPins(photos, comments, opts){
   photos.forEach((url, idx) => {
     const pageWrap = el('div', { class: 'essay-photo' + (opts.readonly ? '' : ' editable') });
     pageWrap.dataset.page = String(idx);
-    const img = el('img', { src: proxifyUrl(url), alt: 'фото ' + (idx+1) });
+    const rotation = getPhotoRotation(url);
+    const img = el('img', { src: proxifyUrl(stripPhotoRotation(url)), alt: 'фото ' + (idx+1) });
     img.addEventListener('dragstart', ev => ev.preventDefault());
+    /* Применяем поворот через CSS. Пины — это абсолютные позиции в pageWrap,
+       они автоматически «следуют» за повёрнутой картинкой, потому что
+       координаты сохраняются как % того же контейнера. */
+    if(rotation){
+      img.style.transform = 'rotate(' + rotation + 'deg)';
+      img.style.transformOrigin = 'center center';
+      /* Для 90/270 свапаем размеры контейнера, чтобы повёрнутая
+         картинка не обрезалась. */
+      if(rotation % 180 === 90){
+        img.style.maxWidth = 'none';
+        img.addEventListener('load', () => {
+          const w = img.naturalWidth, h = img.naturalHeight;
+          if(w && h){
+            /* Свапаем aspect-ratio контейнера */
+            const aspect = h / w;
+            pageWrap.style.aspectRatio = aspect.toFixed(4);
+          }
+        });
+      }
+    }
     /* Кнопка «Развернуть на весь экран» — отдельный круглый виджет в углу.
        Не даём её клик пробросить в pageWrap (иначе поставится пин). */
     const expandBtn = el('button', {
@@ -3877,7 +3983,7 @@ function renderPhotosWithPins(photos, comments, opts){
       onclick: (ev) => {
         ev.stopPropagation();
         ev.preventDefault();
-        STATE.lightbox = { photos: photos.slice(), idx };
+        STATE.lightbox = { photos: photos.slice(), idx, essayId: opts.essayId || null };
         render();
       }
     }, '⛶');
@@ -11137,6 +11243,82 @@ function modalStudentDetail(){
     el('div', { style:{ marginTop:'8px' }}, commentBtn));
   body.append(commentCard);
 
+  /* 🧳 Чемодан без ручки — личный банк ошибок ученика (видим всё, что
+     ученик не смог освоить за 3 разных дня). Загружается лениво. */
+  if(/^[0-9a-f-]{36}$/i.test(sid)){
+    const mbCache = STATE.studentMistakeBank || (STATE.studentMistakeBank = {});
+    let mbList = mbCache[sid];
+    if(mbList === undefined && sb){
+      mbCache[sid] = null;
+      restRequest('GET',
+        '/student_mistake_bank?student_id=eq.' + encodeURIComponent(sid) +
+        '&select=id,task_n,kind,word,correct_answer,explanation,mistakes_count,correct_streak,is_mastered,added_at,last_seen_at' +
+        '&order=is_mastered.asc,mistakes_count.desc,added_at.desc&limit=200'
+      ).then(arr => {
+        mbCache[sid] = Array.isArray(arr) ? arr : [];
+        render();
+      }).catch(() => { mbCache[sid] = []; render(); });
+    }
+    const mbCard = el('div', { class:'card', style:{ marginBottom:'14px' }});
+    mbCard.append(el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }},
+      el('h4', null, '🧳 Чемодан без ручки'),
+      el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }},
+        mbList === null ? '⏳ загружаем…' :
+        mbList === undefined ? '' :
+        (mbList.filter(m => !m.is_mastered).length + ' неосвоенных · ' + mbList.filter(m => m.is_mastered).length + ' закрыто'))));
+    mbCard.append(el('p', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'10px' }},
+      'Слова и вопросы, на которых ученик ошибался. «Закрыто» = ответил верно 3 разных дня подряд. Можно рекомендовать ученику пройти чемодан в его кабинете.'));
+    if(Array.isArray(mbList)){
+      if(!mbList.length){
+        mbCard.append(el('div', { style:{ color:'var(--ink-3)', fontStyle:'italic', fontSize:'13px' }},
+          'Пусто — ученик ещё не делал ошибок (или ещё не решал тренажёры).'));
+      } else {
+        /* Группируем по task_n */
+        const byTaskMb = {};
+        mbList.forEach(m => {
+          if(!byTaskMb[m.task_n]) byTaskMb[m.task_n] = [];
+          byTaskMb[m.task_n].push(m);
+        });
+        const tasksList = el('div', { style:{ display:'flex', flexDirection:'column', gap:'10px' }});
+        Object.keys(byTaskMb).sort((a,b) => a-b).forEach(taskN => {
+          const items = byTaskMb[taskN];
+          const open = items.filter(m => !m.is_mastered).length;
+          const closed = items.length - open;
+          const topic = (EGE_TASKS.find(t => t.n === Number(taskN)) || {}).topic || '';
+          const det = el('details', { style:{ background:'var(--surface-soft)', border:'1px solid var(--border-2)', borderRadius:'10px', padding:'8px 12px' }});
+          det.append(el('summary', { style:{ cursor:'pointer', fontWeight:'700', fontSize:'13px', display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'6px' }},
+            el('span', null, '№' + taskN + (topic ? ' · ' + topic : '')),
+            el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', fontWeight:'500' }},
+              open + ' открыто · ' + closed + ' закрыто')));
+          const itemsBox = el('div', { style:{ marginTop:'8px', display:'flex', flexDirection:'column', gap:'4px' }});
+          items.slice(0, 50).forEach(m => {
+            const word = m.word || (m.correct_answer || '—');
+            const correct = m.correct_answer || '?';
+            /* Показываем word с подстановкой буквы в подчёркивание */
+            let displayWord = word;
+            if(word.includes('_')){
+              displayWord = word.replace(/_+/, '[' + correct + ']');
+            }
+            itemsBox.append(el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', padding:'4px 8px', background:'#fff', borderRadius:'6px', fontSize:'13px' }},
+              el('span', { style:{ fontWeight:'700' }}, displayWord),
+              el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'auto' }},
+                m.is_mastered
+                  ? el('span', { style:{ color:'var(--green)', fontWeight:'700' }}, '✓ закрыто')
+                  : ('❌ ×' + (m.mistakes_count || 1) + (m.correct_streak ? ' · 🔥' + m.correct_streak + '/3' : '')))));
+          });
+          if(items.length > 50){
+            itemsBox.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', fontStyle:'italic', padding:'4px 8px' }},
+              '... и ещё ' + (items.length - 50)));
+          }
+          det.append(itemsBox);
+          tasksList.append(det);
+        });
+        mbCard.append(tasksList);
+      }
+    }
+    body.append(mbCard);
+  }
+
   /* Результаты вариантов-пробников — все попытки этого ученика */
   if(/^[0-9a-f-]{36}$/i.test(sid)){
     const variantsCard = el('div', { class:'card', style:{ marginBottom:'14px' }});
@@ -12649,6 +12831,7 @@ function modalEssayReview(essayId){
   if(isPhotoEssay){
     essayBodyEl = renderPhotosWithPins(essay.photoUrls || [], commentsForView, {
       readonly: false,
+      essayId: essay.id,
       onPinClick: (c, pinEl) => showExistingCommentPopup(essay, c, pinEl),
       onPhotoClick: ({ page, x, y, pageWrap }) => showPhotoErrPopup(essay, pageWrap, { page, x, y })
     });
