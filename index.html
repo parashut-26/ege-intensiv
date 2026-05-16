@@ -3270,7 +3270,7 @@ let PAYMENTS_LOADED = false;
 
 async function loadPaymentSuggestionsFromDb(){
   if(!sb) return;
-  if(!MY_PROFILE || (MY_PROFILE.role !== 'teacher' && MY_PROFILE.role !== 'curator')) return;
+  if(!MY_PROFILE || MY_PROFILE.role !== 'teacher') return;
   try {
     const arr = await restRequest('GET',
       '/payment_suggestions?status=eq.pending&select=*&order=received_at.desc');
@@ -3286,8 +3286,10 @@ async function loadPaymentSuggestionsFromDb(){
 async function loadPaymentsFromDb(){
   if(!sb) return;
   if(!MY_PROFILE) return;
+  // Кураторы не видят оплат — RLS их всё равно отобьёт, не делаем лишний запрос.
+  if(MY_PROFILE.role === 'curator') return;
   try {
-    // Учитель/куратор видит всё. Ученик/родитель — только свои (по RLS).
+    // Учитель видит всё. Ученик/родитель — только свои (по RLS).
     const arr = await restRequest('GET',
       '/payments?select=id,student_id,intensive_id,amount,status,method,paid_at,note,created_at&order=paid_at.desc.nullslast,created_at.desc');
     if(Array.isArray(arr)){
@@ -11718,8 +11720,8 @@ function modalStudentDetail(){
     el('div', { style:{ marginTop:'8px' }}, commentBtn));
   body.append(commentCard);
 
-  /* 💰 История оплат этого ученика */
-  if(PAYMENTS_LOADED){
+  /* 💰 История оплат этого ученика — только учитель, кураторы не видят */
+  if(PAYMENTS_LOADED && MY_PROFILE && MY_PROFILE.role === 'teacher'){
     const myPayments = PAYMENTS.filter(p => p.student_id === s.id);
     const paySum = myPayments.reduce((a, p) => a + (Number(p.amount) || 0), 0);
 
