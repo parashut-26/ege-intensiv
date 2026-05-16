@@ -3708,6 +3708,136 @@ function renderEssayWithMarks(text, comments, opts){
    photos: [url1, url2, ...]  comments: [{ id, kind, comment, photo_anchor:{x,y,page} }]
    opts.readonly: false → клик по фото ставит новый пин (учитель), клик по пину — редакт/удаление
                  true  → только просмотр (ученик) */
+/* =========================================================
+   ЛАЙТБОКС: фото на весь экран с навигацией
+   ========================================================= */
+function modalLightbox(){
+  if(!STATE.lightbox) return null;
+  const { photos } = STATE.lightbox;
+  let { idx } = STATE.lightbox;
+  if(!photos || !photos.length) return null;
+  if(idx < 0) idx = 0;
+  if(idx >= photos.length) idx = photos.length - 1;
+
+  const close = () => { STATE.lightbox = null; render(); };
+  const goPrev = () => {
+    if(idx > 0){ STATE.lightbox.idx = idx - 1; render(); }
+  };
+  const goNext = () => {
+    if(idx < photos.length - 1){ STATE.lightbox.idx = idx + 1; render(); }
+  };
+
+  /* Закрытие по ESC и навигация стрелками */
+  const keyHandler = (ev) => {
+    if(ev.key === 'Escape') { close(); }
+    else if(ev.key === 'ArrowLeft') { goPrev(); }
+    else if(ev.key === 'ArrowRight') { goNext(); }
+  };
+  /* Привязываем один раз на window и снимаем при закрытии — render() пересоздаст обработчик */
+  setTimeout(() => {
+    document.addEventListener('keydown', keyHandler, { once: false });
+    /* Снимаем когда модалки уже нет */
+    const cleanup = () => {
+      if(!STATE.lightbox){
+        document.removeEventListener('keydown', keyHandler);
+      } else {
+        setTimeout(cleanup, 200);
+      }
+    };
+    setTimeout(cleanup, 200);
+  }, 0);
+
+  const url = photos[idx];
+
+  const backdrop = el('div', {
+    style:{
+      position:'fixed', inset:'0', background:'rgba(0,0,0,0.95)', zIndex:'10000',
+      display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center',
+      padding:'20px'
+    },
+    onclick: (ev) => {
+      /* Клик по фону (не по img/кнопкам) — закрываем */
+      if(ev.target === ev.currentTarget) close();
+    }
+  });
+
+  /* Верхняя панель */
+  const topBar = el('div', {
+    style:{
+      position:'absolute', top:'0', left:'0', right:'0', padding:'14px 20px',
+      display:'flex', justifyContent:'space-between', alignItems:'center',
+      background:'linear-gradient(180deg, rgba(0,0,0,0.6), transparent)'
+    }
+  },
+    el('div', { style:{ color:'#fff', fontWeight:'700', fontSize:'14px' }},
+      'Страница ' + (idx + 1) + ' из ' + photos.length),
+    el('button', {
+      style:{
+        background:'rgba(255,255,255,0.15)', color:'#fff', border:'none',
+        width:'40px', height:'40px', borderRadius:'50%', fontSize:'20px',
+        cursor:'pointer'
+      },
+      onclick: close, title:'Закрыть (Esc)'
+    }, '×')
+  );
+  backdrop.append(topBar);
+
+  /* Фото — overflow:auto чтобы можно было прокручивать большое изображение */
+  const imgWrap = el('div', {
+    style:{
+      flex:'1', display:'flex', alignItems:'center', justifyContent:'center',
+      overflow:'auto', width:'100%',
+      WebkitOverflowScrolling:'touch'
+    }
+  });
+  imgWrap.append(el('img', {
+    src: proxifyUrl(url),
+    alt: 'страница ' + (idx + 1),
+    style:{
+      maxWidth:'100%', maxHeight:'90vh', objectFit:'contain',
+      boxShadow:'0 10px 40px rgba(0,0,0,0.5)'
+    }
+  }));
+  backdrop.append(imgWrap);
+
+  /* Навигация — слева/справа стрелки, если есть куда листать */
+  if(idx > 0){
+    backdrop.append(el('button', {
+      style:{
+        position:'absolute', left:'20px', top:'50%', transform:'translateY(-50%)',
+        background:'rgba(255,255,255,0.15)', color:'#fff', border:'none',
+        width:'56px', height:'56px', borderRadius:'50%', fontSize:'28px',
+        cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center'
+      },
+      onclick: (ev) => { ev.stopPropagation(); goPrev(); },
+      title:'Предыдущая (←)'
+    }, '‹'));
+  }
+  if(idx < photos.length - 1){
+    backdrop.append(el('button', {
+      style:{
+        position:'absolute', right:'20px', top:'50%', transform:'translateY(-50%)',
+        background:'rgba(255,255,255,0.15)', color:'#fff', border:'none',
+        width:'56px', height:'56px', borderRadius:'50%', fontSize:'28px',
+        cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center'
+      },
+      onclick: (ev) => { ev.stopPropagation(); goNext(); },
+      title:'Следующая (→)'
+    }, '›'));
+  }
+
+  /* Подсказка */
+  backdrop.append(el('div', {
+    style:{
+      position:'absolute', bottom:'20px', left:'50%', transform:'translateX(-50%)',
+      color:'rgba(255,255,255,0.6)', fontSize:'12px', textAlign:'center',
+      pointerEvents:'none'
+    }
+  }, 'Esc — закрыть · ← → — листать · колесо/жест — масштаб'));
+
+  return backdrop;
+}
+
 function renderPhotosWithPins(photos, comments, opts){
   opts = opts || {};
   const wrap = el('div', { class:'essay-photos' });
@@ -3732,8 +3862,28 @@ function renderPhotosWithPins(photos, comments, opts){
     pageWrap.dataset.page = String(idx);
     const img = el('img', { src: proxifyUrl(url), alt: 'фото ' + (idx+1) });
     img.addEventListener('dragstart', ev => ev.preventDefault());
+    /* Кнопка «Развернуть на весь экран» — отдельный круглый виджет в углу.
+       Не даём её клик пробросить в pageWrap (иначе поставится пин). */
+    const expandBtn = el('button', {
+      title: 'Открыть на весь экран',
+      style:{
+        position:'absolute', top:'8px', right:'8px', zIndex:5,
+        width:'36px', height:'36px', borderRadius:'50%',
+        background:'rgba(0,0,0,0.7)', color:'#fff', border:'none',
+        fontSize:'18px', cursor:'pointer', display:'flex',
+        alignItems:'center', justifyContent:'center',
+        boxShadow:'0 2px 8px rgba(0,0,0,0.3)'
+      },
+      onclick: (ev) => {
+        ev.stopPropagation();
+        ev.preventDefault();
+        STATE.lightbox = { photos: photos.slice(), idx };
+        render();
+      }
+    }, '⛶');
     pageWrap.append(img,
-      el('span', { class:'page-num' }, 'стр. ' + (idx + 1)));
+      el('span', { class:'page-num' }, 'стр. ' + (idx + 1)),
+      expandBtn);
     /* Пины */
     (byPage[idx] || []).forEach((c, i) => {
       const meta = errKindMeta(c.kind);
@@ -18947,6 +19097,7 @@ function _renderNow(){
   if(STATE.walkMaterialsOpen) root.append(modalWalkMaterials());
   if(STATE.archiveOpen) root.append(modalArchive());
   if(STATE.essayOpen) root.append(modalEssayReview(STATE.essayOpen));
+  if(STATE.lightbox) root.append(modalLightbox());
   if(STATE.newStudentForm) root.append(modalNewStudent());
   if(STATE.curatorPermsFor) root.append(modalCuratorPerms());
   if(STATE.studentDetailOpen) root.append(modalStudentDetail());
