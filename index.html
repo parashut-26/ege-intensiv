@@ -1135,16 +1135,41 @@ async function saveTheoryToDb(n, text){
 async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, shuffled }){
   if(!sb || !MY_PROFILE) return null;  /* демо-режим — не сохраняем */
   const items = bank.map((q, i) => {
+    /* expected: правильный ответ. Раньше для inlineChoice клали q.a — но у
+       inlineChoice такого поля нет, правильные ответы лежат в q.blanks[k].correct.
+       Чиним: явно строим массив правильных индексов. */
+    let expected;
+    if(q.inlineChoice && Array.isArray(q.blanks)){
+      expected = q.blanks.map(b => b.correct);
+    } else if(q.match){
+      expected = q.a;
+    } else if(q.text){
+      expected = q.a;
+    } else if(q.multi){
+      expected = q.a;
+    } else if(q.letterGap){
+      expected = q.correct;
+    } else {
+      expected = q.a;
+    }
+
     const item = {
       src: q.src || null,
       user: getUser(i),
-      expected: q.match ? q.a : (q.text ? q.a : (q.multi ? q.a : (q.letterGap ? q.correct : q.a))),
+      expected,
       ok: !!isCorrect(q, i)
     };
     /* Для letterGap сохраняем само слово — иначе в истории ничего не понятно. */
     if(q.letterGap){
       item.word = q.word || null;
       item.expl = q.expl || null;
+    }
+    /* Для inlineChoice сохраняем шаблон + blanks (опции), чтобы разбор
+       читался без обращения к актуальному QUIZ_BANK (банк со временем правится). */
+    if(q.inlineChoice && Array.isArray(q.blanks)){
+      item.inlineChoice = true;
+      item.template = q.template || null;
+      item.blanks = q.blanks.map(b => ({ options: b.options || [], correct: b.correct }));
     }
     /* Для commaPick (задание 16) сохраняем расставленные учеником запятые,
        чтобы учитель потом мог их посмотреть в drill-down. */
@@ -12731,6 +12756,95 @@ function modalAttemptDetail(){
         }
         body.append(card);  /* не забыть добавить карточку в body! */
         return;  /* для letterGap дальше «варианты ответа» не показываем */
+      }
+
+      /* inlineChoice (задание 13/14 — «слитно/раздельно» и подобные).
+         Шаблон с подстановками ${0}, ${1}… и blanks с вариантами. Берём данные
+         либо из item (новые попытки), либо из q (для старых попыток, у которых
+         в БД ничего не сохранилось кроме user/ok). */
+      const inlineTemplate = item.template || (q && q.template);
+      const inlineBlanks   = (Array.isArray(item.blanks) && item.blanks.length)
+                              ? item.blanks
+                              : (q && Array.isArray(q.blanks) ? q.blanks : null);
+      if((item.inlineChoice || (q && q.inlineChoice)) && inlineTemplate && inlineBlanks){
+        const userArr = Array.isArray(item.user) ? item.user.map(Number) : [];
+        const expArr  = Array.isArray(item.expected)
+                          ? item.expected.map(Number)
+                          : inlineBlanks.map(b => Number(b.correct));
+
+        /* Рендер шаблона: вместо ${k} подставляем плашку с выбранным/правильным
+           вариантом, цвет — по совпадению. */
+        const parts = String(inlineTemplate).split(/\$\{(\d+)\}/g);
+        const sentBox = el('div', { style:{
+          padding:'12px', background:'#fff', borderRadius:'8px', marginBottom:'8px',
+          fontSize:'16px', lineHeight:'1.7', whiteSpace:'pre-wrap'
+        }});
+        parts.forEach((part, idx) => {
+          if(idx % 2 === 0){
+            // Текстовая часть шаблона
+            if(part) sentBox.append(document.createTextNode(part));
+          } else {
+            const blankIdx = Number(part);
+            const blank = inlineBlanks[blankIdx];
+            if(!blank){ sentBox.append(document.createTextNode('___')); return; }
+            const userPick = userArr[blankIdx];
+            const correctIdx = (typeof blank.correct === 'number') ? blank.correct : expArr[blankIdx];
+            const userText = (typeof userPick === 'number' && blank.options && blank.options[userPick] != null)
+                              ? String(blank.options[userPick])
+                              : '?';
+            const correctText = (typeof correctIdx === 'number' && blank.options && blank.options[correctIdx] != null)
+                                  ? String(blank.options[correctIdx])
+                                  : '?';
+            const isOk = (userPick === correctIdx);
+            // Плашка с выбором ученика
+            sentBox.append(el('span', {
+              style:{
+                display:'inline-block', padding:'2px 10px', margin:'0 3px',
+                borderRadius:'6px', fontWeight:'700',
+                background: isOk ? '#D1FAE5' : '#FECACA',
+                color: isOk ? '#065F46' : '#991B1B',
+                border: '2px solid ' + (isOk ? 'var(--green)' : 'var(--red)')
+              }
+            }, userText));
+            if(!isOk){
+              // Маленькая подсказка с правильным вариантом сразу после
+              sentBox.append(el('span', {
+                style:{
+                  display:'inline-block', padding:'1px 8px', margin:'0 3px 0 0',
+                  borderRadius:'6px', fontSize:'13px', fontWeight:'600',
+                  background:'#fff', color:'var(--green)', border:'1px dashed var(--green)'
+                }
+              }, '→ ' + correctText));
+            }
+          }
+        });
+        card.append(sentBox);
+
+        /* Сводка: что выбрал / что верно — в человекочитаемой форме (тексты опций) */
+        const userHuman = inlineBlanks.map((b, k) => {
+          const u = userArr[k];
+          return (typeof u === 'number' && b.options && b.options[u] != null) ? b.options[u] : '?';
+        }).join(' · ');
+        const corrHuman = inlineBlanks.map((b, k) => {
+          const c = (typeof b.correct === 'number') ? b.correct : expArr[k];
+          return (typeof c === 'number' && b.options && b.options[c] != null) ? b.options[c] : '?';
+        }).join(' · ');
+        card.append(
+          el('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginTop:'6px' }},
+            el('div', { style:{ background:'#fff', padding:'8px 10px', borderRadius:'8px' }},
+              el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'2px', fontWeight:'700' }}, 'Ответ ученика'),
+              el('div', { style:{ fontSize:'13px', wordBreak:'break-word' }}, userHuman)),
+            el('div', { style:{ background:'#fff', padding:'8px 10px', borderRadius:'8px' }},
+              el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'2px', fontWeight:'700' }}, 'Правильно'),
+              el('div', { style:{ fontSize:'13px', wordBreak:'break-word', color:'var(--green)' }}, corrHuman))));
+
+        if(q && q.expl){
+          card.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px', fontSize:'12px' }},
+            el('div', { style:{ fontSize:'10px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Почему так?'),
+            el('div', { html: typeof formatExplanation === 'function' ? formatExplanation(q.expl) : String(q.expl) })));
+        }
+        body.append(card);
+        return;  /* для inlineChoice дальше generic-разбор не нужен */
       }
 
       /* commaPick (задание 16): рисуем 5 предложений с подсветкой выбора +
