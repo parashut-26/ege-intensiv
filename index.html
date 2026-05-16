@@ -1424,7 +1424,7 @@ async function restoreSession(){
         _AUTH_BOOTSTRAP_RUNNING = false;
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
-        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile())]).then(() => {
+        Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile()), loadPaymentSuggestionsFromDb()]).then(() => {
           render();
           /* После основных загрузок — стартуем фоновый чат-poll */
           startUnreadBgPoll();
@@ -1492,7 +1492,7 @@ async function restoreSession(){
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
     /* Загружаем теорию в фоне */
-    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile())]).then(() => {
+    Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb(), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile()), loadPaymentSuggestionsFromDb()]).then(() => {
           render();
           startUnreadBgPoll();
           startPresenceHeartbeat();
@@ -3256,6 +3256,206 @@ async function loadStudentsFromDb(){
   } catch(e){
     console.warn('Не удалось загрузить учеников:', e.message);
   }
+}
+
+/* =========================================================
+   PAYMENT SUGGESTIONS — предложения от Telegram-бота оплат
+   ========================================================= */
+let PAYMENT_SUGGESTIONS = [];          // массив pending-предложений
+let PAYMENT_SUGGESTIONS_LOADED = false;
+
+async function loadPaymentSuggestionsFromDb(){
+  if(!sb) return;
+  if(!MY_PROFILE || (MY_PROFILE.role !== 'teacher' && MY_PROFILE.role !== 'curator')) return;
+  try {
+    const arr = await restRequest('GET',
+      '/payment_suggestions?status=eq.pending&select=*&order=received_at.desc');
+    if(Array.isArray(arr)){
+      PAYMENT_SUGGESTIONS = arr;
+      PAYMENT_SUGGESTIONS_LOADED = true;
+    }
+  } catch(e){
+    console.warn('payment_suggestions load:', e.message);
+  }
+}
+
+/* Модал просмотра/привязки одного предложения. */
+function modalPaymentSuggestion(sugg){
+  const ov = el('div', { class:'modal-overlay', onclick: (e) => { if(e.target === ov) document.body.removeChild(ov); } });
+  const m = el('div', { class:'modal', style:{ maxWidth:'560px' }});
+
+  m.append(el('h2', { style:{ marginBottom:'10px' }}, '🤖 Поступление #' + sugg.id));
+
+  /* Карточка платежа */
+  const card = el('div', { class:'card', style:{ background:'var(--bg-soft)', padding:'14px', marginBottom:'16px' }});
+  card.append(el('div', { style:{ fontSize:'28px', fontWeight:700, marginBottom:'8px' }}, sugg.amount + ' ₽'));
+  if(sugg.payer_name)         card.append(el('div', { style:{ marginBottom:'4px' }}, '👤 ' + sugg.payer_name));
+  if(sugg.payer_email)        card.append(el('div', { style:{ marginBottom:'4px', color:'var(--ink-2)', fontSize:'13px' }}, '📧 ' + sugg.payer_email));
+  if(sugg.payer_phone)        card.append(el('div', { style:{ marginBottom:'4px', color:'var(--ink-2)', fontSize:'13px' }}, '📱 ' + sugg.payer_phone));
+  if(sugg.order_description)  card.append(el('div', { style:{ marginTop:'8px', color:'var(--ink-2)', fontSize:'13px', fontStyle:'italic' }}, '🛒 ' + sugg.order_description));
+  if(sugg.received_at){
+    const dt = new Date(sugg.received_at);
+    card.append(el('div', { style:{ marginTop:'8px', color:'var(--ink-2)', fontSize:'12px' }}, '⏱ ' + dt.toLocaleString('ru-RU')));
+  }
+  m.append(card);
+
+  /* Выбор ученика */
+  m.append(el('h3', { style:{ fontSize:'14px', marginBottom:'8px' }}, 'К какому ученику привязать?'));
+
+  // Кандидаты от парсера сверху
+  const candidates = Array.isArray(sugg.candidates) ? sugg.candidates : [];
+  const candidateIds = new Set(candidates.map(c => c.id));
+
+  const sel = el('select', { class:'input', style:{ width:'100%', marginBottom:'14px' }});
+  sel.append(el('option', { value:'' }, '— выбери ученика —'));
+  if(candidates.length){
+    const og = el('optgroup', { label:'🤖 Кандидаты от бота' });
+    candidates.forEach(c => og.append(el('option', { value:c.id }, c.name + (c.email ? ' · ' + c.email : ''))));
+    sel.append(og);
+  }
+  if(STUDENTS.length){
+    const og2 = el('optgroup', { label:'Все ученики' });
+    STUDENTS.forEach(s => {
+      if(candidateIds.has(s.id)) return; // не дублируем
+      og2.append(el('option', { value:s.id }, s.name + (s.email ? ' · ' + s.email : '')));
+    });
+    sel.append(og2);
+  }
+  if(sugg.matched_student_id) sel.value = sugg.matched_student_id;
+  m.append(sel);
+
+  /* Заметка к платежу */
+  const noteInput = el('input', { class:'input', type:'text',
+    placeholder: 'Заметка (необязательно) — например, «Краш-тест 2026»',
+    style:{ width:'100%', marginBottom:'14px' } });
+  if(sugg.order_description) noteInput.value = sugg.order_description;
+  m.append(noteInput);
+
+  /* Кнопки */
+  const btnRow = el('div', { style:{ display:'flex', gap:'10px', justifyContent:'flex-end', flexWrap:'wrap' }});
+
+  const btnCancel = el('button', { class:'btn btn-secondary',
+    onclick: () => document.body.removeChild(ov)
+  }, 'Отмена');
+
+  const btnDismiss = el('button', { class:'btn btn-secondary',
+    onclick: async () => {
+      if(!confirm('Отклонить это предложение? Платёж не будет создан.')) return;
+      btnDismiss.disabled = true;
+      try {
+        await restRequest('PATCH', '/payment_suggestions?id=eq.' + sugg.id,
+          { status:'dismissed', resolved_by: MY_PROFILE.id, resolved_at: new Date().toISOString() },
+          { prefer:'return=minimal' });
+        PAYMENT_SUGGESTIONS = PAYMENT_SUGGESTIONS.filter(p => p.id !== sugg.id);
+        showToast('Предложение отклонено');
+        document.body.removeChild(ov);
+        render();
+      } catch(e){
+        btnDismiss.disabled = false;
+        showToast('⚠ ' + e.message);
+      }
+    }
+  }, '✕ Отклонить');
+
+  const btnApply = el('button', { class:'btn btn-primary',
+    onclick: async () => {
+      const studentId = sel.value;
+      if(!studentId){ showToast('Выбери ученика'); return; }
+      btnApply.disabled = true;
+      btnApply.textContent = '⏳ Сохраняем…';
+      try {
+        // 1) Создаём запись в payments
+        const intensiveId = (typeof COURSE !== 'undefined' && COURSE && COURSE.intensiveId) ? COURSE.intensiveId : null;
+        const payRows = await restRequest('POST', '/payments',
+          {
+            student_id:   studentId,
+            intensive_id: intensiveId,
+            amount:       sugg.amount,
+            status:       'paid',
+            method:       'СБП / Т-банк',
+            paid_at:      (sugg.payment_date || sugg.received_at || new Date().toISOString()).slice(0, 10),
+            note:         noteInput.value || null
+          },
+          { prefer:'return=representation' });
+        const newPayId = Array.isArray(payRows) && payRows[0] ? payRows[0].id : null;
+        // 2) Помечаем suggestion как applied
+        await restRequest('PATCH', '/payment_suggestions?id=eq.' + sugg.id,
+          {
+            status: 'applied',
+            matched_student_id: studentId,
+            applied_payment_id: newPayId,
+            resolved_by: MY_PROFILE.id,
+            resolved_at: new Date().toISOString()
+          },
+          { prefer:'return=minimal' });
+        PAYMENT_SUGGESTIONS = PAYMENT_SUGGESTIONS.filter(p => p.id !== sugg.id);
+        showToast('✅ Платёж привязан');
+        document.body.removeChild(ov);
+        render();
+      } catch(e){
+        btnApply.disabled = false;
+        btnApply.textContent = '☑ Привязать платёж';
+        showToast('⚠ ' + (e.message || 'Не удалось привязать'));
+      }
+    }
+  }, '☑ Привязать платёж');
+
+  btnRow.append(btnCancel, btnDismiss, btnApply);
+  m.append(btnRow);
+
+  ov.append(m);
+  document.body.appendChild(ov);
+}
+
+/* Карточка «🤖 Новые поступления» на Сводке учителя. */
+function paymentSuggestionsCard(){
+  if(!PAYMENT_SUGGESTIONS_LOADED) return null;
+  const list = (PAYMENT_SUGGESTIONS || []).filter(p => p.status === 'pending');
+  if(!list.length) return null;
+
+  const card = el('div', { class:'card', style:{
+    marginBottom:'18px',
+    background:'linear-gradient(135deg, #FEF3C7 0%, #FDE68A 100%)',
+    border:'1px solid #F59E0B'
+  }});
+
+  card.append(el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap', marginBottom:'10px' }},
+    el('span', { style:{ fontSize:'28px' }}, '🤖'),
+    el('div', { style:{ flex:1, minWidth:'200px' }},
+      el('h3', { style:{ color:'var(--ink)', marginBottom:'2px' }},
+        list.length + ' ' + pluralRu(list.length, ['новое поступление','новых поступления','новых поступлений'])),
+      el('div', { style:{ fontSize:'13px', color:'var(--ink)', opacity:.85 }},
+        'Пересланы из Т-банка. Привяжи к ученикам, чтобы попали в оплаты.'))
+  ));
+
+  // Список — по 3 первых видно, остальные «ещё N»
+  const visible = list.slice(0, 3);
+  visible.forEach(sugg => {
+    const matched = sugg.matched_student_id
+      ? STUDENTS.find(s => s.id === sugg.matched_student_id)
+      : null;
+    const row = el('div', { style:{
+      display:'flex', alignItems:'center', gap:'12px', flexWrap:'wrap',
+      padding:'10px 12px', marginBottom:'6px',
+      background:'rgba(255,255,255,0.6)', borderRadius:'8px',
+      cursor:'pointer'
+    }, onclick: () => modalPaymentSuggestion(sugg) });
+    row.append(
+      el('div', { style:{ fontWeight:700, minWidth:'80px' }}, sugg.amount + ' ₽'),
+      el('div', { style:{ flex:1, minWidth:'120px', fontSize:'14px' }},
+        (sugg.payer_name || '?') + (sugg.payer_email ? ' · ' + sugg.payer_email : '')),
+      el('div', { style:{ fontSize:'12px', color: matched ? '#059669' : 'var(--ink-2)' }},
+        matched ? '🔍 ' + matched.name : '❓ не найден')
+    );
+    card.append(row);
+  });
+
+  if(list.length > 3){
+    card.append(el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', textAlign:'center', marginTop:'6px' }},
+      'и ещё ' + (list.length - 3) + '…'));
+  }
+
+  return card;
 }
 
 /* =========================================================
@@ -10411,6 +10611,10 @@ function viewTeacherOverview(){
           onclick: () => { STATE.teacherTab = 'essays'; render(); }
         }, 'Открыть →'))));
   }
+
+  /* 🤖 Новые поступления от Telegram-бота оплат */
+  const paySuggCard = paymentSuggestionsCard();
+  if(paySuggCard) wrap.append(paySuggCard);
 
   /* Реальная статистика группы (если загрузилась) */
   const gs = GROUP_STATS;

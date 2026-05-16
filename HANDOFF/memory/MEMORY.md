@@ -1,0 +1,14 @@
+- [User role](user_role.md) — учитель русского/литературы, готовит к ЕГЭ, без техфона
+- [Платформа для интенсива ЕГЭ](project_intensive_platform.md) — веб-приложение для 3-дневного интенсива, прототип в Приложение/prototype.html
+- [Supabase /auth/v1 заблокирован в РФ](tech_supabase_auth_blocked_ru.md) — в платформе используется обход через decodeJwtPayload + REST вместо setSession/getUser
+- [Дыры в QUIZ_BANK без sourceText](data_quizbank_missing_sourcetext.md) — Вариант 2 в заданиях 1 и 2 без исходного текста; есть фильтр isQuestionValid
+- [JWT expiry в Supabase](tech_supabase_jwt_expiry.md) — поднят до 604799 сек (~7 дней), потолок бесплатного тарифа
+- [TODO допарсить задания 1, 2, 3, 8](todo_parse_tasks_1_2_3_8.md) — отложено до после интенсива
+- [Git lock-файлы](feedback_git_lock.md) — sandbox в репо ЗебРус оставляет .git/*.lock; снимать пре-эмптивно одной chained-командой перед коммитом
+- [Web Push на iOS — VAPID_SUBJECT](tech_webpush_apple_vapid.md) — Apple отбивает 403 если в subject не реальный email; для ZebRus = mailto:xxx154xxx153@gmail.com
+- [TODO Этап 2: решалка вариантов](todo_variants_solver_v2.md) — после интенсива 4 июня переехать с OTP на свою решалку с PDF-парсером и inline-полями
+- [TODO задания сочинений](todo_essay_assignments.md) — группировать работы по «теме сочинения», сейчас сданные сочинения свалены без группировки
+- [DONE лендинг на поддомене](todo_landing_subdomain.md) — krashtest.zebrus.online → parashut-26.github.io/krash-test-2026/ (DNS Cloudflare)
+- [TODO AI-рекомендации](todo_ai_recommendations.md) — колонка с автоматическими рекомендациями ученикам по ошибкам через YandexGPT через Supabase Edge Function
+- [TODO пересчёт баллов в тренажёрах](todo_quiz_recalc.md) — после редактирования вопроса в QUIZ_BANK не пересчитываются старые попытки; делаем после интенсива
+- [TODO задание 14 — формат ЕГЭ](todo_task14_full_ege_format.md) — 5 предложений + ответ цифрами (как на реальном ЕГЭ); делаем после интенсива
