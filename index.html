@@ -12869,10 +12869,53 @@ function modalAttemptDetail(){
     });
   }
 
+  /* Учитель может удалить попытку (чистка дублей от двойного «Сохранить»).
+     Ученикам и кураторам кнопка не показывается. RLS-политика «att_delete_teacher»
+     гарантирует, что даже если кто-то попробует через консоль — БД отклонит. */
+  const canDelete = MY_PROFILE && MY_PROFILE.role === 'teacher';
+  const deleteBtn = canDelete ? el('button', { class:'btn btn-secondary', style:{ color:'var(--red)' },
+    onclick: async (ev) => {
+      const studentLabel = student ? student.name : 'ученика';
+      if(!confirm('Удалить эту попытку у ' + studentLabel + '?\n\n' +
+                  'Будет удалён результат «' + attempt.score + '/' + attempt.max_score +
+                  '» от ' + dateStr + '.\nЭто действие нельзя отменить.')) return;
+      ev.target.disabled = true;
+      ev.target.textContent = '⏳ Удаляем…';
+      try {
+        await restRequest('DELETE', '/attempts?id=eq.' + attempt.id, null, { prefer:'return=minimal' });
+        // Чистим локальные кэши
+        if(studentId && STATE.studentAttempts && Array.isArray(STATE.studentAttempts[studentId])){
+          STATE.studentAttempts[studentId] = STATE.studentAttempts[studentId].filter(a => a.id !== attempt.id);
+        }
+        if(STATE.attemptsByTask){
+          Object.keys(STATE.attemptsByTask).forEach(k => {
+            if(Array.isArray(STATE.attemptsByTask[k])){
+              STATE.attemptsByTask[k] = STATE.attemptsByTask[k].filter(a => a.id !== attempt.id);
+            }
+          });
+        }
+        showToast('Попытка удалена');
+        STATE.attemptDetailOpen = null;
+        render();
+      } catch(e){
+        ev.target.disabled = false;
+        ev.target.textContent = '🗑 Удалить попытку';
+        const msg = (e && e.message) || '';
+        if(/permission|denied|RLS|policy/i.test(msg)){
+          showToast('⚠ Нет прав. Прогони SQL add_attempt_delete_policy.sql');
+        } else {
+          showToast('⚠ ' + (msg || 'Не удалось удалить'));
+        }
+      }
+    }
+  }, '🗑 Удалить попытку') : null;
+
   const foot = el('div', { class:'modal-foot' },
     el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }},
       items.length + ' вопросов · ' + items.filter(i => i.ok).length + ' верно'),
-    el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть'));
+    el('div', { style:{ display:'flex', gap:'8px' }},
+      deleteBtn,
+      el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть')));
 
   return el('div', { class:'modal-bg modal-bg-nested', onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }},
     el('div', { class:'modal', style:{ maxWidth:'780px' }}, head, body, foot));
