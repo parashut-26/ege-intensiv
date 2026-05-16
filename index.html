@@ -1875,11 +1875,12 @@ function humanWhen(iso){
 
 /* === ГРУППОВАЯ СТАТИСТИКА (для учителя) === */
 let GROUP_STATS = null;
+let GROUP_STATS_LOADED_AT = 0;   // ms timestamp последней успешной загрузки
 
 async function loadGroupStats(){
   if(!sb) return;
   try {
-    /* attempts всей группы за последние 30 дней */
+    /* attempts всей группы — последние 2000 (с запасом). */
     const arr = await restRequest('GET', '/attempts?select=student_id,ege_task_n,score,max_score,created_at&order=created_at.desc&limit=2000');
     if(!Array.isArray(arr)){ GROUP_STATS = null; return; }
     const today = new Date(); today.setHours(0,0,0,0);
@@ -1920,6 +1921,7 @@ async function loadGroupStats(){
       avgPct: totalMax ? Math.round(totalScore / totalMax * 100) : null,
       byStudent, byDay, byTask
     };
+    GROUP_STATS_LOADED_AT = Date.now();
     console.log('✓ Групповая статистика: ' + arr.length + ' попыток, активны сегодня: ' + studentsToday.size);
   } catch(e){
     console.warn('loadGroupStats упал:', e.message);
@@ -10779,9 +10781,10 @@ function viewTeacherOverview(){
       groupCard.append(chartBox);
     }
 
-    /* Самые слабые задания группы (где средний балл < 70%) */
+    /* Самые слабые задания группы (где средний балл < 70%).
+       Порог count>=1 — во время интенсива нужны свежие сигналы. */
     const weakTasks = Object.entries(gs.byTask)
-      .filter(([_, t]) => t.count >= 2 && t.score / t.max < 0.7)
+      .filter(([_, t]) => t.count >= 1 && t.max > 0 && t.score / t.max < 0.7)
       .map(([n, t]) => ({ n: +n, pct: Math.round(t.score / t.max * 100), count: t.count }))
       .sort((a, b) => a.pct - b.pct)
       .slice(0, 5);
@@ -10827,26 +10830,50 @@ function viewTeacherOverview(){
       '🟡 серым — отметились сами · 🟢 зелёным — отметили вы'));
   row.append(attendBox);
 
-  /* Слабые места — реальные данные из GROUP_STATS.byTask */
+  /* Слабые места — реальные данные из GROUP_STATS.byTask.
+     Авто-обновление при открытии Сводки, если данные старше 60 секунд
+     (во время интенсива ученики решают параллельно — статистика устаревает быстро). */
   const weakBox = el('div', { class:'card' });
+
+  const _refreshGroupStats = async (showSpinnerToast) => {
+    if(showSpinnerToast) showToast('⏳ Обновляю…');
+    await loadGroupStats();
+    render();
+  };
+  if(GROUP_STATS_LOADED_AT && (Date.now() - GROUP_STATS_LOADED_AT) > 60 * 1000){
+    // Запускаем фоновое обновление, не блокируя рендер
+    _refreshGroupStats(false);
+  }
+
+  const updatedAtStr = GROUP_STATS_LOADED_AT
+    ? 'обновлено ' + new Date(GROUP_STATS_LOADED_AT).toTimeString().slice(0,5)
+    : '';
+
   weakBox.append(
-    el('h2', { style:{ marginBottom:'10px' }}, '⚠️ Слабые места группы'),
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px', marginBottom:'4px' }},
+      el('h2', null, '⚠️ Слабые места группы'),
+      el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
+        updatedAtStr ? el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, updatedAtStr) : null,
+        el('button', { class:'btn-icon', title:'Обновить статистику',
+          onclick: () => _refreshGroupStats(true)
+        }, '🔄'))),
     el('p', { style:{ color:'var(--ink-2)', fontSize:'12px', marginBottom:'14px' }},
-      'Темы с самым высоким процентом ошибок. Стоит уделить внимание на вебинаре.'));
+      'Темы с самым высоким процентом ошибок. Хватит даже одной попытки, чтобы тема показалась.'));
+
   const realWeak = realWeakTopicsFromGroupStats();
   if(realWeak === null){
     weakBox.append(el('p', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'8px 0' }},
       '⏳ Загружаем статистику группы…'));
   } else if(!realWeak.length){
     weakBox.append(el('p', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'8px 0' }},
-      'Пока недостаточно данных. Нужно минимум 2 попытки на одно задание, чтобы тема попала в слабые.'));
+      'Сегодня попыток в тренажёрах ещё нет (или все ответы верны). Если девочки только что решали — нажми 🔄, статистика подтянется.'));
   } else {
     realWeak.forEach(t => {
       weakBox.append(weakTopicRow(t));
       weakBox.append(el('div', {
         style:{ marginTop:'-6px', marginBottom:'10px', marginLeft:'170px',
           fontSize:'11px', color:'var(--ink-3)' }
-      }, t.count + ' попыток'));
+      }, t.count + ' ' + pluralRu(t.count, ['попытка','попытки','попыток'])));
     });
   }
   row.append(weakBox);
@@ -10866,11 +10893,12 @@ function viewTeacherOverview(){
 
 /* Считает реальные «слабые места» из GROUP_STATS.byTask.
    Возвращает массив {name, pct (% ошибок), level, taskN, count}, отсортированный
-   по убыванию ошибок, top 6. Возвращает null, если статистика ещё не загружена. */
+   по убыванию ошибок, top 6. Возвращает null, если статистика ещё не загружена.
+   Порог: минимум 1 попытка (во время интенсива хотим видеть всё, что решали). */
 function realWeakTopicsFromGroupStats(){
   if(!GROUP_STATS || !GROUP_STATS.byTask) return null;
   return Object.entries(GROUP_STATS.byTask)
-    .filter(([_, t]) => t.count >= 2 && t.max > 0)
+    .filter(([_, t]) => t.count >= 1 && t.max > 0)
     .map(([n, t]) => {
       const successPct = Math.round(t.score / t.max * 100);
       const errPct = 100 - successPct;
