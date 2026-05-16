@@ -1475,6 +1475,8 @@ async function restoreSession(){
           if(profile.role === 'teacher' || profile.role === 'curator'){
             startPresenceRefreshLoop();
           }
+          /* Live-обновления Сводки (только учитель) */
+          if(profile.role === 'teacher') startTeacherRealtime();
         }).catch(() => {});
         return;
       } else {
@@ -1539,6 +1541,7 @@ async function restoreSession(){
           startUnreadBgPoll();
           startPresenceHeartbeat();
           if(profile.role === 'teacher' || profile.role === 'curator') startPresenceRefreshLoop();
+          if(profile.role === 'teacher') startTeacherRealtime();
         }).catch(() => {});
   } else {
     STATE.view = 'login';
@@ -1976,6 +1979,82 @@ async function loadGroupStats(){
     console.warn('loadGroupStats упал:', e.message);
     GROUP_STATS = null;
   }
+}
+
+/* =========================================================
+   REALTIME — живые обновления статистики и предложений оплат
+   =========================================================
+   Только для учителя. Когда в БД появляется новая попытка или предложение
+   оплаты — фронт мгновенно (1-2 сек) подтягивает свежие данные и
+   перерисовывает Сводку. Дебаунс 2 секунды защищает от шквала событий,
+   если 5 учеников одновременно сохраняют. */
+
+let _REALTIME_CHANNELS = [];
+let _GROUP_STATS_RELOAD_TIMER = null;
+
+function _scheduleGroupStatsReload(){
+  if(_GROUP_STATS_RELOAD_TIMER) clearTimeout(_GROUP_STATS_RELOAD_TIMER);
+  _GROUP_STATS_RELOAD_TIMER = setTimeout(async () => {
+    _GROUP_STATS_RELOAD_TIMER = null;
+    try {
+      await loadGroupStats();
+      if(typeof render === 'function') render();
+    } catch(e){
+      console.warn('realtime stats reload:', e.message);
+    }
+  }, 2000);
+}
+
+function startTeacherRealtime(){
+  if(!sb) return;
+  if(!MY_PROFILE || MY_PROFILE.role !== 'teacher') return;
+  if(_REALTIME_CHANNELS.length){
+    console.log('realtime: уже подписаны');
+    return;
+  }
+  try {
+    /* Подписка №1: попытки тренажёров (INSERT, UPDATE, DELETE) — для Сводки */
+    const attemptsCh = sb
+      .channel('rt-attempts')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'attempts' },
+        (_payload) => {
+          console.log('rt: attempts change');
+          _scheduleGroupStatsReload();
+        })
+      .subscribe((status) => {
+        if(status === 'SUBSCRIBED') console.log('✓ realtime: attempts подписаны');
+        else if(status === 'CHANNEL_ERROR') console.warn('realtime: attempts CHANNEL_ERROR (включи Realtime на таблице attempts в Supabase)');
+      });
+    _REALTIME_CHANNELS.push(attemptsCh);
+
+    /* Подписка №2: предложения оплат — для жёлтой карточки на Сводке */
+    const paySuggCh = sb
+      .channel('rt-pay-sugg')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'payment_suggestions' },
+        async (_payload) => {
+          console.log('rt: payment_suggestions change');
+          try {
+            await loadPaymentSuggestionsFromDb();
+            if(typeof render === 'function') render();
+          } catch(e){ console.warn('realtime pay-sugg reload:', e.message); }
+        })
+      .subscribe((status) => {
+        if(status === 'SUBSCRIBED') console.log('✓ realtime: payment_suggestions подписаны');
+        else if(status === 'CHANNEL_ERROR') console.warn('realtime: payment_suggestions CHANNEL_ERROR (включи Realtime на таблице payment_suggestions в Supabase)');
+      });
+    _REALTIME_CHANNELS.push(paySuggCh);
+  } catch(e){
+    console.warn('startTeacherRealtime:', e.message);
+  }
+}
+
+function stopTeacherRealtime(){
+  if(!sb || !_REALTIME_CHANNELS.length) return;
+  _REALTIME_CHANNELS.forEach(ch => { try { sb.removeChannel(ch); } catch(_){} });
+  _REALTIME_CHANNELS = [];
+  console.log('realtime: остановлено');
 }
 
 /* === ЧАТ ИНТЕНСИВА ===
@@ -10898,16 +10977,24 @@ function viewTeacherOverview(){
     ? 'обновлено ' + new Date(GROUP_STATS_LOADED_AT).toTimeString().slice(0,5)
     : '';
 
+  const liveOn = _REALTIME_CHANNELS && _REALTIME_CHANNELS.length > 0;
   weakBox.append(
     el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px', marginBottom:'4px' }},
       el('h2', null, '⚠️ Слабые места группы'),
       el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
+        liveOn ? el('span', {
+          style:{ fontSize:'11px', color:'var(--green)', fontWeight:'700',
+                  display:'inline-flex', alignItems:'center', gap:'4px' },
+          title:'Live: новые попытки появятся автоматически'
+        }, '🟢 live') : null,
         updatedAtStr ? el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, updatedAtStr) : null,
         el('button', { class:'btn-icon', title:'Обновить статистику',
           onclick: () => _refreshGroupStats(true)
         }, '🔄'))),
     el('p', { style:{ color:'var(--ink-2)', fontSize:'12px', marginBottom:'14px' }},
-      'Темы с самым высоким процентом ошибок. Хватит даже одной попытки, чтобы тема показалась.'));
+      liveOn
+        ? 'Темы с самым высоким процентом ошибок. Обновляется автоматически при каждой новой попытке.'
+        : 'Темы с самым высоким процентом ошибок. Хватит даже одной попытки, чтобы тема показалась.'));
 
   const realWeak = realWeakTopicsFromGroupStats();
   if(realWeak === null){
