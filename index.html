@@ -6714,6 +6714,17 @@ function modalWalkMaterials(){
   const dayMock = DAYS.find(d => d.id === walkKey);
   const isTeacher = STATE.view === 'teacher' || STATE.view === 'curator';
 
+  /* Защита: если ученик каким-то путём (старая ссылка, кэш) открыл закрытый
+     прогулочный день — закрываем модал и показываем уведомление. */
+  if(!isTeacher && dayMock && _walkLockedForStudent(dayMock)){
+    setTimeout(() => {
+      STATE.walkMaterialsOpen = null;
+      showToast('🔒 Откроется ' + dayMock.date);
+      render();
+    }, 0);
+    return null;
+  }
+
   /* Подгрузка списка (один раз за открытие) */
   const cache = STATE.walkMaterialsCache || (STATE.walkMaterialsCache = {});
   let list = cache[walkKey];
@@ -8076,16 +8087,21 @@ function goToDay(dayId){
 
 function mapDayCard(d){
   if(d.kind === 'walk'){
+    const locked = _walkLockedForStudent(d);
     return el('div', {
       class:'day-card walk',
-      style:{ cursor:'pointer' },
-      onclick: () => { STATE.walkMaterialsOpen = d.id; render(); }
+      style:{ cursor: locked ? 'not-allowed' : 'pointer',
+              opacity: locked ? 0.55 : 1,
+              filter: locked ? 'grayscale(0.5)' : 'none' },
+      onclick: locked
+        ? () => showToast('🔒 Откроется ' + d.date)
+        : () => { STATE.walkMaterialsOpen = d.id; render(); }
     },
-      el('div', { style:{ fontSize:'30px' }}, d.emoji || '🌸'),
+      el('div', { style:{ fontSize:'30px' }}, locked ? '🔒' : (d.emoji || '🌸')),
       el('div', null,
         el('div', { class:'meta' }, d.date),
         el('div', { class:'ttl' }, d.title),
-        el('div', { class:'small' }, d.subtitle)));
+        el('div', { class:'small' }, locked ? 'откроется ' + d.date : d.subtitle)));
   }
   if(d.kind === 'exam'){
     return el('div', {
@@ -8271,20 +8287,43 @@ function taskAction(t, locked){
   }, 'Смотреть');
 }
 
+/* Прогулочный день закрыт от ученика, пока не наступила его дата.
+   Учитель/куратор всегда могут зайти — заполнить контент заранее. */
+function _walkLockedForStudent(d){
+  if(!d || d.kind !== 'walk') return false;
+  if(STATE.view !== 'student') return false;
+  const dDate = parseRusDate(d.date);
+  if(!dDate) return false;
+  const t0 = new Date(); t0.setHours(0,0,0,0);
+  return dDate.getTime() > t0.getTime();
+}
+
 function walkBlock(d){
   const isTeacher = STATE.view === 'teacher' || STATE.view === 'curator';
+  const locked = _walkLockedForStudent(d);
+
   return el('div', { class:'card', 'data-day-anchor': String(d.id),
-    style:{ marginBottom:'16px', background:'#FCE7F3', border:'1px solid #FBCFE8' }},
+    style:{ marginBottom:'16px',
+            background: locked ? '#F3F4F6' : '#FCE7F3',
+            border: '1px solid ' + (locked ? '#D1D5DB' : '#FBCFE8'),
+            opacity: locked ? 0.75 : 1 }},
     el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }},
-      el('div', { style:{ fontSize:'40px' }}, d.emoji || '🌸'),
+      el('div', { style:{ fontSize:'40px', filter: locked ? 'grayscale(1)' : 'none' }}, d.emoji || '🌸'),
       el('div', { style:{ flex:1, minWidth:'200px' }},
-        chip(d.subtitle || 'мотивация', 'p'),
+        chip(locked ? ('🔒 Откроется ' + d.date) : (d.subtitle || 'мотивация'),
+             locked ? 'grey' : 'p'),
         el('h2', { style:{ marginTop:'4px' }}, d.title),
         el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }},
-          d.date + ' — подкасты, музыка, картинки и ссылки от учителя')),
-      el('button', { class:'btn btn-p',
-        onclick: () => { STATE.walkMaterialsOpen = d.id; render(); }
-      }, isTeacher ? '📎 Управлять материалами' : '📎 Открыть материалы')));
+          locked
+            ? 'Материалы появятся ' + d.date
+            : (d.date + ' — подкасты, музыка, картинки и ссылки от учителя'))),
+      locked
+        ? el('button', { class:'btn btn-secondary', disabled:'',
+            style:{ opacity:0.6, cursor:'not-allowed' }
+          }, '🔒 Закрыто')
+        : el('button', { class:'btn btn-p',
+            onclick: () => { STATE.walkMaterialsOpen = d.id; render(); }
+          }, isTeacher ? '📎 Управлять материалами' : '📎 Открыть материалы')));
 }
 
 function examBlock(){
