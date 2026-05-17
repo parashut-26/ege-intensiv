@@ -9286,6 +9286,9 @@ function modalTest(taskN){
               if(selected.has(digit)) selected.delete(digit);
               else selected.add(digit);
               refreshAll();
+              /* Кнопка «Ответить» зависит от STATE.testAnswers — перерисовываем,
+                 чтобы она стала активной сразу после первого клика. */
+              render();
             })
           }, on ? ',' : digit);
           ctxBox.append(slot);
@@ -9734,10 +9737,26 @@ function modalTest(taskN){
       const ansInputEl = el('input', {
         type:'text', placeholder:'Введите ответ…', value: ans || '',
         disabled: all || undefined,
+        'data-text-ans-i': String(i),
         style:{ width:'100%', padding:'10px 14px', borderRadius:'10px', fontSize:'14px',
                 border: '2px solid ' + (ok ? 'var(--green)' : bad ? 'var(--red)' : 'var(--border-2)'),
                 background: ok ? 'var(--green-soft)' : bad ? 'var(--red-soft)' : 'var(--surface)' },
-        oninput: ev => { STATE.testAnswers[i] = ev.target.value; }
+        oninput: ev => {
+          STATE.testAnswers[i] = ev.target.value;
+          /* Перерисовываем, чтобы кнопка «Ответить» стала активной с первого
+             же символа. Сохраняем фокус и позицию курсора, иначе клавиатура
+             на iPhone слетает после каждой буквы. */
+          const caret = ev.target.selectionStart;
+          const myIdx = i;
+          render();
+          requestAnimationFrame(() => {
+            const back = document.querySelector('[data-text-ans-i="' + myIdx + '"]');
+            if(back){
+              try { back.focus({ preventScroll: true }); } catch(_){ back.focus(); }
+              try { back.setSelectionRange(caret, caret); } catch(_){}
+            }
+          });
+        }
       });
       block.append(ansInputEl);
       /* Если выше был кликабельный context с цифрами — записываем сюда ссылку
