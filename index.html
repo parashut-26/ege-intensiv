@@ -10533,6 +10533,7 @@ function modalMistakeTrainer(){
     STATE.testAnswers = {};
     STATE.testChecked = false;
     STATE.testInstantSubmitted = {};
+    STATE.mistakeSubmitted = {};
     /* Инвалидируем кэш чемодана — может число изменилось */
     if(typeof MISTAKE_BANK_CACHE !== 'undefined') MISTAKE_BANK_CACHE.items = null;
     render();
@@ -10561,6 +10562,9 @@ function modalMistakeTrainer(){
   }
   const bank = STATE.mistakeBankShuffled;
 
+  /* Карта «отвеченных» — { i: true } — нажал ли «Ответить» по этому вопросу */
+  if(!STATE.mistakeSubmitted) STATE.mistakeSubmitted = {};
+
   const body = el('div', { class:'modal-body' });
   let correct = 0;
   bank.forEach((it, i) => {
@@ -10578,7 +10582,8 @@ function modalMistakeTrainer(){
     /* Ё/Е считаем равными — частая ситуация в текстах */
     const normEY = s => String(s || '').toLowerCase().replace(/ё/g, 'е');
     const isRight = normEY(ans.trim()) === normEY(q.correct);
-    const showResult = STATE.testChecked || (STATE.testInstant && answered);
+    /* Показываем результат ТОЛЬКО когда ученик нажал «Ответить» (или общая «проверить») */
+    const showResult = STATE.testChecked || !!STATE.mistakeSubmitted[i];
     if(showResult && isRight) correct++;
 
     const block = el('div', { style:{ marginBottom:'14px', padding:'14px', border:'1px solid var(--border)', borderRadius:'12px', background:'var(--surface-soft)' }});
@@ -10610,17 +10615,15 @@ function modalMistakeTrainer(){
 
     const idx = q.word.indexOf('_');
     /* gapLenWord — фактическое число «_» в слове (для нарезки before/after).
-       gapLen — сколько букв ученик может ввести (= max между числом «_» и
-       длиной правильного ответа). Так для «прис_дать» с правильным «нн»
-       поле возьмёт обе буквы, а не только первую. */
+       gapLen — ширина поля для ввода. ВСЕГДА 2 символа в чемодане, чтобы поле
+       не подсказывало длину ответа (как в задании 15). Ученик может ввести
+       1 или 2 буквы, проверка по точному совпадению с q.correct. */
     let gapLenWord = 0;
     if(idx >= 0){
       while(idx + gapLenWord < q.word.length && q.word[idx + gapLenWord] === '_') gapLenWord++;
     }
     if(gapLenWord < 1) gapLenWord = 1;
-    let gapLen = Math.max(gapLenWord, String(q.correct || '').length || 1);
-    /* Для задания 15 (Н/НН) всегда ширина 2, чтобы поле не подсказывало длину ответа */
-    if(it.task_n === 15 || /^нн?$/i.test(String(q.correct || ''))) gapLen = 2;
+    const gapLen = 2;  /* всегда 2 — без подсказки длины */
     const before = idx >= 0 ? q.word.slice(0, idx) : q.word;
     const after  = idx >= 0 ? q.word.slice(idx + gapLenWord) : '';
     const inpBg = !showResult ? '#fff' : (isRight ? '#D1FAE5' : '#FECACA');
@@ -10637,38 +10640,74 @@ function modalMistakeTrainer(){
     });
     inp.value = ans;
     if(showResult) inp.disabled = true;
-    inp.oninput = async (ev) => {
+    inp.oninput = (ev) => {
       const v = String(ev.target.value || '').slice(0, gapLen).toLowerCase();
       ev.target.value = v;
       STATE.testAnswers[i] = v;
-      if(v.length >= gapLen){
-        /* Сразу проверяем и записываем результат (Ё/Е равны) */
-        const ok = normEY(v) === normEY(q.correct);
-        const nextI = i + 1;
-        /* Сразу переводим фокус на следующий input, чтобы клавиатура не закрылась */
-        const tryFocusNext = () => {
-          const next = document.querySelector('input[data-bank-i="' + nextI + '"]:not([disabled])');
-          if(next) next.focus();
-        };
-        if(ok){
-          /* Не блокируем UI — пушим в БД параллельно, рендер сразу */
-          recordCorrectForBank({
-            taskN: it.task_n, word: q.word, correct: q.correct,
-          }).catch(() => {});
-        } else {
-          recordMistakeForBank({
-            taskN: it.task_n, kind:'letterGap', word: q.word, correct: q.correct,
-            question_text: q.q, explanation: q.expl,
-          }).catch(() => {});
+      /* Просто сохраняем — проверка по клику кнопки. Никакого автоперехода. */
+      render();
+      requestAnimationFrame(() => {
+        const back = document.querySelector('input[data-bank-i="' + i + '"]:not([disabled])');
+        if(back){
+          try { back.focus({ preventScroll: true }); } catch(_){ back.focus(); }
+          const len = (back.value || '').length;
+          try { back.setSelectionRange(len, len); } catch(_){}
         }
-        render();
-        requestAnimationFrame(tryFocusNext);
+      });
+    };
+    inp.onkeydown = (ev) => {
+      if(ev.key === 'Enter'){
+        ev.preventDefault();
+        /* Enter = «Ответить» */
+        if(answered) submitMistake();
       }
     };
+
+    /* Кнопка «✓ Ответить» — активна с первой буквы. Поведение как в обычном тренажёре. */
+    const submitMistake = async () => {
+      const v = String(STATE.testAnswers[i] || '').trim().toLowerCase();
+      if(!v) return;
+      const ok = normEY(v) === normEY(q.correct);
+      STATE.mistakeSubmitted[i] = true;
+      if(ok){
+        recordCorrectForBank({ taskN: it.task_n, word: q.word, correct: q.correct }).catch(() => {});
+      } else {
+        recordMistakeForBank({
+          taskN: it.task_n, kind:'letterGap', word: q.word, correct: q.correct,
+          question_text: q.q, explanation: q.expl,
+        }).catch(() => {});
+      }
+      render();
+      /* Перевод фокуса на следующий невыдавший вопрос — только ПОСЛЕ нажатия кнопки */
+      requestAnimationFrame(() => {
+        for(let n = i + 1; n < bank.length; n++){
+          if(!STATE.mistakeSubmitted[n]){
+            const next = document.querySelector('input[data-bank-i="' + n + '"]:not([disabled])');
+            if(next){ next.focus(); break; }
+          }
+        }
+      });
+    };
+
+    const submitBtn = el('button', {
+      style:{
+        marginTop:'10px', padding:'8px 16px', borderRadius:'10px',
+        border:'2px solid ' + (answered && !showResult ? 'var(--p)' : 'var(--border-2)'),
+        background: answered && !showResult ? 'var(--p)' : 'var(--surface-soft)',
+        color: answered && !showResult ? '#fff' : 'var(--ink-3)',
+        fontWeight:'700', fontSize:'14px',
+        cursor: answered && !showResult ? 'pointer' : 'not-allowed',
+        opacity: answered && !showResult ? 1 : 0.55
+      },
+      disabled: !answered || showResult || undefined,
+      onclick: submitMistake
+    }, showResult ? '✓ Проверено' : answered ? '✓ Ответить' : 'Выбери ответ');
+
     block.append(
       el('div', { style:{ padding:'14px', background:'#FFFCF2', borderRadius:'10px', textAlign:'center' }},
         el('div', { style:{ fontSize:'24px', fontWeight:'700' }},
           before, inp, after),
+        !showResult ? submitBtn : null,
         showResult && !isRight
           ? el('div', { style:{ marginTop:'6px', fontSize:'13px', color:'var(--green)' }},
               'Правильно: ', el('b', null, q.correct))
