@@ -3813,8 +3813,10 @@ async function loadQuizSeedFile(){
         if(it && it.q && Array.isArray(it.opts) && typeof it.a === 'number'){
           return {
             q: String(it.q), opts: it.opts.map(String), a: it.a,
+            context: it.context || undefined,
+            sourceText: it.sourceText || undefined,
             expl: it.expl || undefined,
-            src: s.name, collection: s.name,
+            src: it.src || s.name, collection: it.collection || s.name,
           };
         }
         /* multi-вопрос: q + opts + a (массив индексов) */
@@ -3822,8 +3824,9 @@ async function loadQuizSeedFile(){
           return {
             multi: true, q: String(it.q), opts: it.opts.map(String), a: it.a,
             sourceText: it.sourceText || undefined,
+            context: it.context || undefined,
             expl: it.expl || undefined,
-            src: it.src || s.name, collection: s.name,
+            src: it.src || s.name, collection: it.collection || s.name,
           };
         }
         /* inlineChoice: template с placeholder'ами ${0}, ${1} и массив blanks.
