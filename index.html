@@ -10930,21 +10930,47 @@ function studentSelfDashboardCard(){
   /* ---- 6. Пробники (если есть попытки вариантов) ---- */
   const varAtts = STATE.myVariantAttempts || [];
   if(Array.isArray(varAtts) && varAtts.length){
-    const vCard = el('div', { class:'card', style:{ marginBottom:'14px' }});
-    const vDet = el('details', null,
-      el('summary', { style:{ cursor:'pointer', fontWeight:'700' }},
-        '📋 Мои пробники (' + varAtts.length + ')'));
-    const vBody = el('div', { style:{ marginTop:'10px' }});
-    vDet.append(vBody);
-    varAtts.slice(0, 10).forEach(a => {
-      const total = a.total_score != null && a.total_max_score
-        ? a.total_score + '/' + a.total_max_score
-        : '—';
-      const pct = a.total_max_score ? Math.round((a.total_score || 0) / a.total_max_score * 100) : null;
+    /* Считаем агрегат: средний балл по всем пробникам */
+    let sumScore = 0, sumMax = 0, countDone = 0;
+    varAtts.forEach(a => {
+      const mx = (a.variant && a.variant.total_max_score) || a.total_max_score || 0;
+      if(mx > 0){
+        sumScore += Number(a.total_score) || 0;
+        sumMax += Number(mx);
+        countDone++;
+      }
+    });
+    const avgPct = sumMax ? Math.round(sumScore / sumMax * 100) : null;
+
+    const vCard = el('div', { class:'card', style:{ marginBottom:'14px', cursor:'pointer' },
+      title:'Открыть раздел Пробники',
+      onclick: () => { STATE.studentTab = 'variants'; render(); }
+    });
+    /* Шапка с агрегатом и стрелкой → */
+    vCard.append(el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px', marginBottom:'10px' }},
+      el('div', null,
+        el('h4', { style:{ margin:0 }}, '📋 Мои пробники'),
+        el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginTop:'2px' }},
+          varAtts.length + ' ' + pluralRu(varAtts.length, ['пробник','пробника','пробников']) +
+          (avgPct != null ? ' · средний ' + avgPct + '%' : ''))),
+      el('div', { style:{ display:'flex', gap:'6px', alignItems:'center' }},
+        avgPct != null ? el('span', {
+          style:{ padding:'4px 10px', borderRadius:'8px', fontWeight:'700', fontSize:'14px',
+                  background: avgPct >= 80 ? 'var(--green-soft)' : avgPct >= 60 ? 'var(--y-soft)' : 'var(--red-soft)',
+                  color:    avgPct >= 80 ? 'var(--green)'      : avgPct >= 60 ? 'var(--warn)'   : 'var(--red)' }
+        }, avgPct + '%') : null,
+        el('span', { style:{ fontSize:'20px', color:'var(--ink-3)' }}, '→'))));
+
+    /* Список последних пробников — кликабельные, ведут на ту же вкладку */
+    varAtts.slice(0, 5).forEach(a => {
+      const mx = (a.variant && a.variant.total_max_score) || a.total_max_score || 0;
+      const sc = a.total_score;
+      const total = sc != null && mx ? sc + '/' + mx : '—';
+      const pct = mx ? Math.round((Number(sc) || 0) / mx * 100) : null;
       const title = (a.variant && a.variant.title) || ('Вариант #' + a.variant_id);
       const date = a.finished_at || a.imported_at || a.created_at;
-      vBody.append(el('div', {
-        style:{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap',
+      vCard.append(el('div', {
+        style:{ display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'8px',
                 padding:'8px 12px', marginBottom:'6px',
                 background:'var(--bg-soft)', borderRadius:'8px', fontSize:'13px' }
       },
@@ -10956,7 +10982,11 @@ function studentSelfDashboardCard(){
           color: pct == null ? 'var(--ink-3)' : pct >= 80 ? 'var(--green)' : pct >= 60 ? 'var(--warn)' : 'var(--red)' }},
           total + (pct != null ? ' · ' + pct + '%' : ''))));
     });
-    vCard.append(vDet);
+    if(varAtts.length > 5){
+      vCard.append(el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', textAlign:'center', marginTop:'4px' }},
+        'и ещё ' + (varAtts.length - 5) + '…'));
+    }
+
     wrap.append(vCard);
   }
 
