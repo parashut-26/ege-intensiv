@@ -10609,14 +10609,20 @@ function modalMistakeTrainer(){
       }, '✓ Знаю')));
 
     const idx = q.word.indexOf('_');
-    /* Считаем длину пропуска (число '_' подряд) */
-    let gapLen = 0;
+    /* gapLenWord — фактическое число «_» в слове (для нарезки before/after).
+       gapLen — сколько букв ученик может ввести (= max между числом «_» и
+       длиной правильного ответа). Так для «прис_дать» с правильным «нн»
+       поле возьмёт обе буквы, а не только первую. */
+    let gapLenWord = 0;
     if(idx >= 0){
-      while(idx + gapLen < q.word.length && q.word[idx + gapLen] === '_') gapLen++;
+      while(idx + gapLenWord < q.word.length && q.word[idx + gapLenWord] === '_') gapLenWord++;
     }
-    if(gapLen < 1) gapLen = Math.max(1, String(q.correct || '').length);
+    if(gapLenWord < 1) gapLenWord = 1;
+    let gapLen = Math.max(gapLenWord, String(q.correct || '').length || 1);
+    /* Для задания 15 (Н/НН) всегда ширина 2, чтобы поле не подсказывало длину ответа */
+    if(it.task_n === 15 || /^нн?$/i.test(String(q.correct || ''))) gapLen = 2;
     const before = idx >= 0 ? q.word.slice(0, idx) : q.word;
-    const after  = idx >= 0 ? q.word.slice(idx + gapLen) : '';
+    const after  = idx >= 0 ? q.word.slice(idx + gapLenWord) : '';
     const inpBg = !showResult ? '#fff' : (isRight ? '#D1FAE5' : '#FECACA');
     const inpBorder = !showResult ? 'var(--border-2)' : (isRight ? 'var(--green)' : 'var(--red)');
     const inpColor = !showResult ? '#0F766E' : (isRight ? '#065F46' : '#991B1B');
