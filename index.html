@@ -16354,13 +16354,108 @@ function modalEditTheory(n){
           el('h2', null, t.topic)),
         el('button', { class:'x', onclick: () => { STATE.contentEditTaskN = null; render(); }}, '×')),
       el('div', { class:'modal-body' },
-        /* Текст теории */
+        /* Текст теории + панель форматирования + предпросмотр. */
         (function(){
           const card = el('div', { class:'card', style:{ marginBottom:'14px', background:'var(--surface-soft)' }});
+
           const ta = el('textarea', {
-            placeholder: 'Опишите тему: что проверяется в задании ' + n + ', типичные ловушки, формулы, правила. Можно с разметкой Markdown.',
-            style:{ width:'100%', padding:'12px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'160px', resize:'vertical', marginTop:'8px', fontFamily:'inherit', fontSize:'14px', lineHeight:'1.5' }
+            placeholder: 'Опишите тему: что проверяется в задании ' + n + ', типичные ловушки, формулы, правила. Используй кнопки сверху для форматирования.',
+            style:{ width:'100%', padding:'14px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'400px', resize:'vertical', fontFamily:'inherit', fontSize:'14px', lineHeight:'1.55', boxSizing:'border-box' }
           }, THEORY[n] || '');
+
+          /* Предпросмотр — рядом или под textarea, обновляется по input */
+          const preview = el('div', {
+            style:{ padding:'14px', borderRadius:'10px', border:'1px dashed var(--border-2)',
+                    background:'#fff', minHeight:'400px', maxHeight:'600px', overflow:'auto',
+                    fontSize:'14px', lineHeight:'1.55', boxSizing:'border-box' }
+          });
+          const renderPreview = () => {
+            try {
+              preview.innerHTML = window.marked
+                ? window.marked.parse(ta.value || '')
+                : ('<pre style="white-space:pre-wrap">' + (ta.value || '').replace(/</g,'&lt;') + '</pre>');
+            } catch(_){ preview.textContent = ta.value || ''; }
+          };
+          renderPreview();
+          ta.addEventListener('input', renderPreview);
+
+          /* Хелпер: вставить/обернуть выделение */
+          const wrap = (left, right, placeholder) => {
+            const s = ta.selectionStart, e = ta.selectionEnd;
+            const sel = ta.value.slice(s, e) || (placeholder || '');
+            const before = ta.value.slice(0, s);
+            const after  = ta.value.slice(e);
+            ta.value = before + left + sel + right + after;
+            const newStart = before.length + left.length;
+            ta.focus();
+            ta.setSelectionRange(newStart, newStart + sel.length);
+            renderPreview();
+          };
+          const insertAtLineStart = (prefix) => {
+            const s = ta.selectionStart;
+            const lineStart = ta.value.lastIndexOf('\n', s - 1) + 1;
+            const before = ta.value.slice(0, lineStart);
+            const after  = ta.value.slice(lineStart);
+            ta.value = before + prefix + after;
+            ta.focus();
+            ta.setSelectionRange(s + prefix.length, s + prefix.length);
+            renderPreview();
+          };
+
+          /* Кнопки панели */
+          const mkBtn = (label, title, fn, style) => {
+            const b = el('button', { type:'button', title,
+              style: Object.assign({
+                padding:'4px 10px', minWidth:'32px', fontSize:'13px', cursor:'pointer',
+                background:'#fff', border:'1px solid var(--border-2)', borderRadius:'6px',
+                fontFamily:'inherit', fontWeight:'700'
+              }, style || {}),
+              onclick: (ev) => { ev.preventDefault(); fn(); }
+            }, label);
+            return b;
+          };
+
+          const toolbar = el('div', {
+            style:{ display:'flex', gap:'4px', flexWrap:'wrap', alignItems:'center',
+                    padding:'8px', background:'#fff', border:'1px solid var(--border-2)',
+                    borderRadius:'10px 10px 0 0', borderBottom:'none' }
+          },
+            mkBtn(el('b', null, 'Ж'),    'Жирный (Ctrl+B)',     () => wrap('**','**','текст')),
+            mkBtn(el('i', null, 'К'),    'Курсив',              () => wrap('*','*','текст')),
+            mkBtn(el('u', null, 'П'),    'Подчёркнутый',        () => wrap('<u>','</u>','текст')),
+            mkBtn(el('span', { style:{ background:'#FEF08A', padding:'0 4px', borderRadius:'3px' }}, 'A'),
+                                         'Жёлтый маркер',       () => wrap('<mark>','</mark>','текст')),
+            mkBtn(el('span', { style:{ color:'#DC2626' }}, 'A'),
+                                         'Красный цвет',        () => wrap('<span style="color:#DC2626">','</span>','текст')),
+            mkBtn(el('span', { style:{ color:'#2563EB' }}, 'A'),
+                                         'Синий цвет',          () => wrap('<span style="color:#2563EB">','</span>','текст')),
+            mkBtn(el('span', { style:{ color:'#059669' }}, 'A'),
+                                         'Зелёный цвет',        () => wrap('<span style="color:#059669">','</span>','текст')),
+            el('span', { style:{ width:'1px', height:'20px', background:'var(--border-2)', margin:'0 4px' }}),
+            mkBtn('H1',        'Заголовок 1',  () => insertAtLineStart('# ')),
+            mkBtn('H2',        'Заголовок 2',  () => insertAtLineStart('## ')),
+            mkBtn('• список',  'Маркированный список',  () => insertAtLineStart('- '), { fontWeight:'400' }),
+            mkBtn('1. список', 'Нумерованный список',   () => insertAtLineStart('1. '), { fontWeight:'400' }),
+            mkBtn('—',         'Горизонтальная линия',  () => wrap('\n\n---\n\n','')),
+            mkBtn('🔗',        'Ссылка',                () => wrap('[','](https://)','текст ссылки'))
+          );
+
+          /* Связываем textarea сверху, panel toolbar над ним (без скруглений снизу),
+             ниже строка-разделитель «Превью», ниже preview-блок. */
+          ta.style.borderTopLeftRadius = '0';
+          ta.style.borderTopRightRadius = '0';
+          ta.style.borderTop = 'none';
+
+          /* Ctrl+B для жирного, Ctrl+I — курсив */
+          ta.addEventListener('keydown', (e) => {
+            if((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')){
+              e.preventDefault(); wrap('**','**','текст');
+            }
+            if((e.ctrlKey || e.metaKey) && (e.key === 'i' || e.key === 'I')){
+              e.preventDefault(); wrap('*','*','текст');
+            }
+          });
+
           const status = el('span', { style:{ fontSize:'12px', color:'var(--ink-3)', marginLeft:'10px' }}, '');
           const saveBtn = el('button', { class:'btn btn-y btn-sm', style:{ marginTop:'8px' },
             onclick: async () => {
@@ -16382,12 +16477,25 @@ function modalEditTheory(n){
               }
             }
           }, '💾 Сохранить в БД');
+
+          /* Двухколоночный layout — редактор слева, превью справа.
+             На узких экранах автоматически становится одной колонкой. */
+          const editorWrap = el('div', null, toolbar, ta);
+          const grid = el('div', {
+            style:{ display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr)', gap:'12px', marginTop:'8px' }
+          },
+            editorWrap,
+            el('div', null,
+              el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', fontWeight:'700', marginBottom:'4px', textTransform:'uppercase' }},
+                '👁 Как увидит ученик'),
+              preview));
+
           card.append(
             el('h4', null, '📖 Текст теории (то, что увидит ученик)'),
             el('p', { style:{ fontSize:'12px', color:'var(--ink-3)', margin:'4px 0 4px 0' }},
-              'Сохраняется в таблицу ege_tasks, поле theory_md. После сохранения — обновите страницу, чтобы убедиться, что записалось.'),
-            ta,
-            el('div', { style:{ display:'flex', alignItems:'center', marginTop:'8px' }}, saveBtn, status));
+              'Слева — редактор с панелью форматирования. Справа — живой предпросмотр. Можно использовать Markdown или цветной HTML.'),
+            grid,
+            el('div', { style:{ display:'flex', alignItems:'center', marginTop:'10px' }}, saveBtn, status));
           return card;
         })(),
 
