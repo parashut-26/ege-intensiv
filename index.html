@@ -621,6 +621,7 @@ const STATE = {
   testOpen: null,
   essayOpen: null,
   essayBy: null,           // 'curator' | 'teacher' — кто проверяет
+  essayFullscreen: false,  // ⛶ раскрытый модал проверки сочинения
   essayDraftOpen: false,   // открыта форма сдачи сочинения у ученика
   essayDraftText: '',      // черновик текста
   essayDraftMode: 'typed', // 'typed' | 'photo'
@@ -14463,22 +14464,34 @@ function modalEssayReview(essayId){
         }, '✓ Опубликовать ученику')));
   }
 
-  /* Модаль */
-  const modal = el('div', { class:'modal' });
+  /* Модаль. STATE.essayFullscreen — переключается кнопкой ⛶/⤡ в шапке. */
+  const isFullscreen = !!STATE.essayFullscreen;
+  const modalStyle = isFullscreen
+    ? { maxWidth:'none', width:'calc(100vw - 24px)', maxHeight:'calc(100vh - 24px)', height:'calc(100vh - 24px)', borderRadius:'12px' }
+    : {};
+  const bgStyle = isFullscreen ? { padding:'12px' } : {};
+
+  const modal = el('div', { class:'modal', style: modalStyle });
   modal.append(
     el('div', { class:'modal-head' },
       el('div', null,
         el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
           essay.studentName + ' · ' + whenLabel + (isCurator ? ' · режим куратора' : '')),
         el('h2', null, '✍️ ' + essayLabel)),
-      el('button', { class:'x',
-        onclick: () => { STATE.essayOpen = null; STATE.essayBy = null; STATE.scoresK = {}; STATE.errors = {}; STATE.essayComment = ''; STATE.essayVoiceUrl = null; render(); }
-      }, '×')),
+      el('div', { style:{ display:'flex', gap:'4px', alignItems:'center' }},
+        el('button', { class:'btn-icon',
+          title: isFullscreen ? 'Свернуть' : 'Раскрыть на весь экран',
+          style:{ fontSize:'18px' },
+          onclick: () => { STATE.essayFullscreen = !STATE.essayFullscreen; render(); }
+        }, isFullscreen ? '⤡' : '⛶'),
+        el('button', { class:'x',
+          onclick: () => { STATE.essayOpen = null; STATE.essayBy = null; STATE.scoresK = {}; STATE.errors = {}; STATE.essayComment = ''; STATE.essayVoiceUrl = null; render(); }
+        }, '×'))),
     el('div', { class:'modal-body' },
       el('div', { class:'essay-grid' }, leftCol, rightCol)),
     foot);
 
-  return el('div', { class:'modal-bg',
+  return el('div', { class:'modal-bg', style: bgStyle,
     onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.essayOpen = null; STATE.essayBy = null; STATE.scoresK = {}; STATE.errors = {}; STATE.essayComment = ''; STATE.essayVoiceUrl = null; render(); }}
   }, modal);
 }
