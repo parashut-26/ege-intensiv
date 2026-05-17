@@ -622,6 +622,7 @@ const STATE = {
   essayOpen: null,
   essayBy: null,           // 'curator' | 'teacher' — кто проверяет
   essayFullscreen: false,  // ⛶ раскрытый модал проверки сочинения
+  variantEditFullscreen: false,  // ⛶ раскрытый модал редактирования варианта
   essayDraftOpen: false,   // открыта форма сдачи сочинения у ученика
   essayDraftText: '',      // черновик текста
   essayDraftMode: 'typed', // 'typed' | 'photo'
@@ -18842,6 +18843,19 @@ async function loadVariantForEdit(variantId){
 function modalEditVariant(){
   if(!STATE.editVariantId) return null;
   const close = () => { STATE.editVariantId = null; STATE.editVariantData = null; render(); };
+  const isFs = !!STATE.variantEditFullscreen;
+
+  /* Стили модала с учётом fullscreen. */
+  const modalStyle = isFs
+    ? { maxWidth:'none', width:'calc(100vw - 24px)', maxHeight:'calc(100vh - 24px)', height:'calc(100vh - 24px)', borderRadius:'12px' }
+    : { maxWidth:'1100px' };  /* 1100 вместо 920 — даже без fullscreen побольше */
+  const bgStyle = isFs ? { padding:'12px' } : {};
+
+  const fsBtn = el('button', { class:'btn-icon',
+    title: isFs ? 'Свернуть' : 'Раскрыть на весь экран',
+    style:{ fontSize:'18px' },
+    onclick: () => { STATE.variantEditFullscreen = !STATE.variantEditFullscreen; render(); }
+  }, isFs ? '⤡' : '⛶');
 
   const head = el('div', { class:'modal-head' },
     el('div', null,
@@ -18849,15 +18863,17 @@ function modalEditVariant(){
         '✏️ Редактирование варианта'),
       el('h2', { style:{ marginTop:'4px' }},
         STATE.editVariantData ? STATE.editVariantData.variant.title : '⏳ Загружаю…')),
-    el('button', { class:'x', onclick: close }, '×'));
+    el('div', { style:{ display:'flex', gap:'4px', alignItems:'center' }},
+      fsBtn,
+      el('button', { class:'x', onclick: close }, '×')));
 
   const body = el('div', { class:'modal-body' });
 
   if(!STATE.editVariantData){
     body.append(el('div', { style:{ textAlign:'center', color:'var(--ink-3)', padding:'30px' }}, '⏳ Загружаю данные варианта…'));
-    return el('div', { class:'modal-bg',
+    return el('div', { class:'modal-bg', style: bgStyle,
       onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
-    }, el('div', { class:'modal', style:{ maxWidth:'920px' }}, head, body));
+    }, el('div', { class:'modal', style: modalStyle }, head, body));
   }
 
   const { variant, questions, sourceTexts } = STATE.editVariantData;
@@ -18908,17 +18924,17 @@ function modalEditVariant(){
     const q = qByNum[n];
     const block = el('div', { style:{ marginTop:'10px', padding:'8px 10px', background:'var(--bg)', borderRadius:'8px', border:'1px solid var(--border)' }});
     const taskEd = richTextEditor(q.question_text || '', {
-      minHeight:'60px', fontSize:'12px',
+      minHeight:'140px', fontSize:'13px',
       onChange: (html) => { q.question_text = html; }
     });
     const ansInp = el('input', { type:'text', value: q.correct_answer || '',
-      style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'13px', fontWeight:'700', boxSizing:'border-box', marginTop:'4px' }
+      style:{ width:'100%', padding:'8px 10px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'14px', fontWeight:'700', boxSizing:'border-box', marginTop:'4px' }
     });
     ansInp.oninput = () => { q.correct_answer = ansInp.value; };
     /* Пояснение — почему правильный ответ именно такой. Ученик увидит после сдачи. */
-    const explInp = el('textarea', {
+    const explInp = el('textarea', { rows:6,
       placeholder:'Почему именно так? (правило, разбор). Ученик увидит после сдачи.',
-      style:{ width:'100%', padding:'6px 8px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'12px', boxSizing:'border-box', marginTop:'4px', minHeight:'42px', resize:'vertical', fontFamily:'inherit' }
+      style:{ width:'100%', padding:'8px 10px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'13px', boxSizing:'border-box', marginTop:'4px', minHeight:'120px', resize:'vertical', fontFamily:'inherit', lineHeight:'1.45' }
     });
     explInp.value = q.explanation || '';
     explInp.oninput = () => { q.explanation = explInp.value; };
@@ -18971,11 +18987,11 @@ function modalEditVariant(){
   const src13Obj = srcByKind['text_1_3'];
   const src22Obj = srcByKind['text_22_26'];
   const q27 = qByNum[27];
-  const src13Ed = richTextEditor(src13Obj.body || '', { minHeight:'100px', fontSize:'11px',
+  const src13Ed = richTextEditor(src13Obj.body || '', { minHeight:'240px', fontSize:'13px',
     onChange: (html) => { src13Obj.body = html; }});
-  const src22Ed = richTextEditor(src22Obj.body || '', { minHeight:'100px', fontSize:'11px',
+  const src22Ed = richTextEditor(src22Obj.body || '', { minHeight:'240px', fontSize:'13px',
     onChange: (html) => { src22Obj.body = html; }});
-  const src27Ed = richTextEditor(q27.question_text || '', { minHeight:'100px', fontSize:'11px',
+  const src27Ed = richTextEditor(q27.question_text || '', { minHeight:'240px', fontSize:'13px',
     onChange: (html) => { q27.question_text = html; }});
 
   body.append(
@@ -19057,9 +19073,9 @@ function modalEditVariant(){
   }, '💾 Сохранить изменения');
   body.append(saveBtn);
 
-  return el('div', { class:'modal-bg',
+  return el('div', { class:'modal-bg', style: bgStyle,
     onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
-  }, el('div', { class:'modal', style:{ maxWidth:'920px' }}, head, body));
+  }, el('div', { class:'modal', style: modalStyle }, head, body));
 }
 
 /* Модалка импорта сочинений из Excel. Учитель выбирает .xlsx,
