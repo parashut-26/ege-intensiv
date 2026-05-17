@@ -4171,6 +4171,19 @@ function modalQuickEditQuestion(){
   });
   qInput.value = q.q || '';
 
+  /* Контекст / предложение — отдельная плашка для заданий 17-20 и подобных,
+     где вопрос-инструкция и само предложение хранятся в разных полях.
+     Показываем только если у вопроса есть context (т.е. это «text» с предложением). */
+  const hasContext = (q.text || q.match) && (typeof q.context === 'string' || q.context === '' || q.context === undefined && q.text);
+  const ctxInput = el('textarea', {
+    rows:4,
+    placeholder:'Текст предложения (с цифрами в скобках для номеров позиций запятых)',
+    style:{ width:'100%', padding:'10px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'14px', fontFamily:'inherit', resize:'vertical', minHeight:'100px', boxSizing:'border-box', fontStyle:'italic', background:'#FFFBEB' }
+  });
+  ctxInput.value = q.context || '';
+  const ctxLabel = el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px', marginTop:'14px' }},
+    '📝 Предложение / контекст:');
+
   /* Правильный ответ — зависит от типа */
   const ansLabel = el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px', marginTop:'14px' }}, '');
   let ansInput, ansHint;
@@ -4256,6 +4269,11 @@ function modalQuickEditQuestion(){
       if(w.includes('_')) q.word = w;
       if(c) q.correct = c.toLowerCase();
     }
+    /* Контекст / предложение */
+    if(hasContext){
+      const newCtx = (ctxInput.value || '').trim();
+      q.context = newCtx || undefined;
+    }
     /* Пояснение */
     const newExpl = (explInput.value || '').trim();
     q.expl = newExpl || undefined;
@@ -4286,8 +4304,10 @@ function modalQuickEditQuestion(){
           el('h2', { style:{ marginTop:'4px' }}, '✏️ Редактирование вопроса')),
         el('button', { class:'x', onclick: close }, '×')),
       el('div', { class:'modal-body' },
-        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }}, 'Текст вопроса:'),
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }}, 'Текст вопроса (формулировка-задание):'),
         qInput,
+        hasContext ? ctxLabel : null,
+        hasContext ? ctxInput : null,
         ansLabel, ansInput,
         ansHint ? el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'4px' }}, ansHint) : null,
         explLabel, explInput,
@@ -9211,7 +9231,76 @@ function modalTest(taskN){
       block.append(srcBox);
     }
     if(q.context){
-      block.append(el('div', { html: renderInlineMd(q.context), style:{ padding:'10px 12px', background:'#fff', borderRadius:'8px', borderLeft:'3px solid var(--p)', marginBottom:'10px', fontSize:'13px', fontStyle:'italic', color:'var(--ink-2)' }}));
+      /* Если в context есть цифры в скобках (1), (2), (3)... и тип text —
+         делаем их кликабельными: ученик щёлкает по цифре → она превращается
+         в запятую, а в поле ответа автоматически добавляется эта цифра. */
+      const hasNumberedSlots = q.text && /\(\d+\)/.test(q.context);
+      if(hasNumberedSlots){
+        const inputRef = {};  /* сюда после создания запишем ссылку на <input> ответа */
+        const ctxBox = el('div', { style:{ padding:'12px 14px', background:'#fff', borderRadius:'8px', borderLeft:'3px solid var(--p)', marginBottom:'10px', fontSize:'15px', color:'var(--ink)', lineHeight:'2' }});
+        const curVal = String(STATE.testAnswers[i] || '');
+        const selected = new Set();
+        for(const ch of curVal) if(/\d/.test(ch)) selected.add(ch);
+
+        const refreshAll = () => {
+          // Перерисовываем кружочки — без полного render(), чтобы не терять фокус
+          const newVal = Array.from(selected).sort().join('');
+          STATE.testAnswers[i] = newVal;
+          if(inputRef.el){
+            inputRef.el.value = newVal;
+            inputRef.el.dispatchEvent(new Event('input'));
+          }
+          // Обновим внешний вид всех слотов в ctxBox
+          ctxBox.querySelectorAll('[data-slot]').forEach(node => {
+            const d = node.getAttribute('data-slot');
+            const on = selected.has(d);
+            node.textContent = on ? ',' : d;
+            node.style.background = on ? '#FEF08A' : '#fff';
+            node.style.borderColor = on ? '#F59E0B' : 'var(--border-2)';
+            node.style.color = on ? '#92400E' : 'var(--ink)';
+          });
+        };
+
+        let lastIdx = 0;
+        const slotRe = /\((\d+)\)/g;
+        let sm;
+        while((sm = slotRe.exec(q.context)) !== null){
+          if(sm.index > lastIdx){
+            ctxBox.append(document.createTextNode(q.context.slice(lastIdx, sm.index)));
+          }
+          const digit = sm[1];
+          const on = selected.has(digit);
+          const slot = el('span', {
+            'data-slot': digit,
+            style:{
+              display:'inline-block', minWidth:'24px', padding:'2px 10px', margin:'0 3px',
+              background: on ? '#FEF08A' : '#fff',
+              border: '2px solid ' + (on ? '#F59E0B' : 'var(--border-2)'),
+              color: on ? '#92400E' : 'var(--ink)',
+              borderRadius:'8px',
+              cursor: all ? 'default' : 'pointer',
+              fontWeight:'700', userSelect:'none',
+              textAlign:'center', fontSize:'14px'
+            },
+            onclick: all ? null : (() => {
+              if(selected.has(digit)) selected.delete(digit);
+              else selected.add(digit);
+              refreshAll();
+            })
+          }, on ? ',' : digit);
+          ctxBox.append(slot);
+          lastIdx = sm.index + sm[0].length;
+        }
+        if(lastIdx < q.context.length){
+          ctxBox.append(document.createTextNode(q.context.slice(lastIdx)));
+        }
+        block.append(ctxBox);
+        block._commaSlotInputRef = inputRef;  /* передадим вниз, чтобы input записался сюда */
+        block.append(el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginBottom:'8px' }},
+          '💡 Кликни по цифре, чтобы поставить запятую. Цифры выбранных позиций соберутся в ответ ниже.'));
+      } else {
+        block.append(el('div', { html: renderInlineMd(q.context), style:{ padding:'10px 12px', background:'#fff', borderRadius:'8px', borderLeft:'3px solid var(--p)', marginBottom:'10px', fontSize:'13px', fontStyle:'italic', color:'var(--ink-2)' }}));
+      }
     }
 
     if(q.pair && q.word){
@@ -9642,14 +9731,18 @@ function modalTest(taskN){
       const ans = STATE.testAnswers[i];
       const ok = all && isCorrect(q, i);
       const bad = all && !ok;
-      block.append(el('input', {
+      const ansInputEl = el('input', {
         type:'text', placeholder:'Введите ответ…', value: ans || '',
         disabled: all || undefined,
         style:{ width:'100%', padding:'10px 14px', borderRadius:'10px', fontSize:'14px',
                 border: '2px solid ' + (ok ? 'var(--green)' : bad ? 'var(--red)' : 'var(--border-2)'),
                 background: ok ? 'var(--green-soft)' : bad ? 'var(--red-soft)' : 'var(--surface)' },
         oninput: ev => { STATE.testAnswers[i] = ev.target.value; }
-      }));
+      });
+      block.append(ansInputEl);
+      /* Если выше был кликабельный context с цифрами — записываем сюда ссылку
+         на input, чтобы клик по цифре синхронно обновлял поле ответа. */
+      if(block._commaSlotInputRef){ block._commaSlotInputRef.el = ansInputEl; }
       if(all){
         const accept = Array.isArray(q.a) ? q.a : [q.a];
         block.append(el('div', { style:{ marginTop:'8px', fontSize:'12px', color: ok ? 'var(--green)' : 'var(--red)' }},
