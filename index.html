@@ -9856,31 +9856,32 @@ function modalTest(taskN){
   },
     el('div', { class:'modal', style:{ maxWidth:'700px' }},
       el('div', { class:'modal-head' },
-        el('div', null,
+        el('div', { style:{ flex:1, minWidth:0 }},
           el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
             '⚡ Тренажёр · автопроверка · задание ' + taskN +
             (STATE.testLimit != null ? ' · ' + bank.length + ' вопр.' : '')),
           el('h2', { style:{ marginTop:'4px' }},
-            (EGE_TASKS.find(t => t.n === taskN) || {}).topic || 'Разминка')),
-        /* Чекбокс «Мгновенная проверка» — показывает результат сразу после ответа */
-        el('label', {
-          style:{ display:'flex', alignItems:'center', gap:'6px', cursor:'pointer', fontSize:'12px', color:'var(--ink-2)', marginRight:'10px', userSelect:'none', whiteSpace:'nowrap' },
-          title:'Показывать правильный ответ и пояснение сразу после клика, не дожидаясь конца теста'
-        },
-          (() => {
-            const cb = el('input', { type:'checkbox' });
-            cb.checked = !!STATE.testInstant;
-            cb.onchange = () => {
-              STATE.testInstant = cb.checked;
-              /* Когда выключаем — сбрасываем общую проверку, чтобы UI не залип
-                 в «всё проверено». Когда включаем — оставляем как есть. */
-              if(!cb.checked) STATE.testChecked = false;
-              render();
-            };
-            return cb;
-          })(),
-          '⚡ Мгновенная проверка'),
-        el('button', { class:'x',
+            (EGE_TASKS.find(t => t.n === taskN) || {}).topic || 'Разминка'),
+          /* Чекбокс «Мгновенная проверка» — под заголовком, как доп-настройка.
+             Не уезжает наверх, чтобы крестик ВСЕГДА оставался виден справа. */
+          el('label', {
+            style:{ display:'inline-flex', alignItems:'center', gap:'6px', cursor:'pointer', fontSize:'12px', color:'var(--ink-2)', userSelect:'none', marginTop:'8px', padding:'4px 8px', background:'var(--bg-soft)', borderRadius:'8px' },
+            title:'Показывать правильный ответ и пояснение сразу после клика, не дожидаясь конца теста'
+          },
+            (() => {
+              const cb = el('input', { type:'checkbox' });
+              cb.checked = !!STATE.testInstant;
+              cb.onchange = () => {
+                STATE.testInstant = cb.checked;
+                /* Когда выключаем — сбрасываем общую проверку, чтобы UI не залип
+                   в «всё проверено». Когда включаем — оставляем как есть. */
+                if(!cb.checked) STATE.testChecked = false;
+                render();
+              };
+              return cb;
+            })(),
+            '⚡ Мгновенная проверка')),
+        el('button', { class:'x', style:{ flexShrink:0, marginLeft:'10px' },
           onclick: () => { STATE.testOpen = null; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = null; STATE.testLimit = null; STATE.shuffledBank = null; render(); }
         }, '×')),
       body,
