@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ZebRus · Парижская гонка</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;1,500&family=Manrope:wght@400;500;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* Париж ночью: глубокий бордо/тёмно-фиолетовый фон + тёплое
+       золото уличных фонарей + кремовые акценты (свет окон в кафе).
+       Серия — гонка, тема — ночные бульвары и кафе. */
+    --bg-0: #1a0a14;
+    --bg-1: #2a1421;
+    --bg-2: #3a1e2e;
+    --asphalt: #2c1b25;            /* брусчатка ночного бульвара */
+    --line-yellow: #f5d182;        /* свет уличных фонарей */
+    --racing-red: #c1272d;         /* бордо — как красное вино */
+    --neon-cyan: #f4d4af;          /* кремовый — окна кафе */
+    --neon-lime: #d4a574;          /* тёплый бежевый */
+    --gold: #facc15;
+    --text: #f5f0e8;
+    --text-dim: #c7b8a6;
+    --correct: #65a30d;
+    --wrong: #ef4444;
+    --partial: #f59e0b;
+    --font-display: 'Playfair Display', Georgia, serif;
+    --font-body: 'Manrope', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    min-height: 100vh;
+    background: var(--bg-0);
+    color: var(--text);
+    font-family: var(--font-body);
+    overflow-x: hidden;
+  }
+  body::before {
+    /* свет уличных фонарей сверху + красное зарево от ресторанов внизу */
+    content: ""; position: fixed; inset: 0;
+    background:
+      radial-gradient(ellipse at top, rgba(245, 209, 130, 0.18), transparent 55%),
+      radial-gradient(ellipse at bottom, rgba(193, 39, 45, 0.20), transparent 55%),
+      linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
+    z-index: -2;
+  }
+  body::after {
+    /* мерцающие огоньки города */
+    content: ""; position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 15% 25%, rgba(245, 209, 130, 0.6) 1.5px, transparent 2px),
+      radial-gradient(circle at 75% 65%, rgba(244, 212, 175, 0.5) 1.5px, transparent 2px),
+      radial-gradient(circle at 45% 85%, rgba(245, 209, 130, 0.6) 1.5px, transparent 2px),
+      radial-gradient(circle at 25% 55%, rgba(244, 212, 175, 0.4) 1.5px, transparent 2px),
+      radial-gradient(circle at 65% 15%, rgba(245, 209, 130, 0.5) 1.5px, transparent 2px),
+      radial-gradient(circle at 90% 40%, rgba(244, 212, 175, 0.5) 1.5px, transparent 2px);
+    background-size: 280px 280px;
+    z-index: -1; pointer-events: none;
+    opacity: 0.7;
+  }
+  .app { max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; position: relative; }
+
+  /* СТАРТОВЫЙ ЭКРАН */
+  .start-screen { text-align: center; padding: 50px 20px 30px; animation: slideIn 0.5s ease; }
+  .start-screen .title {
+    font-family: var(--font-display);
+    font-size: clamp(2.2rem, 6vw, 4rem);
+    line-height: 0.95;
+    color: var(--line-yellow);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+    text-shadow: 0 0 40px rgba(255, 216, 61, 0.3);
+  }
+  .start-screen .title .accent { color: var(--racing-red); }
+  .start-screen .subtitle {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    margin-bottom: 40px;
+  }
+  .start-screen .car-anim {
+    font-size: 5rem;
+    margin-bottom: 30px;
+    display: inline-block;
+    animation: drive 3s ease-in-out infinite;
+  }
+  @keyframes drive {
+    0%, 100% { transform: translateX(-30px); }
+    50% { transform: translateX(30px); }
+  }
+  .start-screen .input-group { max-width: 400px; margin: 0 auto 24px; text-align: left; }
+  .start-screen label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--neon-cyan);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .start-screen input {
+    width: 100%;
+    padding: 16px 20px;
+    background: var(--bg-2);
+    border: 2px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 1.1rem;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    outline: none;
+  }
+  .start-screen input:focus {
+    border-color: var(--line-yellow);
+    box-shadow: 0 0 0 4px rgba(255, 216, 61, 0.1);
+  }
+  .start-screen input::placeholder { color: var(--text-dim); }
+  .rules {
+    max-width: 500px;
+    margin: 28px auto;
+    padding: 24px;
+    background: rgba(0, 229, 255, 0.05);
+    border: 1px dashed rgba(0, 229, 255, 0.3);
+    border-radius: 12px;
+    text-align: left;
+  }
+  .rules h3 {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    color: var(--neon-cyan);
+    letter-spacing: 3px;
+    margin-bottom: 12px;
+  }
+  .rules ul { list-style: none; }
+  .rules li { padding: 6px 0; color: var(--text-dim); font-size: 0.95rem; }
+  .rules li::before { content: "▸ "; color: var(--line-yellow); margin-right: 6px; }
+
+  /* ШАПКА */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px dashed rgba(255, 216, 61, 0.3);
+    position: relative;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .header::after {
+    content: ""; position: absolute;
+    left: 0; right: 0; bottom: -2px;
+    height: 6px;
+    background-image: repeating-conic-gradient(var(--text) 0% 25%, transparent 0% 50%);
+    background-size: 12px 12px;
+    opacity: 0.4;
+  }
+  .logo {
+    font-family: var(--font-display);
+    font-size: clamp(1.2rem, 2.5vw, 1.6rem);
+    line-height: 0.95;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .logo .accent { color: var(--racing-red); }
+  .logo .player {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    margin-top: 4px;
+    font-weight: 500;
+  }
+  .stats { display: flex; gap: 20px; align-items: center; font-family: var(--font-mono); }
+  .stat .label {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .stat .value { font-family: var(--font-display); font-size: 1.5rem; line-height: 1; }
+  .stat .value.bees { color: var(--line-yellow); }
+  .stat .value.timer { color: var(--neon-cyan); }
+  .sound-toggle {
+    background: transparent;
+    border: 1px solid var(--text-dim);
+    color: var(--text-dim);
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.2s ease;
+  }
+  .sound-toggle:hover {
+    color: var(--line-yellow);
+    border-color: var(--line-yellow);
+  }
+  .sound-toggle.muted { opacity: 0.4; }
+
+  /* ТРАССА */
+  .track { margin-bottom: 28px; position: relative; }
+  .track-info {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+  .track-info .current { color: var(--neon-cyan); }
+  .track-bar {
+    height: 22px;
+    background: var(--asphalt);
+    border-radius: 11px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .track-bar::before {
+    content: "";
+    position: absolute;
+    top: 50%; left: 0; right: 0;
+    height: 3px;
+    transform: translateY(-50%);
+    background-image: repeating-linear-gradient(90deg,
+      var(--line-yellow) 0 16px, transparent 16px 28px);
+    opacity: 0.4;
+  }
+  .track-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--racing-red), var(--gold));
+    transition: width 0.6s cubic-bezier(.2, .9, .3, 1);
+  }
+  .track-car {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.3rem;
+    transition: left 0.6s cubic-bezier(.2, .9, .3, 1);
+    filter: drop-shadow(0 0 8px rgba(255, 216, 61, 0.6));
+    z-index: 2;
+  }
+
+  /* КАРТА ЗАДАНИЯ */
+  .card {
+    background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 20px;
+    padding: 36px 32px;
+    position: relative;
+    box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+  .card::before {
+    content: attr(data-num);
+    position: absolute;
+    top: -14px;
+    left: 28px;
+    background: var(--line-yellow);
+    color: var(--bg-0);
+    font-family: var(--font-display);
+    font-size: 0.9rem;
+    padding: 4px 14px;
+    border-radius: 4px;
+    letter-spacing: 2px;
+    transform: skewX(-12deg);
+  }
+  .task-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--neon-cyan);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .task-label .hint { color: var(--text-dim); margin-left: 8px; }
+  .sentence {
+    font-size: clamp(1.1rem, 2.2vw, 1.45rem);
+    line-height: 1.7;
+    font-weight: 500;
+    margin-bottom: 28px;
+    color: var(--text);
+  }
+  .word {
+    display: inline-block;
+    padding: 4px 8px;
+    margin: 2px 1px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: 1.5px solid transparent;
+    user-select: none;
+  }
+  .word:hover {
+    background: rgba(255, 216, 61, 0.1);
+    border-color: rgba(255, 216, 61, 0.4);
+  }
+  .word.selected {
+    background: rgba(255, 216, 61, 0.2);
+    border-color: var(--line-yellow);
+    color: var(--line-yellow);
+    box-shadow: 0 0 12px rgba(255, 216, 61, 0.4);
+  }
+  .word.correct {
+    background: rgba(0, 255, 136, 0.2);
+    border-color: var(--correct);
+    color: var(--correct);
+    box-shadow: 0 0 16px rgba(0, 255, 136, 0.5);
+    pointer-events: none;
+  }
+  .word.wrong {
+    background: rgba(255, 56, 96, 0.2);
+    border-color: var(--wrong);
+    color: var(--wrong);
+    text-decoration: line-through;
+    pointer-events: none;
+  }
+  .word.missed {
+    background: rgba(255, 184, 0, 0.15);
+    border-color: var(--partial);
+    color: var(--partial);
+    pointer-events: none;
+    animation: pulseMiss 1s ease 2;
+  }
+  @keyframes pulseMiss {
+    0%, 100% { box-shadow: 0 0 0 rgba(255, 184, 0, 0); }
+    50% { box-shadow: 0 0 18px rgba(255, 184, 0, 0.6); }
+  }
+  .word.disabled { pointer-events: none; opacity: 0.5; }
+  .punct { display: inline; color: var(--text-dim); }
+
+  /* КНОПКИ */
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .btn {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 14px 28px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .btn-primary {
+    background: var(--racing-red);
+    color: var(--text);
+    box-shadow: 0 4px 0 #b81e3f, 0 10px 30px -10px rgba(255, 46, 85, 0.6);
+  }
+  .btn-primary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 0 #b81e3f, 0 14px 36px -10px rgba(255, 46, 85, 0.7);
+  }
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(2px);
+    box-shadow: 0 2px 0 #b81e3f;
+  }
+  .btn-primary:disabled {
+    background: var(--asphalt);
+    color: var(--text-dim);
+    box-shadow: none;
+    cursor: not-allowed;
+  }
+  .btn-secondary {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1.5px solid var(--text-dim);
+  }
+  .btn-secondary:hover {
+    color: var(--neon-cyan);
+    border-color: var(--neon-cyan);
+  }
+  .btn-large { font-size: 1.3rem; padding: 20px 48px; }
+
+  /* ФИДБЕК */
+  .feedback {
+    margin-top: 24px;
+    padding: 20px 24px;
+    border-radius: 12px;
+    border-left: 4px solid;
+    animation: slideIn 0.4s cubic-bezier(.2, .9, .3, 1);
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .feedback.correct { background: rgba(0, 255, 136, 0.08); border-color: var(--correct); }
+  .feedback.partial { background: rgba(255, 184, 0, 0.08); border-color: var(--partial); }
+  .feedback.wrong { background: rgba(255, 56, 96, 0.08); border-color: var(--wrong); }
+  .feedback .status {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .feedback.correct .status { color: var(--correct); }
+  .feedback.partial .status { color: var(--partial); }
+  .feedback.wrong .status { color: var(--wrong); }
+  .phrase {
+    font-family: var(--font-mono);
+    font-size: 1.1rem;
+    color: var(--line-yellow);
+    margin-bottom: 6px;
+  }
+  .phrase::before { content: "» "; color: var(--text-dim); }
+  .meaning { color: var(--text); line-height: 1.6; }
+  .meaning strong { color: var(--neon-cyan); }
+
+  /* ФИНИШ */
+  .finish { text-align: center; padding: 50px 20px; animation: slideIn 0.6s ease; }
+  .finish .flag { font-size: 4rem; margin-bottom: 16px; animation: wave 2s ease-in-out infinite; }
+  @keyframes wave {
+    0%, 100% { transform: rotate(-10deg); }
+    50% { transform: rotate(10deg); }
+  }
+  .finish h2 {
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 5vw, 3rem);
+    color: var(--line-yellow);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .finish .player-name {
+    font-family: var(--font-mono);
+    color: var(--neon-cyan);
+    font-size: 1.1rem;
+    margin-bottom: 32px;
+  }
+  .finish-stats {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+  }
+  .finish-stat .label {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .finish-stat .value { font-family: var(--font-display); font-size: 2.5rem; }
+  .finish-stat .value.bees { color: var(--gold); }
+  .finish-stat .value.time { color: var(--neon-cyan); }
+  .finish .medal {
+    display: inline-block;
+    padding: 12px 32px;
+    background: linear-gradient(135deg, var(--racing-red), var(--gold));
+    color: var(--bg-0);
+    font-family: var(--font-display);
+    letter-spacing: 3px;
+    border-radius: 8px;
+    margin-bottom: 28px;
+    transform: skewX(-8deg);
+  }
+
+  @media (max-width: 600px) {
+    .app { padding: 20px 14px 60px; }
+    .card { padding: 28px 20px; }
+    .stats { gap: 14px; }
+    .stat .value { font-size: 1.2rem; }
+    .btn { font-size: 0.85rem; padding: 12px 20px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app" id="app"></div>
+
+<script>
+const CONFIG = {
+  gameName: 'paris-night',
+  gameTitle: 'Парижская гонка',
+};
+
+/* В каждом задании phraseologisms — массив (один или несколько фразеологизмов).
+   Балл за задание засчитывается, если ученик нашёл ХОТЯ БЫ ОДИН целиком.
+   Тема партии: фразеологизмы об общении и разговоре. 15 заданий. */
+const TASKS = [
+  { sentence: "Они сидели в переговорной почти час. Ни один не повышал голос, но атмосфера была напряжённой. Они говорили глаза в глаза, не прячась за формальностями. И это многое решило.",
+    phraseologisms: [
+      { phrase: "глаза в глаза", meaning: "лицом к лицу, открыто, прямо смотря друг другу в глаза (часто — в трудном разговоре, без уловок и посредников)" }
+    ] },
+  { sentence: "Он снова извинился, пообещал, что исправится, и снова не пришёл. Она знала, что всё повторится. Он просто умел искусно водить за нос. И она устала это терпеть.",
+    phraseologisms: [
+      { phrase: "водить за нос", meaning: "обманывать, постоянно обещать и не выполнять, морочить" }
+    ] },
+  { sentence: "Они вышли из кабинета и пошли вдоль коридора. Шли молча, но шаг в шаг. Иногда, чтобы понять друг друга, достаточно идти рука об руку. Слова были бы лишними.",
+    phraseologisms: [
+      { phrase: "шаг в шаг", meaning: "точно в один темп, синхронно, в одинаковом ритме" },
+      { phrase: "рука об руку", meaning: "вместе, дружно, согласованно (часто о близких людях, делающих что-то совместно)" }
+    ] },
+  { sentence: "В коридоре он остановил её и тихо позвал по имени. Они отошли в сторону, подальше от глаз. Поговорили буквально пять минут, но этого хватило. Разговор был с глазу на глаз — и другого не требовалось.",
+    phraseologisms: [
+      { phrase: "с глазу на глаз", meaning: "наедине, без посторонних" }
+    ] },
+  { sentence: "Он заговорил первым. Она отвечала коротко, сдержанно. Постепенно они оба увлеклись, стали говорить быстрее. Всё началось буднично, а закончилось неожиданно — как часто бывает, когда идёт слово за слово.",
+    phraseologisms: [
+      { phrase: "слово за слово", meaning: "постепенно завязывая разговор, реплика за репликой (часто — о разговоре, перерастающем в спор)" }
+    ] },
+  { sentence: "В зале было многолюдно и шумно. Он поднялся и начал говорить, не используя подготовленного текста. Люди прислушались. Он умел говорить своими словами, и это подкупало.",
+    phraseologisms: [
+      { phrase: "своими словами", meaning: "не цитируя дословно, а пересказывая суть собственными выражениями" }
+    ] },
+  { sentence: "Он не вмешивался в обсуждение, только записывал что-то в блокнот. Все говорили, спорили, предлагали решения. А он предпочитал пока быть в тени, чтобы услышать больше, чем сказать.",
+    phraseologisms: [
+      { phrase: "быть в тени", meaning: "оставаться незаметным, не привлекать к себе внимания" }
+    ] },
+  { sentence: "Он рассказывал что-то длинное и путаное, размахивал руками, отвлекал внимание. Было ясно: он просто пытался заговаривать зубы. Его не слушали — ждали, когда он закончит.",
+    phraseologisms: [
+      { phrase: "заговаривать зубы", meaning: "отвлекать пустыми разговорами от сути дела; намеренно уводить разговор в сторону" }
+    ] },
+  { sentence: "На сцену он вышел в простой рубашке и джинсах. Но стоило ему заговорить, зал замер. Он так умело умел играть роль, что каждый верил: перед ними настоящий герой.",
+    phraseologisms: [
+      { phrase: "играть роль", meaning: "притворяться кем-то, исполнять чужое поведение; делать вид" }
+    ] },
+  { sentence: "Она внимательно слушала и вдруг вставила: «Между прочим, вы не указали основной источник». Наступила пауза. Все поняли, что её «замечание» не такое уж случайное.",
+    phraseologisms: [
+      { phrase: "Между прочим", meaning: "кстати, вскользь, как бы случайно (часто вводит важное замечание)" }
+    ] },
+  { sentence: "Они не обращались друг к другу по имени и не улыбались. Но говорили без высокомерия, без нажима. Они умели общаться на равных, даже если стояли по разные стороны конфликта.",
+    phraseologisms: [
+      { phrase: "общаться на равных", meaning: "вести разговор без иерархии и давления, как два равных собеседника" }
+    ] },
+  { sentence: "Он вошёл, не поздоровался и сразу начал говорить. Она подняла бровь, но промолчала. «Первым делом, — сказал он, — нужно уточнить сроки». Остальное подождёт.",
+    phraseologisms: [
+      { phrase: "Первым делом", meaning: "в первую очередь, прежде всего, сразу" }
+    ] },
+  { sentence: "Она зашла и сразу заметила его. Он стоял у окна, спиной к двери. Но всё: осанка, движение рук, взгляд — говорили об одном, всё стало ясно уже с первого взгляда. Это был не гость, а хозяин ситуации.",
+    phraseologisms: [
+      { phrase: "с первого взгляда", meaning: "сразу, как только посмотрел; с самого начала встречи" }
+    ] },
+  { sentence: "Она посмотрела на ценник, потом на продавца. «Скажите на милость, — сказала она спокойно, — а с чего такая цена?» Голос её был вежлив, но твёрд. Он понял, что уступить придётся.",
+    phraseologisms: [
+      { phrase: "Скажите на милость", meaning: "позвольте узнать, объясните (устаревшее вежливое выражение, часто с оттенком удивления или иронии)" }
+    ] },
+  { sentence: "Они спорили долго, но без крика. Каждый изложил свою позицию, не давил на другого. И в итоге согласились: у каждого своя точка зрения, и это нормально.",
+    phraseologisms: [
+      { phrase: "точка зрения", meaning: "мнение, взгляд на что-либо; позиция в каком-либо вопросе" }
+    ] }
+];
+
+function tokenize(text) {
+  const tokens = [];
+  const regex = /([А-Яа-яЁё\-]+|[.,!?;:«»—…"']+|\s+)/g;
+  let m;
+  while ((m = regex.exec(text)) !== null) {
+    const t = m[0];
+    if (/^\s+$/.test(t)) tokens.push({ type: 'space', text: ' ' });
+    else if (/^[А-Яа-яЁё\-]+$/.test(t)) tokens.push({ type: 'word', text: t });
+    else tokens.push({ type: 'punct', text: t });
+  }
+  return tokens;
+}
+function findPhraseIndices(tokens, phrase) {
+  const phraseWords = phrase.toLowerCase().split(/\s+/).filter(Boolean);
+  const wordIndices = [];
+  tokens.forEach((tok, idx) => { if (tok.type === 'word') wordIndices.push(idx); });
+  for (let i = 0; i <= wordIndices.length - phraseWords.length; i++) {
+    let match = true;
+    for (let j = 0; j < phraseWords.length; j++) {
+      if (tokens[wordIndices[i + j]].text.toLowerCase() !== phraseWords[j]) { match = false; break; }
+    }
+    if (match) return phraseWords.map((_, j) => wordIndices[i + j]);
+  }
+  return [];
+}
+TASKS.forEach(task => {
+  task.tokens = tokenize(task.sentence);
+  task.phraseologisms.forEach(p => {
+    p.indices = findPhraseIndices(task.tokens, p.phrase);
+  });
+});
+
+/* ===== ЗВУК (Web Audio — без файлов) ===== */
+const Sound = {
+  ctx: null,
+  engineOscillator: null,
+  engineGain: null,
+  enabled: true,
+
+  init() {
+    if (this.ctx) return;
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) { this.enabled = false; }
+  },
+
+  startEngine() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx || this.engineOscillator) return;
+
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const lfo = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
+    const masterGain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc1.type = 'sawtooth';
+    osc1.frequency.value = 55;
+    osc2.type = 'square';
+    osc2.frequency.value = 82;
+
+    lfo.frequency.value = 8;
+    lfoGain.gain.value = 4;
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc1.frequency);
+
+    filter.type = 'lowpass';
+    filter.frequency.value = 280;
+    filter.Q.value = 5;
+
+    masterGain.gain.value = 0;
+    masterGain.gain.linearRampToValueAtTime(0.05, this.ctx.currentTime + 0.5);
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(masterGain);
+    masterGain.connect(this.ctx.destination);
+
+    osc1.start(); osc2.start(); lfo.start();
+    this.engineOscillator = { osc1, osc2, lfo };
+    this.engineGain = masterGain;
+  },
+
+  stopEngine() {
+    if (!this.engineOscillator) return;
+    const now = this.ctx.currentTime;
+    this.engineGain.gain.linearRampToValueAtTime(0, now + 0.4);
+    const refs = this.engineOscillator;
+    this.engineOscillator = null;
+    setTimeout(() => {
+      try { refs.osc1.stop(); refs.osc2.stop(); refs.lfo.stop(); } catch(e) {}
+    }, 500);
+  },
+
+  rev() {
+    if (!this.enabled || !this.engineOscillator) return;
+    const now = this.ctx.currentTime;
+    this.engineOscillator.osc1.frequency.cancelScheduledValues(now);
+    this.engineOscillator.osc1.frequency.setValueAtTime(55, now);
+    this.engineOscillator.osc1.frequency.linearRampToValueAtTime(110, now + 0.08);
+    this.engineOscillator.osc1.frequency.linearRampToValueAtTime(55, now + 0.4);
+  },
+
+  /* ===== ПАРИЖСКИЕ ЗВУКИ ===== */
+  success() {
+    /* Аккордеонный мажорный аккорд: три ноты sawtooth-волной
+       одновременно, с лёгким детюнингом — даёт характерный
+       «дышащий» звук французского аккордеона. */
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const chord = [261.63, 329.63, 392.00];  // C–E–G мажорная триада
+    chord.forEach(freq => {
+      [0, +1.5].forEach(detune => {  // два осциллятора со сдвигом — эффект аккордеона
+        const o = this.ctx.createOscillator();
+        const g = this.ctx.createGain();
+        o.type = 'sawtooth';
+        o.frequency.value = freq;
+        o.detune.value = detune * 10;
+        g.gain.value = 0;
+        g.gain.linearRampToValueAtTime(0.05, now + 0.05);
+        g.gain.linearRampToValueAtTime(0.04, now + 0.35);
+        g.gain.exponentialRampToValueAtTime(0.001, now + 0.7);
+        o.connect(g); g.connect(this.ctx.destination);
+        o.start(now); o.stop(now + 0.75);
+      });
+    });
+  },
+
+  fail() {
+    /* Мягкое «non!»: короткий нисходящий тон c округлым тембром. */
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    const filt = this.ctx.createBiquadFilter();
+    o.type = 'triangle';
+    o.frequency.setValueAtTime(330, now);
+    o.frequency.exponentialRampToValueAtTime(165, now + 0.3);
+    filt.type = 'lowpass';
+    filt.frequency.value = 800;
+    g.gain.value = 0;
+    g.gain.linearRampToValueAtTime(0.14, now + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+    o.connect(filt); filt.connect(g); g.connect(this.ctx.destination);
+    o.start(now); o.stop(now + 0.45);
+  },
+
+  finish() {
+    /* Перезвон бокалов «À la santé!» — высокие синусоиды по
+       мажорной гамме вверх; в конце «звон» добавочного триаля. */
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    /* Восходящая фраза: C5–E5–G5–C6 + двойной финальный «дзынь» */
+    const notes = [
+      { f: 523.25, t: 0.00 },
+      { f: 659.25, t: 0.18 },
+      { f: 783.99, t: 0.36 },
+      { f: 1046.5, t: 0.54 },
+      { f: 1318.5, t: 0.78 },   // финальный звонкий «дзынь»
+      { f: 1567.9, t: 0.78 }    // одновременно — призвук
+    ];
+    notes.forEach(n => {
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = n.f;
+      g.gain.value = 0;
+      g.gain.linearRampToValueAtTime(0.10, now + n.t + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, now + n.t + 0.7);
+      o.connect(g); g.connect(this.ctx.destination);
+      o.start(now + n.t); o.stop(now + n.t + 0.75);
+    });
+  },
+
+  toggle() {
+    this.enabled = !this.enabled;
+    if (!this.enabled) this.stopEngine();
+    return this.enabled;
+  }
+};
+
+/* ===== СОСТОЯНИЕ ===== */
+const state = {
+  playerName: '',
+  inviteCode: null,
+  current: 0,
+  score: 0,
+  selected: new Set(),
+  answered: false,
+  startTime: null,
+  elapsedSeconds: 0,
+  timerInterval: null,
+  wrongTasks: []
+};
+
+const urlParams = new URLSearchParams(window.location.search);
+state.inviteCode = urlParams.get('invite') || urlParams.get('id') || null;
+
+/* ===== РЕЖИМ ВСТРАИВАНИЯ В ПЛАТФОРМУ ZebRus =====
+   Если игра открыта в iframe платформы (`?mode=embed`):
+   - стартовый экран ввода имени пропускается;
+   - имя ученика берётся из ?name=... (передаёт платформа);
+   - по финишу шлём результат через postMessage родителю;
+   - кнопка «Новый заезд» заменяется на «Закрыть».
+   В standalone-режиме (без mode=embed) игра работает как обычно
+   — имя в localStorage, никаких отправок наружу. */
+const EMBED = urlParams.get('mode') === 'embed';
+if (EMBED) {
+  state.playerName = urlParams.get('name') || 'Гость';
+}
+
+/* ===== ТАЙМЕР ===== */
+function startTimer() {
+  state.startTime = Date.now();
+  state.timerInterval = setInterval(updateTimerDisplay, 1000);
+}
+function stopTimer() {
+  if (state.timerInterval) clearInterval(state.timerInterval);
+  state.elapsedSeconds = Math.floor((Date.now() - state.startTime) / 1000);
+}
+function updateTimerDisplay() {
+  const seconds = Math.floor((Date.now() - state.startTime) / 1000);
+  const el = document.getElementById('timer-value');
+  if (el) el.textContent = formatTime(seconds);
+}
+function formatTime(seconds) {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = (seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+/* ===== СОХРАНЕНИЕ РЕЗУЛЬТАТА =====
+   В embed-режиме: шлём postMessage родителю (платформа ZebRus сама
+   запишет в Supabase в таблицу game_attempts с привязкой к ученику).
+   В standalone-режиме (внешняя ссылка, гостевая игра): ничего не
+   сохраняем — только лог в консоль.
+*/
+async function saveResult() {
+  const result = {
+    game_slug: CONFIG.gameName,        // 'paris-night'
+    game_title: CONFIG.gameTitle,
+    player_name: state.playerName,
+    score: state.score,
+    max_score: TASKS.length,
+    time_seconds: state.elapsedSeconds,
+    wrong_tasks: state.wrongTasks,
+    finished_at: new Date().toISOString()
+  };
+  console.log('📊 Результат:', result);
+
+  if (EMBED && window.parent && window.parent !== window) {
+    try {
+      window.parent.postMessage({ type: 'zebrus_game_result', payload: result }, '*');
+    } catch (e) {
+      console.warn('postMessage failed:', e);
+    }
+  }
+}
+
+/* ===== РЕНДЕР: СТАРТ ===== */
+function renderStart() {
+  const savedName = localStorage.getItem('zebrus_player_name') || '';
+  document.getElementById('app').innerHTML = `
+    <div class="start-screen">
+      <div class="car-anim">🚕</div>
+      <h1 class="title">Парижская<span class="accent">.</span><br>гонка</h1>
+      <p class="subtitle">Ночные бульвары · ZebRus · 2026</p>
+      <div class="input-group">
+        <label for="name-input">Имя гонщика</label>
+        <input type="text" id="name-input" placeholder="Например: Аня"
+               value="${escapeAttr(savedName)}" maxlength="40" autocomplete="off">
+      </div>
+      <button class="btn btn-primary btn-large" id="start-btn">🏁 На старт</button>
+      <div class="rules">
+        <h3>Правила гонки</h3>
+        <ul>
+          <li>В каждом тексте — один или несколько фразеологизмов</li>
+          <li>Кликай по словам, чтобы выделить весь фразеологизм</li>
+          <li>Балл засчитывается за любой полностью найденный фразеологизм</li>
+          <li>За каждый балл — ✨ огонёк ночного Парижа</li>
+          <li>Время гонки тоже считается — постарайся быстрее</li>
+        </ul>
+      </div>
+    </div>
+  `;
+
+  const input = document.getElementById('name-input');
+  const btn = document.getElementById('start-btn');
+  input.focus();
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
+  btn.addEventListener('click', () => {
+    const name = input.value.trim();
+    if (!name) {
+      input.focus();
+      input.style.borderColor = 'var(--racing-red)';
+      setTimeout(() => { input.style.borderColor = ''; }, 1500);
+      return;
+    }
+    state.playerName = name;
+    localStorage.setItem('zebrus_player_name', name);
+    Sound.init();
+    /* двигатель больше не запускаем — раздражает; оставляем
+       только дискретные звуки success / fail / finish */
+    startTimer();
+    renderGame();
+  });
+}
+
+/* ===== РЕНДЕР: ИГРА ===== */
+function renderGame() {
+  if (state.current >= TASKS.length) { renderFinish(); return; }
+
+  document.getElementById('app').innerHTML = `
+    <header class="header">
+      <div class="logo">
+        Парижская гонка<span class="accent">.</span>
+        <span class="player">🚕 ${escapeHtml(state.playerName)}</span>
+      </div>
+      <div class="stats">
+        <div class="stat">
+          <div class="label">✨ Огоньки</div>
+          <div class="value bees" id="score-value">${state.score}</div>
+        </div>
+        <div class="stat">
+          <div class="label">⏱️ Время</div>
+          <div class="value timer" id="timer-value">00:00</div>
+        </div>
+        <button class="sound-toggle ${Sound.enabled ? '' : 'muted'}" id="sound-btn">
+          ${Sound.enabled ? '🔊' : '🔇'}
+        </button>
+      </div>
+    </header>
+    <div class="track">
+      <div class="track-info">
+        <span>Старт</span>
+        <span class="current" id="track-label"></span>
+        <span>Финиш 🏁</span>
+      </div>
+      <div class="track-bar">
+        <div class="track-fill" id="track-fill"></div>
+        <div class="track-car" id="track-car">🚕</div>
+      </div>
+    </div>
+    <main id="game-area"></main>
+  `;
+
+  document.getElementById('sound-btn').addEventListener('click', (e) => {
+    const enabled = Sound.toggle();
+    e.currentTarget.textContent = enabled ? '🔊' : '🔇';
+    e.currentTarget.classList.toggle('muted', !enabled);
+    /* движок больше не запускаем — звуки только дискретные (success/fail/finish) */
+  });
+
+  updateTrack();
+  updateTimerDisplay();
+  renderTask();
+}
+
+function renderTask() {
+  const task = TASKS[state.current];
+  state.selected = new Set();
+  state.answered = false;
+  updateTrack();
+
+  const wordsHTML = task.tokens.map((tok, idx) => {
+    if (tok.type === 'space') return ' ';
+    if (tok.type === 'punct') return `<span class="punct">${escapeHtml(tok.text)}</span>`;
+    return `<span class="word" data-idx="${idx}">${escapeHtml(tok.text)}</span>`;
+  }).join('');
+
+  document.getElementById('game-area').innerHTML = `
+    <div class="card" data-num="№ ${String(state.current + 1).padStart(2, '0')}">
+      <div class="task-label">
+        Задание · найди фразеологизм
+        <span class="hint">кликай по словам</span>
+      </div>
+      <p class="sentence">${wordsHTML}</p>
+      <div class="actions">
+        <button class="btn btn-primary" id="check-btn" disabled>На финиш!</button>
+        <button class="btn btn-secondary" id="reset-btn">Сбросить</button>
+      </div>
+      <div id="feedback"></div>
+    </div>
+  `;
+
+  document.querySelectorAll('.word').forEach(el => {
+    el.addEventListener('click', () => {
+      if (state.answered) return;
+      const idx = parseInt(el.dataset.idx);
+      Sound.rev();
+      if (state.selected.has(idx)) {
+        state.selected.delete(idx);
+        el.classList.remove('selected');
+      } else {
+        state.selected.add(idx);
+        el.classList.add('selected');
+      }
+      document.getElementById('check-btn').disabled = state.selected.size < 2;
+    });
+  });
+
+  document.getElementById('check-btn').addEventListener('click', checkAnswer);
+  document.getElementById('reset-btn').addEventListener('click', () => {
+    if (state.answered) return;
+    state.selected.clear();
+    document.querySelectorAll('.word').forEach(el => el.classList.remove('selected'));
+    document.getElementById('check-btn').disabled = true;
+  });
+}
+
+function checkAnswer() {
+  if (state.answered) return;
+  state.answered = true;
+  const task = TASKS[state.current];
+  const selectedIndices = state.selected;
+
+  /* Все индексы всех фразеологизмов задания (объединение). */
+  const allCorrectIndices = new Set();
+  task.phraseologisms.forEach(p => p.indices.forEach(i => allCorrectIndices.add(i)));
+
+  /* Найденные = те фразеологизмы, ВСЕ слова которых выделены. */
+  const foundPhrases = task.phraseologisms.filter(p =>
+    p.indices.length > 0 && p.indices.every(i => selectedIndices.has(i))
+  );
+  const isAnyFound  = foundPhrases.length > 0;
+  const isAllFound  = foundPhrases.length === task.phraseologisms.length;
+  /* Был ли частичный «правильный» клик (часть слов какого-то фразеологизма) — без полного? */
+  const hasPartial  = !isAnyFound && [...selectedIndices].some(i => allCorrectIndices.has(i));
+
+  /* Подсветка слов */
+  document.querySelectorAll('.word').forEach(el => {
+    const idx = parseInt(el.dataset.idx);
+    el.classList.remove('selected');
+    if (allCorrectIndices.has(idx) && selectedIndices.has(idx))      el.classList.add('correct');
+    else if (!allCorrectIndices.has(idx) && selectedIndices.has(idx)) el.classList.add('wrong');
+    else if (allCorrectIndices.has(idx) && !selectedIndices.has(idx)) el.classList.add('missed');
+    else                                                              el.classList.add('disabled');
+  });
+
+  /* Статус-сообщение и звук */
+  let statusText, cssClass;
+  if (isAllFound) {
+    state.score++;
+    document.getElementById('score-value').textContent = state.score;
+    statusText = task.phraseologisms.length > 1
+      ? '✨ Все фразеологизмы найдены — magnifique!'
+      : '✨ Точно в цель — magnifique!';
+    cssClass = 'correct';
+    Sound.success();
+  } else if (isAnyFound) {
+    /* Балл засчитан, но не все фразеологизмы найдены */
+    state.score++;
+    document.getElementById('score-value').textContent = state.score;
+    statusText = '🥈 Балл засчитан — в задании был ещё один';
+    cssClass = 'partial';
+    Sound.success();
+  } else if (hasPartial) {
+    state.wrongTasks.push(state.current + 1);
+    statusText = '☕ Почти, ещё кофе?';
+    cssClass = 'partial';
+    Sound.fail();
+  } else {
+    state.wrongTasks.push(state.current + 1);
+    statusText = '🚧 Не туда свернули';
+    cssClass = 'wrong';
+    Sound.fail();
+  }
+
+  /* Список всех фразеологизмов задания со статусом (✓ нашла / ✗ пропустила) */
+  const phrasesHTML = task.phraseologisms.map(p => {
+    const found = foundPhrases.includes(p);
+    return `
+      <div class="phrase">${found ? '✓ ' : '✗ '}${escapeHtml(p.phrase)}</div>
+      <div class="meaning"><strong>Значение:</strong> ${escapeHtml(p.meaning)}</div>
+    `;
+  }).join('<div style="height:8px"></div>');
+
+  document.getElementById('feedback').innerHTML = `
+    <div class="feedback ${cssClass}">
+      <div class="status">${statusText}</div>
+      ${phrasesHTML}
+    </div>
+  `;
+
+  const checkBtn = document.getElementById('check-btn');
+  checkBtn.disabled = false;
+  checkBtn.textContent = state.current === TASKS.length - 1 ? 'К финишу 🏁' : 'Следующий поворот →';
+  const newBtn = checkBtn.cloneNode(true);
+  checkBtn.parentNode.replaceChild(newBtn, checkBtn);
+  newBtn.addEventListener('click', () => {
+    state.current++;
+    if (state.current >= TASKS.length) {
+      renderFinish();
+    } else {
+      renderTask();
+    }
+  });
+  document.getElementById('reset-btn').remove();
+}
+
+function updateTrack() {
+  const total = TASKS.length;
+  const progress = ((state.current + 1) / total) * 100;
+  const fill = document.getElementById('track-fill');
+  const car = document.getElementById('track-car');
+  const label = document.getElementById('track-label');
+  if (fill) fill.style.width = progress + '%';
+  if (car) car.style.left = progress + '%';
+  if (label) label.textContent = `Чекпоинт ${state.current + 1} / ${total}`;
+}
+
+/* ===== РЕНДЕР: ФИНИШ ===== */
+function renderFinish() {
+  stopTimer();
+  /* двигатель не запускали — останавливать нечего */
+  setTimeout(() => Sound.finish(), 300);
+
+  const total = TASKS.length;
+  const pct = Math.round((state.score / total) * 100);
+  let medal = '☕ Гость кафе';
+  if (pct >= 90) medal = '🥐 Истинный парижанин!';
+  else if (pct >= 70) medal = '🗼 Покоритель бульваров';
+  else if (pct >= 50) medal = '🍷 Любитель ночного города';
+
+  saveResult();
+
+  document.getElementById('app').innerHTML = `
+    <div class="finish">
+      <div class="flag">🗼</div>
+      <h2>Гонка завершена</h2>
+      <div class="player-name">🚕 ${escapeHtml(state.playerName)}</div>
+      <div class="finish-stats">
+        <div class="finish-stat">
+          <div class="label">Огоньки</div>
+          <div class="value bees">✨ ${state.score}/${total}</div>
+        </div>
+        <div class="finish-stat">
+          <div class="label">Время</div>
+          <div class="value time">${formatTime(state.elapsedSeconds)}</div>
+        </div>
+      </div>
+      <div class="medal">${medal}</div>
+      <div style="margin-top: 20px;">
+        <button class="btn btn-primary" id="restart-btn">${EMBED ? 'Закрыть' : 'Новый заезд'}</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('restart-btn').addEventListener('click', () => {
+    if (EMBED && window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'zebrus_game_close' }, '*');
+      return;
+    }
+    state.current = 0;
+    state.score = 0;
+    state.wrongTasks = [];
+    /* двигатель больше не запускаем */
+    startTimer();
+    renderGame();
+  });
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function escapeAttr(str) {
+  return String(str).replace(/"/g, '&quot;');
+}
+
+/* ===== ЗАПУСК =====
+   В embed-режиме сразу стартуем игру (имя уже взяли из ?name=…),
+   стартовый экран ввода имени не показываем.
+   В standalone-режиме — обычный стартовый экран. */
+if (EMBED) {
+  /* Sound.enabled оставляем true — ученики в кабинете тоже хотят звук.
+     Если в будущем понадобится выключить, можно передавать ?sound=off */
+  Sound.init();
+  startTimer();
+  renderGame();
+} else {
+  renderStart();
+}
+</script>
+
+</body>
+</html>
