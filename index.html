@@ -20488,14 +20488,15 @@ function viewTeacherDays(){
           attached.day_id = null;
         } catch(e){ showToast('⚠ ' + e.message); return; }
       }
-      /* Привязываем новый (или ничего если выбран «не привязан») */
+      /* Привязываем новый (или ничего если выбран «не привязан»).
+         Заодно автоматически публикуем — иначе ученик не увидит. */
       if(newId){
         try {
           await restRequest('PATCH', '/test_variants?id=eq.' + newId,
-            { day_id: d.id }, { prefer: 'return=minimal' });
+            { day_id: d.id, is_published: true }, { prefer: 'return=minimal' });
           const v = pdfVariants.find(x => x.id === newId);
-          if(v) v.day_id = d.id;
-          showToast('✓ Вариант привязан к дню ' + d.id);
+          if(v){ v.day_id = d.id; v.is_published = true; }
+          showToast('✓ Вариант привязан к дню ' + d.id + ' и опубликован');
         } catch(e){ showToast('⚠ ' + e.message); return; }
       } else {
         showToast('✓ Вариант отвязан');
