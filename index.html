@@ -18183,6 +18183,16 @@ async function toggleWarmupDayPublished(day, next){
   } catch(e){ showToast('⚠ ' + e.message); }
 }
 
+async function updateWarmupDayMeta(day, fields){
+  try {
+    await restRequest('PATCH', '/warmup_days?id=eq.' + day.id, fields, { prefer: 'return=minimal' });
+    Object.assign(day, fields);
+    STATE.editingWarmupDayId = null;
+    showToast('✓ Сохранено');
+    render();
+  } catch(e){ showToast('⚠ ' + e.message); }
+}
+
 async function addWarmupBlock(dayId, payload){
   try {
     payload.day_id = dayId;
@@ -18209,40 +18219,48 @@ async function uploadWarmupImage(file){
   return baseUrl + '/storage/v1/object/public/warmup/' + path;
 }
 
-/* Голоса в опросе: подгрузить + проголосовать (или сменить голос). */
-async function loadWarmupVotes(blockId){
-  try {
-    const list = await restRequest('GET',
-      '/warmup_poll_votes?block_id=eq.' + blockId +
-      '&select=id,student_id,option_index');
-    if(!STATE.warmupVotesByBlock) STATE.warmupVotesByBlock = {};
-    STATE.warmupVotesByBlock[blockId] = list || [];
-  } catch(e){
-    console.error('loadWarmupVotes', e);
-    if(!STATE.warmupVotesByBlock) STATE.warmupVotesByBlock = {};
-    STATE.warmupVotesByBlock[blockId] = [];
-  }
+/* Голоса в опросе хранятся прямо в jsonb-поле блока (config.poll.votes),
+   не в отдельной таблице — это обходит 502 от прокси reg.ru на маленьких
+   запросах к warmup_poll_votes. Структура:
+     config.poll.votes = { "<student_uuid>": <option_index>, ... }
+   Минус — теоретический race condition при одновременных голосах двух
+   учеников, на нашем масштабе несущественно. */
+function getPollVotes(block){
+  const v = block && block.config && block.config.poll && block.config.poll.votes;
+  return (v && typeof v === 'object') ? v : {};
 }
+function getMyVoteIndex(block){
+  if(!MY_PROFILE || !MY_PROFILE.id) return null;
+  const v = getPollVotes(block);
+  return Object.prototype.hasOwnProperty.call(v, MY_PROFILE.id) ? v[MY_PROFILE.id] : null;
+}
+
 async function voteWarmupPoll(blockId, optionIndex){
   if(!MY_PROFILE || !MY_PROFILE.id) return;
+  /* Находим блок в локальном STATE */
+  let block = null, dayId = null;
+  Object.keys(STATE.warmupBlocksByDay || {}).forEach(d => {
+    (STATE.warmupBlocksByDay[d] || []).forEach(b => {
+      if(b.id === blockId){ block = b; dayId = parseInt(d, 10); }
+    });
+  });
+  if(!block) return;
+  /* Готовим новый config с обновлённым голосом */
+  const newConfig = JSON.parse(JSON.stringify(block.config || {}));
+  if(!newConfig.poll) newConfig.poll = {};
+  if(!newConfig.poll.votes) newConfig.poll.votes = {};
+  newConfig.poll.votes[MY_PROFILE.id] = optionIndex;
+  /* Оптимистично обновляем локально — UI отзовётся мгновенно */
+  block.config = newConfig;
+  /* Перерисовываем overlay */
+  if(STATE.openWarmupDayId === dayId){
+    const day = (STATE.warmupDays || []).find(d => d.id === dayId);
+    if(day) renderWarmupOverlay(day);
+  }
+  /* Пишем в БД */
   try {
-    /* Удаляем старый голос (если был), потом вставляем новый — самый
-       простой способ, поддерживается даже без RPC. */
-    await restRequest('DELETE',
-      '/warmup_poll_votes?block_id=eq.' + blockId + '&student_id=eq.' + MY_PROFILE.id,
-      null, { prefer: 'return=minimal' });
-    await restRequest('POST', '/warmup_poll_votes',
-      { block_id: blockId, student_id: MY_PROFILE.id, option_index: optionIndex },
-      { prefer: 'return=minimal' });
-    await loadWarmupVotes(blockId);
-    /* Перерисовать только этот блок проще через render() — overlay в DOM,
-       но он формируется заново только при открытии. Поэтому обновим
-       inline-разметку голосов. */
-    const overlay = document.getElementById('zebrus-warmup-overlay');
-    if(overlay){
-      const day = (STATE.warmupDays || []).find(d => d.id === STATE.openWarmupDayId);
-      if(day) renderWarmupOverlay(day);
-    }
+    await restRequest('PATCH', '/warmup_blocks?id=eq.' + blockId,
+      { config: newConfig }, { prefer: 'return=minimal' });
   } catch(e){
     console.error('voteWarmupPoll', e);
     showToast('Не получилось проголосовать');
@@ -18277,14 +18295,49 @@ function viewTeacherWarmup(){
 
   STATE.warmupDays.forEach(d => {
     const det = el('details', { class:'card', open:true, style:{ marginBottom:'12px' }});
+    const ss = { padding:'6px 10px', borderRadius:'6px', border:'1px solid var(--border-2)', fontSize:'14px' };
+    const isEditingDay = STATE.editingWarmupDayId === d.id;
+    /* Шапка дня: либо обычный заголовок, либо поля редактирования */
+    let headerLeft;
+    if(isEditingDay){
+      const emojiInput = el('input', { type:'text', value: d.emoji || '☀️',
+        style:Object.assign({}, ss, { width:'60px', textAlign:'center', fontSize:'20px' })});
+      const titleInput = el('input', { type:'text', value: d.title || '', placeholder:'Название дня',
+        style:Object.assign({}, ss, { width:'200px' })});
+      const subInput   = el('input', { type:'text', value: d.subtitle || '', placeholder:'Подзаголовок',
+        style:Object.assign({}, ss, { width:'260px' })});
+      headerLeft = el('div', { style:{ display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' }},
+        emojiInput, titleInput, subInput,
+        el('button', { class:'btn btn-teal btn-sm',
+          onclick: (ev) => { ev.preventDefault(); ev.stopPropagation();
+            updateWarmupDayMeta(d, {
+              emoji: emojiInput.value.trim() || '☀️',
+              title: titleInput.value.trim() || d.title,
+              subtitle: subInput.value.trim() || null
+            });
+          }
+        }, '💾'),
+        el('button', { class:'btn btn-secondary btn-sm',
+          onclick: (ev) => { ev.preventDefault(); ev.stopPropagation();
+            STATE.editingWarmupDayId = null; render();
+          }
+        }, '✕'));
+    } else {
+      headerLeft = el('div', { style:{ display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
+        el('span', { style:{ fontSize:'1.6rem' }}, d.emoji || '☀️'),
+        el('div', null,
+          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.06em', fontWeight:'700' }},
+            'День ' + d.ord + ' · ' + d.day_date),
+          el('div', { style:{ fontWeight:'800', fontSize:'16px' }}, d.title + (d.subtitle ? ' · ' + d.subtitle : ''))),
+        el('button', { class:'btn btn-secondary btn-sm', style:{ padding:'2px 8px', fontSize:'12px' },
+          onclick: (ev) => { ev.preventDefault(); ev.stopPropagation();
+            STATE.editingWarmupDayId = d.id; render();
+          }
+        }, '✎'));
+    }
     det.append(
       el('summary', { style:{ cursor:'pointer', listStyle:'none', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
-        el('div', { style:{ display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
-          el('span', { style:{ fontSize:'1.6rem' }}, d.emoji || '☀️'),
-          el('div', null,
-            el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.06em', fontWeight:'700' }},
-              'День ' + d.ord + ' · ' + d.day_date),
-            el('div', { style:{ fontWeight:'800', fontSize:'16px' }}, d.title + (d.subtitle ? ' · ' + d.subtitle : '')))),
+        headerLeft,
         el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
           d.is_published
             ? el('span', { style:{ background:'#DCFCE7', color:'#166534', padding:'2px 8px', borderRadius:'8px', fontSize:'11px', fontWeight:'700' }}, 'ОТКРЫТ')
@@ -18351,16 +18404,15 @@ function renderWarmupBlockTeacher(b, day){
       '🎮 ' + (g ? (g.emoji + ' ' + g.title) : '(игра не найдена)')));
   }
   if(cfg.poll && cfg.poll.question && Array.isArray(cfg.poll.options) && cfg.poll.options.length){
-    /* Показываем количество голосов по каждому варианту */
-    if(STATE.warmupVotesByBlock == null || STATE.warmupVotesByBlock[b.id] == null){
-      loadWarmupVotes(b.id).then(render);
-    }
-    const votes = (STATE.warmupVotesByBlock && STATE.warmupVotesByBlock[b.id]) || [];
-    const total = votes.length;
+    /* Голоса хранятся в cfg.poll.votes = { uuid: option_index } */
+    const votesObj = getPollVotes(b);
+    const counts = cfg.poll.options.map((_, idx) =>
+      Object.values(votesObj).filter(v => v === idx).length);
+    const total = counts.reduce((a, c) => a + c, 0);
     card.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'var(--p-soft)', borderRadius:'6px', fontSize:'13px' }},
       el('div', { style:{ fontWeight:'700', marginBottom:'6px' }}, '📊 ' + cfg.poll.question),
       ...cfg.poll.options.map((opt, idx) => {
-        const count = votes.filter(v => v.option_index === idx).length;
+        const count = counts[idx];
         const pct = total ? Math.round(count / total * 100) : 0;
         return el('div', { style:{ marginBottom:'4px' }},
           opt + ' — ' + count + (total ? ' (' + pct + '%)' : ''));
@@ -18579,11 +18631,24 @@ function renderWarmupBlockStudent(b){
     card.append(el('img', { src:imgs[0], alt: b.title || '',
       style:{ display:'block', width:'100%', maxHeight:'420px', objectFit:'cover', background:'var(--bg)' }}));
   } else if(imgs.length > 1){
-    /* Горизонтальный скролл-карусель для нескольких */
+    /* Горизонтальный скролл-карусель + счётчик «N / M» в углу */
+    const wrap = el('div', { style:{ position:'relative' }});
     const carousel = el('div', { style:{ display:'flex', overflowX:'auto', gap:'4px', scrollSnapType:'x mandatory', background:'var(--bg)' }});
+    const counter = el('div', { style:{ position:'absolute', top:'10px', right:'12px',
+                                         background:'rgba(0,0,0,0.55)', color:'#fff',
+                                         padding:'4px 10px', borderRadius:'999px',
+                                         fontSize:'12px', fontWeight:'700',
+                                         pointerEvents:'none', zIndex:'1' }},
+      '1 / ' + imgs.length);
     imgs.forEach(u => carousel.append(el('img', { src:u, alt:'',
       style:{ flex:'0 0 100%', maxHeight:'420px', objectFit:'cover', scrollSnapAlign:'start' }})));
-    card.append(carousel);
+    /* Обновляем счётчик на скролле */
+    carousel.addEventListener('scroll', () => {
+      const idx = Math.round(carousel.scrollLeft / carousel.clientWidth) + 1;
+      counter.textContent = idx + ' / ' + imgs.length;
+    });
+    wrap.append(carousel, counter);
+    card.append(wrap);
   }
 
   const inner = el('div', { style:{ padding:'16px 20px' }});
@@ -18628,45 +18693,39 @@ function renderWarmupBlockStudent(b){
       }, '↗ Открыть ссылку')));
   }
 
-  /* Опрос */
+  /* Опрос — голоса в jsonb config.poll.votes (без отдельной таблицы) */
   if(cfg.poll && cfg.poll.question && Array.isArray(cfg.poll.options) && cfg.poll.options.length >= 2){
-    if(STATE.warmupVotesByBlock == null || STATE.warmupVotesByBlock[b.id] == null){
-      loadWarmupVotes(b.id).then(() => {
-        const overlay = document.getElementById('zebrus-warmup-overlay');
-        const day = (STATE.warmupDays || []).find(d => d.id === STATE.openWarmupDayId);
-        if(overlay && day) renderWarmupOverlay(day);
-      });
-    }
-    const votes = (STATE.warmupVotesByBlock && STATE.warmupVotesByBlock[b.id]) || [];
-    const myVote = MY_PROFILE && votes.find(v => v.student_id === MY_PROFILE.id);
-    const total = votes.length;
+    const votesObj = getPollVotes(b);
+    const myIdx = getMyVoteIndex(b);
+    const counts = cfg.poll.options.map((_, idx) =>
+      Object.values(votesObj).filter(v => v === idx).length);
+    const total = counts.reduce((a, c) => a + c, 0);
     const pollBox = el('div', { style:{ padding:'14px', background:'var(--p-soft)', borderRadius:'10px', marginTop:'10px' }},
       el('div', { style:{ fontWeight:'700', fontSize:'15px', marginBottom:'10px' }}, '📊 ' + cfg.poll.question));
     cfg.poll.options.forEach((opt, idx) => {
-      const count = votes.filter(v => v.option_index === idx).length;
+      const count = counts[idx];
       const pct = total ? Math.round(count / total * 100) : 0;
-      const isMine = myVote && myVote.option_index === idx;
+      const isMine = myIdx === idx;
       const row = el('div', { style:{ position:'relative', padding:'10px 14px', marginBottom:'6px',
                                       border:'2px solid ' + (isMine ? 'var(--p-deep)' : 'var(--border-2)'),
                                       borderRadius:'8px', cursor:'pointer', overflow:'hidden',
                                       background:'#fff' },
         onclick: () => voteWarmupPoll(b.id, idx)
       });
-      /* Полоска % на фоне (если уже проголосовал кто-то) */
-      if(myVote){
+      if(myIdx != null){
         row.append(el('div', { style:{ position:'absolute', inset:'0', width: pct + '%',
                                        background: isMine ? 'var(--p-soft)' : 'var(--bg)',
                                        transition:'width .3s ease', zIndex:'0',
                                        pointerEvents:'none' }}));
       }
-      row.append(el('div', { style:{ position:'relative', zIndex:'1', display:'flex', justifyContent:'space-between', alignItems:'center' }},
+      row.append(el('div', { style:{ position:'relative', zIndex:'1', display:'flex', justifyContent:'space-between', alignItems:'center', pointerEvents:'none' }},
         el('span', null, (isMine ? '✓ ' : '') + opt),
-        myVote ? el('span', { style:{ fontWeight:'700', fontSize:'13px', color:'var(--ink-3)' }}, count + ' · ' + pct + '%') : null));
+        myIdx != null ? el('span', { style:{ fontWeight:'700', fontSize:'13px', color:'var(--ink-3)' }}, count + ' · ' + pct + '%') : null));
       pollBox.append(row);
     });
     pollBox.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'6px' }},
-      myVote ? ('Ты выбрал(а) вариант ' + (myVote.option_index + 1) + '. Можешь сменить — нажми другой.')
-             : 'Тапни вариант, чтобы проголосовать.'));
+      myIdx != null ? ('Ты выбрал(а) вариант ' + (myIdx + 1) + '. Можешь сменить — нажми другой.')
+                    : 'Тапни вариант, чтобы проголосовать.'));
     inner.append(pollBox);
   }
 
@@ -21875,7 +21934,24 @@ async function sendChat(){
 function chatFab(){
   const total = STATE.totalUnread || 0;
   const fab = el('button', { class:'chat-fab',
-    onclick: () => { STATE.chatOpen = true; render(); },
+    onclick: () => {
+      STATE.chatOpen = true;
+      /* При каждом открытии — принудительно подтягиваем актуальные сообщения,
+         не дожидаясь polling-тика (раз в 7 сек). Иначе при повторном открытии
+         показывались старые сообщения, и ученик думал, что чат пустой. */
+      if(STATE.chatChannel === 'dm' && STATE.dmRoomId){
+        loadDmMessages().then(() => render());
+      } else if(STATE.chatRoomId){
+        loadChatMessages().then(() => render());
+      } else {
+        /* Комнату ещё не загружали — сбросим флаг повторной попытки */
+        STATE.chatRoomTried = false;
+        STATE.dmListTried  = false;
+      }
+      /* И запускаем polling заново, если он был остановлен при закрытии */
+      try { startChatPolling(); } catch(_){}
+      render();
+    },
     title: total ? (total + ' новых сообщений') : 'Чат'
   }, '💬');
   /* Счётчик только если реально есть непрочитанные.
