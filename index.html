@@ -18145,7 +18145,7 @@ async function loadWarmupBlocks(dayId){
   try {
     const list = await restRequest('GET',
       '/warmup_blocks?day_id=eq.' + dayId +
-      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config&order=ord.asc');
+      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord&order=ord.asc');
     if(!STATE.warmupBlocksByDay) STATE.warmupBlocksByDay = {};
     STATE.warmupBlocksByDay[dayId] = list || [];
   } catch(e){
@@ -18155,15 +18155,34 @@ async function loadWarmupBlocks(dayId){
   }
 }
 
+/* Загрузить посты для дня интенсива (DAYS.id = 1/2/3) */
+async function loadIntensivePosts(dayOrd){
+  try {
+    const list = await restRequest('GET',
+      '/warmup_blocks?intensive_day_ord=eq.' + dayOrd +
+      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord&order=ord.asc');
+    if(!STATE.intensivePostsByOrd) STATE.intensivePostsByOrd = {};
+    STATE.intensivePostsByOrd[dayOrd] = list || [];
+  } catch(e){
+    console.error('loadIntensivePosts', e);
+    if(!STATE.intensivePostsByOrd) STATE.intensivePostsByOrd = {};
+    STATE.intensivePostsByOrd[dayOrd] = [];
+  }
+}
+
 async function updateWarmupBlock(blockId, payload){
   try {
     await restRequest('PATCH', '/warmup_blocks?id=eq.' + blockId, payload, { prefer: 'return=minimal' });
-    /* Найдём день этого блока, чтобы перезагрузить */
-    let dayId = null;
+    /* Найдём, где живёт этот пост — в warmup-дне или в дне интенсива */
+    let warmupDayId = null, intensiveOrd = null;
     Object.keys(STATE.warmupBlocksByDay || {}).forEach(d => {
-      if((STATE.warmupBlocksByDay[d] || []).some(b => b.id === blockId)) dayId = parseInt(d, 10);
+      if((STATE.warmupBlocksByDay[d] || []).some(b => b.id === blockId)) warmupDayId = parseInt(d, 10);
     });
-    if(dayId != null) await loadWarmupBlocks(dayId);
+    Object.keys(STATE.intensivePostsByOrd || {}).forEach(o => {
+      if((STATE.intensivePostsByOrd[o] || []).some(b => b.id === blockId)) intensiveOrd = parseInt(o, 10);
+    });
+    if(warmupDayId != null)   await loadWarmupBlocks(warmupDayId);
+    if(intensiveOrd != null)  await loadIntensivePosts(intensiveOrd);
     showToast('✓ Сохранено');
     STATE.editingBlockId = null;
     render();
@@ -18193,18 +18212,30 @@ async function updateWarmupDayMeta(day, fields){
   } catch(e){ showToast('⚠ ' + e.message); }
 }
 
-async function addWarmupBlock(dayId, payload){
+async function addWarmupBlock(target, payload){
+  /* target — либо { dayId } для warmup, либо { intensiveOrd } для интенсива */
   try {
-    payload.day_id = dayId;
-    if(payload.ord == null){
-      const cur = (STATE.warmupBlocksByDay && STATE.warmupBlocksByDay[dayId]) || [];
-      payload.ord = cur.length;
+    if(target.intensiveOrd){
+      payload.intensive_day_ord = target.intensiveOrd;
+      payload.day_id = null;
+      if(payload.ord == null){
+        const cur = (STATE.intensivePostsByOrd && STATE.intensivePostsByOrd[target.intensiveOrd]) || [];
+        payload.ord = cur.length;
+      }
+    } else {
+      payload.day_id = target.dayId;
+      payload.intensive_day_ord = null;
+      if(payload.ord == null){
+        const cur = (STATE.warmupBlocksByDay && STATE.warmupBlocksByDay[target.dayId]) || [];
+        payload.ord = cur.length;
+      }
     }
     if(!payload.type) payload.type = 'mixed';
     await restRequest('POST', '/warmup_blocks', payload, { prefer: 'return=minimal' });
-    await loadWarmupBlocks(dayId);
-    /* После успешного сохранения сворачиваем форму обратно в кнопку */
+    if(target.intensiveOrd) await loadIntensivePosts(target.intensiveOrd);
+    else await loadWarmupBlocks(target.dayId);
     STATE.addingPostToDayId = null;
+    STATE.addingPostToIntensiveOrd = null;
     showToast('✓ Пост добавлен');
     render();
   } catch(e){
@@ -18282,7 +18313,8 @@ async function deleteWarmupBlock(block){
   if(!confirm('Удалить блок «' + (block.title || block.type) + '»?')) return;
   try {
     await restRequest('DELETE', '/warmup_blocks?id=eq.' + block.id, null, { prefer: 'return=minimal' });
-    await loadWarmupBlocks(block.day_id);
+    if(block.day_id)            await loadWarmupBlocks(block.day_id);
+    if(block.intensive_day_ord) await loadIntensivePosts(block.intensive_day_ord);
     showToast('✓ Удалён');
     render();
   } catch(e){ showToast('⚠ ' + e.message); }
@@ -18443,12 +18475,14 @@ function renderWarmupBlockTeacher(b, day){
   return card;
 }
 
-function renderAddBlockForm(day, editingBlock){
+function renderAddBlockForm(day, editingBlock, target){
   /* Единая форма «как пост в Telegram»: все поля опциональны,
      можно совмещать картинку + текст + игру + опрос.
-     editingBlock — если передан, форма работает в режиме правки
-     (поля предзаполнены, кнопка делает PATCH вместо POST). */
+     editingBlock — если передан, форма в режиме правки.
+     target — { dayId } для warmup или { intensiveOrd } для дня
+     интенсива; если не передан, по умолчанию warmup-день. */
   const isEdit = !!editingBlock;
+  const tgt = target || (day && day.ord && !day.day_date ? { intensiveOrd: day.ord } : { dayId: day && day.id });
   const box = el('div', { style:{ marginTop:'12px', padding:'14px',
     background: isEdit ? '#FEF3C7' : 'var(--p-soft)',
     borderRadius:'10px', border:'1px dashed ' + (isEdit ? '#D97706' : 'var(--p-deep)') }});
