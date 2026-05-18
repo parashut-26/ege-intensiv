@@ -554,9 +554,9 @@ let MY_PROFILE = null;
    ======================================================================= */
 const STATE = {
   view: 'login',           // login | student | curator | teacher
-  studentTab: 'home',      // home | days | theory | variants | achievements | profile
+  studentTab: 'home',      // home | days | theory | variants | games | achievements | profile
   curatorTab: 'students',  // students | essays | chat
-  teacherTab: 'overview',  // overview | students | attendance | payments | essays | analytics | variants | content | days
+  teacherTab: 'overview',  // overview | students | attendance | payments | essays | analytics | variants | games | content | days
   contentTab: 'theory',    // theory | tests | materials | samples
   /* Сводная по пробникам (импорт OTP) */
   selectedVariantId: null,        // если выбрана конкретная сводная — id варианта
@@ -10425,6 +10425,146 @@ function studentVariantsCard(){
    УЧЕНИК · ДОСТИЖЕНИЯ
    ======================================================================= */
 /* =======================================================================
+   УЧЕНИК · ИГРЫ — вкладка с каталогом мини-тренажёров
+   ─────────────────────────────────────────────────────────────────────
+   Показываются только игры с is_published=true (RLS их и так фильтрует
+   читать может любой, но фильтруем для красоты — скрытые не нужны).
+   Карточки группируются по теме. Клик по карточке открывает игру
+   в iframe-модалке с ?mode=embed&name=<имя>. По окончании игра шлёт
+   postMessage с результатом — пишем в game_attempts.
+   ======================================================================= */
+async function loadStudentGamesList(){
+  try {
+    STATE.studentGamesList = await restRequest('GET',
+      '/games?is_published=eq.true&select=id,slug,title,topic,emoji,description,url,day_id' +
+      '&order=topic.asc,created_at.desc');
+  } catch(e){
+    console.error('loadStudentGamesList', e);
+    STATE.studentGamesList = [];
+  }
+}
+
+/* Слушатель postMessage от игры — регистрируем один раз. */
+if(!window.__zebrusGameListener){
+  window.__zebrusGameListener = true;
+  window.addEventListener('message', async (ev) => {
+    const d = ev.data;
+    if(!d || typeof d !== 'object') return;
+    if(d.type === 'zebrus_game_close'){
+      closeGameModal();
+      return;
+    }
+    if(d.type === 'zebrus_game_result'){
+      const p = d.payload || {};
+      const gameId = STATE.openGameId;
+      if(!gameId || !MY_PROFILE || !MY_PROFILE.id) return;
+      try {
+        await restRequest('POST', '/game_attempts', {
+          game_id: gameId,
+          student_id: MY_PROFILE.id,
+          score: p.score | 0,
+          max_score: p.max_score | 0,
+          time_seconds: p.time_seconds | 0,
+          payload: { wrong_tasks: p.wrong_tasks || [] }
+        }, { prefer: 'return=minimal' });
+        showToast('🐝 Результат сохранён');
+      } catch(e){
+        console.error('game_attempts insert', e);
+        showToast('Не получилось сохранить результат');
+      }
+    }
+  });
+}
+
+function openGameModal(game){
+  STATE.openGameId = game.id;
+  const name = (MY_PROFILE && MY_PROFILE.full_name) ? MY_PROFILE.full_name.split(' ')[0] : 'Ученик';
+  const url = (game.url || ('/games/' + game.slug + '/')) +
+    '?mode=embed&name=' + encodeURIComponent(name);
+
+  const overlay = el('div', { id:'zebrus-game-overlay',
+    style:{ position:'fixed', inset:'0', background:'rgba(15,12,30,0.85)', zIndex:'9999',
+            display:'flex', flexDirection:'column', padding:'0' }},
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                        padding:'10px 16px', background:'#fff', borderBottom:'1px solid var(--border-2)' }},
+      el('div', { style:{ fontWeight:'800', display:'flex', alignItems:'center', gap:'8px' }},
+        el('span', { style:{ fontSize:'1.3rem' }}, game.emoji || '🎮'),
+        game.title),
+      el('button', { class:'btn btn-secondary',
+        onclick: () => closeGameModal()
+      }, '✕ Закрыть')),
+    el('iframe', { src:url, style:{ flex:1, width:'100%', border:'none', background:'#0a0e1a' }})
+  );
+  document.body.appendChild(overlay);
+}
+
+function closeGameModal(){
+  STATE.openGameId = null;
+  const ov = document.getElementById('zebrus-game-overlay');
+  if(ov) ov.remove();
+}
+
+function viewStudentGames(){
+  const wrap = el('div', { class:'fade-in' });
+  wrap.append(
+    el('h1', null, '🎮 Игры'),
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'18px' }},
+      'Мини-тренажёры по темам ЕГЭ. Проходи в удобном темпе — баллы попадают в твою статистику.'));
+
+  if(!STATE.studentGamesList){
+    loadStudentGamesList().then(render);
+    wrap.append(el('div', { style:{ color:'var(--ink-3)', padding:'40px', textAlign:'center' }},
+      '⏳ Загружаю каталог…'));
+    return wrap;
+  }
+
+  const games = STATE.studentGamesList;
+  if(!games.length){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', padding:'40px' }},
+      el('div', { style:{ fontSize:'2.5rem', marginBottom:'10px' }}, '🎮'),
+      el('div', { style:{ color:'var(--ink-2)' }},
+        'Пока игр нет. Загляни попозже — Ольга Александровна как раз готовит первые.')));
+    return wrap;
+  }
+
+  /* Группа по теме */
+  const byTopic = {};
+  games.forEach(g => {
+    const k = g.topic || 'Без темы';
+    (byTopic[k] = byTopic[k] || []).push(g);
+  });
+
+  Object.keys(byTopic).forEach(topic => {
+    wrap.append(el('h3', { style:{ marginTop:'18px', marginBottom:'10px', color:'var(--ink-2)' }},
+      topic));
+    const grid = el('div', { style:{ display:'grid',
+      gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:'12px' }});
+    byTopic[topic].forEach(g => grid.append(renderStudentGameCard(g)));
+    wrap.append(grid);
+  });
+
+  return wrap;
+}
+
+function renderStudentGameCard(g){
+  return el('div', { class:'card',
+    style:{ cursor:'pointer', transition:'transform .15s ease',
+            background:'linear-gradient(135deg, #FFFBEB, #FEF3C7)',
+            borderColor:'#FACC15' },
+    onmouseover: (e) => { e.currentTarget.style.transform = 'translateY(-3px)'; },
+    onmouseout:  (e) => { e.currentTarget.style.transform = 'translateY(0)'; },
+    onclick: () => openGameModal(g)
+  },
+    el('div', { style:{ fontSize:'2.5rem', marginBottom:'8px' }}, g.emoji || '🎮'),
+    el('div', { style:{ fontWeight:'800', fontSize:'15px', marginBottom:'6px' }}, g.title),
+    g.description ? el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', lineHeight:'1.4' }}, g.description) : null,
+    el('div', { style:{ marginTop:'10px', display:'flex', justifyContent:'flex-end' }},
+      el('span', { style:{ background:'#FACC15', color:'#1A1B3A', padding:'4px 12px',
+                           borderRadius:'8px', fontSize:'12px', fontWeight:'700' }},
+        '▶ Играть')));
+}
+
+/* =======================================================================
    УЧЕНИК · ПРОБНИКИ — отдельная вкладка
    Использует ту же карточку что и в Профиле, но в полном размере как страница.
    ======================================================================= */
@@ -17800,6 +17940,205 @@ async function importOtpFile(file, title){
   render();
 }
 
+/* ==========================================================================
+   ИГРЫ — мини-тренажёры (вкладка «Игры»)
+   ──────────────────────────────────────────────────────────────────────────
+   Каталог HTML-игр в /games/<slug>/. Учитель:
+     · видит карточки всех игр
+     · переключатель «Опубликовать» — игра становится видна ученикам
+     · кнопка «Внешняя ссылка» — копирует /games/<slug>/ (гостевой режим
+       без сохранения результата)
+     · кнопка «Результаты» — список попыток учеников (ученик × лучший балл)
+   ========================================================================== */
+
+async function loadGamesList(){
+  try {
+    STATE.gamesList = await restRequest('GET',
+      '/games?select=id,slug,title,topic,emoji,description,url,is_published,day_id,created_at' +
+      '&order=created_at.desc');
+  } catch(e){
+    console.error('loadGamesList', e);
+    STATE.gamesList = [];
+  }
+}
+
+async function loadGameAttempts(gameId){
+  try {
+    STATE.gameAttempts = await restRequest('GET',
+      '/game_attempts?game_id=eq.' + gameId +
+      '&select=id,student_id,score,max_score,percent,time_seconds,created_at,' +
+      'student:profiles!game_attempts_student_id_fkey(id,full_name)' +
+      '&order=created_at.desc');
+  } catch(e){
+    console.error('loadGameAttempts', e);
+    STATE.gameAttempts = [];
+  }
+}
+
+async function toggleGamePublished(game, next){
+  try {
+    await restRequest('PATCH', '/games?id=eq.' + game.id, { is_published: next },
+      { prefer: 'return=minimal' });
+    game.is_published = next;
+    showToast(next ? '🎮 Игра открыта ученикам' : '🚫 Игра скрыта');
+    render();
+  } catch(e){
+    console.error('toggleGamePublished', e);
+    showToast('Не получилось — попробуй ещё раз');
+  }
+}
+
+function copyGuestLink(game){
+  const url = window.location.origin + (game.url || ('/games/' + game.slug + '/'));
+  try {
+    navigator.clipboard.writeText(url);
+    showToast('🔗 Ссылка скопирована');
+  } catch(e){
+    prompt('Скопируй ссылку вручную:', url);
+  }
+}
+
+function viewTeacherGames(){
+  const wrap = el('div', { class:'fade-in' });
+
+  /* Сводная по конкретной игре */
+  if(STATE.selectedGameId){
+    return viewGameResults();
+  }
+
+  wrap.append(
+    el('h1', null, '🎮 Игры'),
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'18px' }},
+      'Каталог мини-тренажёров. Открой игру ученикам — она появится у них на вкладке «Игры». ' +
+      'Внешняя ссылка работает без логина (для друзей, гостей, открытых уроков), но в этом ' +
+      'режиме баллы не сохраняются.'));
+
+  /* Подгружаем, если ещё не подгружали */
+  if(!STATE.gamesList){
+    loadGamesList().then(render);
+    wrap.append(el('div', { style:{ color:'var(--ink-3)', padding:'40px', textAlign:'center' }},
+      '⏳ Загружаю каталог…'));
+    return wrap;
+  }
+
+  const games = STATE.gamesList;
+  if(!games.length){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', padding:'40px' }},
+      el('div', { style:{ fontSize:'2.5rem', marginBottom:'10px' }}, '🎮'),
+      el('div', { style:{ color:'var(--ink-2)' }},
+        'Пока ни одной игры. Добавь в таблицу `games` запись через Supabase, и она появится здесь.')));
+    return wrap;
+  }
+
+  /* Группируем по теме */
+  const byTopic = {};
+  games.forEach(g => {
+    const k = g.topic || 'Без темы';
+    (byTopic[k] = byTopic[k] || []).push(g);
+  });
+
+  Object.keys(byTopic).forEach(topic => {
+    wrap.append(el('h3', { style:{ marginTop:'18px', marginBottom:'10px', color:'var(--ink-2)' }},
+      topic));
+    byTopic[topic].forEach(g => wrap.append(renderTeacherGameCard(g)));
+  });
+
+  return wrap;
+}
+
+function renderTeacherGameCard(g){
+  const card = el('div', { class:'card', style:{ marginBottom:'12px' }});
+  card.append(
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'12px', flexWrap:'wrap' }},
+      el('div', { style:{ flex:'1 1 260px' }},
+        el('div', { style:{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'6px' }},
+          el('span', { style:{ fontSize:'1.6rem' }}, g.emoji || '🎮'),
+          el('h3', { style:{ margin:0 }}, g.title),
+          g.is_published
+            ? el('span', { style:{ background:'#DCFCE7', color:'#166534', padding:'2px 8px', borderRadius:'8px', fontSize:'11px', fontWeight:'700' }}, 'ОТКРЫТА')
+            : el('span', { style:{ background:'#FEE2E2', color:'#991B1B', padding:'2px 8px', borderRadius:'8px', fontSize:'11px', fontWeight:'700' }}, 'СКРЫТА')),
+        g.description ? el('div', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'10px' }}, g.description) : null),
+
+      el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' }},
+        el('button', { class:'btn ' + (g.is_published ? 'btn-secondary' : 'btn-teal'),
+          onclick: () => toggleGamePublished(g, !g.is_published)
+        }, g.is_published ? '🚫 Скрыть' : '✅ Открыть'),
+        el('button', { class:'btn btn-secondary',
+          onclick: () => copyGuestLink(g)
+        }, '🔗 Гостевая ссылка'),
+        el('button', { class:'btn btn-secondary',
+          onclick: () => { STATE.selectedGameId = g.id; STATE.gameAttempts = null; render(); }
+        }, '📊 Результаты'))));
+  return card;
+}
+
+function viewGameResults(){
+  const wrap = el('div', { class:'fade-in' });
+  const game = (STATE.gamesList || []).find(g => g.id === STATE.selectedGameId);
+  if(!game){
+    STATE.selectedGameId = null;
+    return viewTeacherGames();
+  }
+
+  wrap.append(
+    el('button', { class:'btn btn-secondary', style:{ marginBottom:'14px' },
+      onclick: () => { STATE.selectedGameId = null; STATE.gameAttempts = null; render(); }
+    }, '← Назад к играм'),
+    el('h1', null, (game.emoji || '🎮') + ' ' + game.title),
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'14px' }},
+      'Все попытки учеников. Лучший балл — самая высокая попытка по проценту.'));
+
+  if(!STATE.gameAttempts){
+    loadGameAttempts(game.id).then(render);
+    wrap.append(el('div', { style:{ color:'var(--ink-3)', padding:'40px', textAlign:'center' }},
+      '⏳ Загружаю результаты…'));
+    return wrap;
+  }
+
+  const attempts = STATE.gameAttempts;
+  if(!attempts.length){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', padding:'30px', color:'var(--ink-2)' }},
+      'Пока никто не играл. Когда ученики начнут проходить — здесь появятся их результаты.'));
+    return wrap;
+  }
+
+  /* Группируем по ученику — берём лучшую попытку */
+  const byStudent = {};
+  attempts.forEach(a => {
+    const sid = a.student_id;
+    const cur = byStudent[sid];
+    if(!cur || (a.percent || 0) > (cur.best.percent || 0)){
+      byStudent[sid] = { student: a.student, best: a, all: [] };
+    }
+  });
+  attempts.forEach(a => { if(byStudent[a.student_id]) byStudent[a.student_id].all.push(a); });
+
+  const rows = Object.values(byStudent).sort((x,y) => (y.best.percent || 0) - (x.best.percent || 0));
+
+  const table = el('div', { class:'card', style:{ padding:0, overflow:'hidden' }});
+  rows.forEach((r, i) => {
+    const a = r.best;
+    table.append(el('div', { style:{
+      display:'grid', gridTemplateColumns:'1fr auto auto auto', gap:'12px',
+      padding:'12px 16px', alignItems:'center',
+      borderTop: i === 0 ? 'none' : '1px solid var(--border-2)'
+    }},
+      el('div', null,
+        el('div', { style:{ fontWeight:'700' }}, (r.student && r.student.full_name) || 'без имени'),
+        el('div', { style:{ fontSize:'12px', color:'var(--ink-3)' }},
+          r.all.length + ' ' + (r.all.length === 1 ? 'попытка' : 'попытки'))),
+      el('div', { style:{ fontFamily:'monospace', fontSize:'13px' }},
+        '🐝 ' + a.score + '/' + a.max_score),
+      el('div', { style:{ fontFamily:'monospace', fontSize:'13px', color:'var(--ink-3)' }},
+        (a.time_seconds != null) ? ('⏱ ' + Math.floor(a.time_seconds/60) + ':' + String(a.time_seconds%60).padStart(2,'0')) : '—'),
+      el('div', { style:{ fontWeight:'800', fontSize:'18px',
+                          color: (a.percent || 0) >= 70 ? 'var(--green)' : (a.percent || 0) >= 50 ? 'var(--gold)' : 'var(--ink-2)' }},
+        Math.round(a.percent || 0) + '%')));
+  });
+  wrap.append(table);
+  return wrap;
+}
+
 /* --- Главная вьюшка вкладки --- */
 function viewTeacherVariants(){
   const wrap = el('div', { class:'fade-in' });
@@ -20921,6 +21260,7 @@ function _renderNow(){
       { key:'days', label:'Дни интенсива', ic:'📅' },
       { key:'theory', label:'Задания', ic:'📚' },
       { key:'variants', label:'Пробники', ic:'📋' },
+      { key:'games', label:'Игры', ic:'🎮' },
       { key:'achievements', label:'Достижения', ic:'🏆' },
       { key:'profile', label:'Профиль', ic:'👤' },
     ];
@@ -20929,6 +21269,7 @@ function _renderNow(){
       days: viewStudentDays,
       theory: viewStudentTheory,
       variants: viewStudentVariants,
+      games: viewStudentGames,
       achievements: viewStudentAchievements,
       profile: viewStudentProfile,
     };
@@ -21008,6 +21349,7 @@ function _renderNow(){
       { key:'essays', label:'Сочинения', ic:'📝', badge: (newEssays + preCheckEssays) || null },
       { key:'analytics', label:'Аналитика', ic:'📈' },
       { key:'variants', label:'Варианты', ic:'📋' },
+      { key:'games', label:'Игры', ic:'🎮' },
       { key:'content', label:'Контент', ic:'📚' },
       { key:'days', label:'Дни', ic:'📅' },
     ];
@@ -21019,6 +21361,7 @@ function _renderNow(){
       essays: viewTeacherEssays,
       analytics: viewTeacherAnalytics,
       variants: viewTeacherVariants,
+      games: viewTeacherGames,
       content: viewTeacherContent,
       days: viewTeacherDays,
     };
