@@ -18024,22 +18024,26 @@ function getDayGames(dayId, fromList){
   return list.filter(g => gameIds.includes(g.id));
 }
 
-/* Toggle привязки: добавляет/удаляет game_day_assignments. */
+/* Toggle привязки: добавляет/удаляет game_day_assignments.
+   После операции перезагружаем список с сервера — это надёжнее,
+   чем пытаться синхронизировать локальный state (Supabase может
+   не вернуть строку при некоторых RLS-конфигурациях, тогда чекбокс
+   «прыгает» обратно после render). */
 async function toggleGameDayAssignment(gameId, dayId, attach){
   try {
     if(attach){
-      const row = await restRequest('POST', '/game_day_assignments',
+      await restRequest('POST', '/game_day_assignments',
         { game_id: gameId, day_id: dayId },
-        { prefer: 'return=representation' });
-      const inserted = Array.isArray(row) ? row[0] : row;
-      if(inserted) (STATE.gameDayAssignments = STATE.gameDayAssignments || []).push(inserted);
+        { prefer: 'return=minimal' });
     } else {
       await restRequest('DELETE',
         '/game_day_assignments?game_id=eq.' + gameId + '&day_id=eq.' + dayId,
         null, { prefer: 'return=minimal' });
-      STATE.gameDayAssignments = (STATE.gameDayAssignments || [])
-        .filter(a => !(a.game_id === gameId && a.day_id === dayId));
     }
+    /* Перезагружаем актуальное состояние привязок */
+    const fresh = await restRequest('GET',
+      '/game_day_assignments?select=id,game_id,day_id');
+    STATE.gameDayAssignments = fresh || [];
   } catch(e){
     console.error('toggleGameDayAssignment', e);
     showToast('Не получилось — попробуй ещё раз');
