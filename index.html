@@ -8188,6 +8188,34 @@ function viewStudentDays(){
       }
     })();
   }
+  /* === Секция «🔥 Разогрев» — pre-intensive дни перед стартом интенсива === */
+  if(!STATE.warmupDays) loadWarmupDays().then(render);
+  const publishedWarmup = (STATE.warmupDays || []).filter(d => d.is_published);
+  if(publishedWarmup.length){
+    const warmupBox = el('div', { class:'card',
+      style:{ marginBottom:'20px', padding:'18px 20px',
+              background:'linear-gradient(135deg, #FFF7ED, #FED7AA)',
+              borderColor:'#FB923C' }},
+      el('div', { style:{ fontSize:'11px', color:'#9A3412', textTransform:'uppercase',
+                          letterSpacing:'.06em', fontWeight:'700', marginBottom:'12px' }},
+        '🔥 Разогрев перед интенсивом'),
+      el('div', { style:{ display:'grid',
+                          gridTemplateColumns:'repeat(auto-fill, minmax(160px, 1fr))', gap:'10px' }},
+        ...publishedWarmup.map(d => el('div', { class:'card',
+          style:{ cursor:'pointer', padding:'14px', textAlign:'center',
+                  background:'#fff', borderColor:'#FB923C',
+                  transition:'transform .15s ease' },
+          onmouseover: (e) => { e.currentTarget.style.transform = 'translateY(-3px)'; },
+          onmouseout:  (e) => { e.currentTarget.style.transform = 'translateY(0)'; },
+          onclick: () => openWarmupDayFullscreen(d)
+        },
+          el('div', { style:{ fontSize:'2.2rem', marginBottom:'4px' }}, d.emoji || '☀️'),
+          el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', textTransform:'uppercase',
+                              letterSpacing:'.04em', fontWeight:'700' }}, 'День ' + d.ord),
+          el('div', { style:{ fontWeight:'700', fontSize:'13px', marginTop:'2px' }}, d.title),
+          d.subtitle ? el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }}, d.subtitle) : null))));
+    wrap.append(warmupBox);
+  }
   DAYS.filter(d => d.kind === 'work').forEach(d => wrap.append(dayBlock(d)));
   DAYS.filter(d => d.kind === 'walk').forEach(d => wrap.append(walkBlock(d)));
   wrap.append(examBlock());
@@ -18094,6 +18122,296 @@ function copyGuestLink(game){
   }
 }
 
+/* ==========================================================================
+   PRE-INTENSIVE «РАЗОГРЕВ»
+   ──────────────────────────────────────────────────────────────────────────
+   5 дней перед интенсивом (25-29 мая 2026), у каждого — массив блоков
+   (text / game / link / image / poll). Учитель наполняет через конструктор
+   во вкладке «🔥 Разогрев»; ученик видит секцию «Разогрев» вверху раздела
+   «Дни интенсива», клик по карточке открывает день в полноэкранном
+   overlay со всеми блоками.
+   ========================================================================== */
+
+async function loadWarmupDays(){
+  try {
+    STATE.warmupDays = await restRequest('GET',
+      '/warmup_days?select=id,ord,day_date,title,subtitle,emoji,is_published&order=ord.asc') || [];
+  } catch(e){
+    console.error('loadWarmupDays', e);
+    STATE.warmupDays = [];
+  }
+}
+async function loadWarmupBlocks(dayId){
+  try {
+    const list = await restRequest('GET',
+      '/warmup_blocks?day_id=eq.' + dayId +
+      '&select=id,ord,type,title,body,url,game_id,emoji,config&order=ord.asc');
+    if(!STATE.warmupBlocksByDay) STATE.warmupBlocksByDay = {};
+    STATE.warmupBlocksByDay[dayId] = list || [];
+  } catch(e){
+    console.error('loadWarmupBlocks', e);
+    if(!STATE.warmupBlocksByDay) STATE.warmupBlocksByDay = {};
+    STATE.warmupBlocksByDay[dayId] = [];
+  }
+}
+
+async function toggleWarmupDayPublished(day, next){
+  try {
+    await restRequest('PATCH', '/warmup_days?id=eq.' + day.id,
+      { is_published: next }, { prefer: 'return=minimal' });
+    day.is_published = next;
+    showToast(next ? '🔥 День открыт ученикам' : '🚫 День скрыт');
+    render();
+  } catch(e){ showToast('⚠ ' + e.message); }
+}
+
+async function addWarmupBlock(dayId, payload){
+  try {
+    payload.day_id = dayId;
+    if(payload.ord == null){
+      const cur = (STATE.warmupBlocksByDay && STATE.warmupBlocksByDay[dayId]) || [];
+      payload.ord = cur.length;
+    }
+    await restRequest('POST', '/warmup_blocks', payload, { prefer: 'return=minimal' });
+    await loadWarmupBlocks(dayId);
+    showToast('✓ Блок добавлен');
+    render();
+  } catch(e){
+    console.error('addWarmupBlock', e);
+    showToast('⚠ ' + e.message);
+  }
+}
+async function deleteWarmupBlock(block){
+  if(!confirm('Удалить блок «' + (block.title || block.type) + '»?')) return;
+  try {
+    await restRequest('DELETE', '/warmup_blocks?id=eq.' + block.id, null, { prefer: 'return=minimal' });
+    await loadWarmupBlocks(block.day_id);
+    showToast('✓ Удалён');
+    render();
+  } catch(e){ showToast('⚠ ' + e.message); }
+}
+
+/* === Учитель: вкладка «🔥 Разогрев» === */
+function viewTeacherWarmup(){
+  const wrap = el('div', { class:'fade-in' });
+  wrap.append(
+    el('h1', null, '🔥 Разогрев перед интенсивом'),
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'18px' }},
+      'Пять дней до старта интенсива (25–29 мая). У каждого дня — набор блоков: текст, игра, ссылка, картинка. Ученик открывает день полноэкранно на телефоне и проходит блоки по порядку.'));
+
+  if(!STATE.warmupDays){
+    loadWarmupDays().then(render);
+    wrap.append(el('div', { style:{ color:'var(--ink-3)', padding:'40px', textAlign:'center' }},
+      '⏳ Загружаю…'));
+    return wrap;
+  }
+  /* Подгружаем игры тоже — нужны в конструкторе для типа 'game' */
+  if(!STATE.gamesList) loadGamesList().then(render);
+
+  STATE.warmupDays.forEach(d => {
+    const det = el('details', { class:'card', open:true, style:{ marginBottom:'12px' }});
+    det.append(
+      el('summary', { style:{ cursor:'pointer', listStyle:'none', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
+        el('div', { style:{ display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
+          el('span', { style:{ fontSize:'1.6rem' }}, d.emoji || '☀️'),
+          el('div', null,
+            el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.06em', fontWeight:'700' }},
+              'День ' + d.ord + ' · ' + d.day_date),
+            el('div', { style:{ fontWeight:'800', fontSize:'16px' }}, d.title + (d.subtitle ? ' · ' + d.subtitle : '')))),
+        el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
+          d.is_published
+            ? el('span', { style:{ background:'#DCFCE7', color:'#166534', padding:'2px 8px', borderRadius:'8px', fontSize:'11px', fontWeight:'700' }}, 'ОТКРЫТ')
+            : el('span', { style:{ background:'#FEE2E2', color:'#991B1B', padding:'2px 8px', borderRadius:'8px', fontSize:'11px', fontWeight:'700' }}, 'СКРЫТ'),
+          el('button', { class:'btn ' + (d.is_published ? 'btn-secondary' : 'btn-teal') + ' btn-sm',
+            onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); toggleWarmupDayPublished(d, !d.is_published); }
+          }, d.is_published ? '🚫 Скрыть' : '✅ Открыть'))));
+
+    /* Подгружаем блоки лениво */
+    if(STATE.warmupBlocksByDay && STATE.warmupBlocksByDay[d.id]){
+      const blocks = STATE.warmupBlocksByDay[d.id];
+      if(!blocks.length){
+        det.append(el('div', { style:{ padding:'12px', color:'var(--ink-3)', fontSize:'13px' }},
+          'Пока ни одного блока. Добавь первый — кнопка ниже.'));
+      } else {
+        blocks.forEach(b => det.append(renderWarmupBlockTeacher(b)));
+      }
+      det.append(renderAddBlockForm(d));
+    } else {
+      loadWarmupBlocks(d.id).then(render);
+      det.append(el('div', { style:{ padding:'10px', color:'var(--ink-3)' }}, '⏳ загружаю блоки…'));
+    }
+    wrap.append(det);
+  });
+  return wrap;
+}
+
+function renderWarmupBlockTeacher(b){
+  const labels = { text:'📝 Текст', game:'🎮 Игра', link:'🔗 Ссылка', image:'🖼 Картинка', poll:'📊 Опрос' };
+  const card = el('div', { style:{ padding:'12px 14px', border:'1px solid var(--border)', borderRadius:'10px', marginTop:'8px', background:'var(--bg)' }},
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }},
+      el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', fontWeight:'700', textTransform:'uppercase', letterSpacing:'.04em' }},
+        labels[b.type] || b.type),
+      el('button', { class:'btn btn-secondary btn-sm', style:{ padding:'2px 8px', fontSize:'12px' },
+        onclick: () => deleteWarmupBlock(b)
+      }, '🗑')),
+    el('div', { style:{ display:'flex', gap:'8px', alignItems:'flex-start' }},
+      el('span', { style:{ fontSize:'1.4rem' }}, b.emoji || '📌'),
+      el('div', { style:{ flex:1, minWidth:0 }},
+        b.title ? el('div', { style:{ fontWeight:'700', marginBottom:'4px' }}, b.title) : null,
+        b.body  ? el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', whiteSpace:'pre-wrap' }}, b.body) : null,
+        b.url   ? el('div', { style:{ fontSize:'12px', color:'var(--p-deep)', marginTop:'4px', wordBreak:'break-all' }}, '🔗 ' + b.url) : null,
+        b.game_id ? el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px' }},
+          '🎮 ' + (((STATE.gamesList || []).find(g => g.id === b.game_id) || {}).title || '(игра не найдена)')) : null)));
+  return card;
+}
+
+function renderAddBlockForm(day){
+  const box = el('div', { style:{ marginTop:'12px', padding:'12px', background:'var(--p-soft)', borderRadius:'10px', border:'1px dashed var(--p-deep)' }});
+  const typeSel = el('select', { style:{ padding:'6px 10px', borderRadius:'6px', border:'1px solid var(--border-2)', fontSize:'13px' }},
+    el('option', { value:'text'  }, '📝 Текст'),
+    el('option', { value:'game'  }, '🎮 Игра'),
+    el('option', { value:'link'  }, '🔗 Ссылка'),
+    el('option', { value:'image' }, '🖼 Картинка'));
+  const fieldsBox = el('div', { style:{ marginTop:'10px' }});
+  function rebuildFields(){
+    fieldsBox.innerHTML = '';
+    const t = typeSel.value;
+    const emojiInput = el('input', { type:'text', placeholder:'эмодзи 📌', style:{ width:'80px', padding:'6px 10px', borderRadius:'6px', border:'1px solid var(--border-2)' }});
+    const titleInput = el('input', { type:'text', placeholder:'Заголовок', style:{ flex:1, padding:'6px 10px', borderRadius:'6px', border:'1px solid var(--border-2)' }});
+    fieldsBox.append(el('div', { style:{ display:'flex', gap:'8px', marginBottom:'8px' }}, emojiInput, titleInput));
+
+    let extra = {};
+    if(t === 'text'){
+      const ta = el('textarea', { placeholder:'Текст карточки (можно многострочный)',
+        style:{ width:'100%', minHeight:'80px', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)', fontFamily:'inherit', fontSize:'13px' }});
+      fieldsBox.append(ta);
+      extra.getPayload = () => ({ body: ta.value });
+    } else if(t === 'game'){
+      const sel = el('select', { style:{ width:'100%', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)' }},
+        el('option', { value:'' }, '— выбери игру —'),
+        ...((STATE.gamesList || []).map(g => el('option', { value: String(g.id) }, (g.emoji || '🎮') + ' ' + g.title))));
+      fieldsBox.append(sel);
+      const desc = el('textarea', { placeholder:'Короткое описание (необязательно)',
+        style:{ width:'100%', minHeight:'50px', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)', marginTop:'6px', fontFamily:'inherit', fontSize:'13px' }});
+      fieldsBox.append(desc);
+      extra.getPayload = () => ({ game_id: sel.value ? parseInt(sel.value,10) : null, body: desc.value });
+    } else if(t === 'link'){
+      const url = el('input', { type:'url', placeholder:'https://… (видео, Яндекс.Диск)',
+        style:{ width:'100%', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)' }});
+      const desc = el('textarea', { placeholder:'Описание (необязательно)',
+        style:{ width:'100%', minHeight:'50px', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)', marginTop:'6px', fontFamily:'inherit', fontSize:'13px' }});
+      fieldsBox.append(url, desc);
+      extra.getPayload = () => ({ url: url.value, body: desc.value });
+    } else if(t === 'image'){
+      const url = el('input', { type:'url', placeholder:'URL картинки (можно вставить с Яндекс.Диска)',
+        style:{ width:'100%', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)' }});
+      const desc = el('textarea', { placeholder:'Подпись (необязательно)',
+        style:{ width:'100%', minHeight:'50px', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)', marginTop:'6px', fontFamily:'inherit', fontSize:'13px' }});
+      fieldsBox.append(url, desc);
+      extra.getPayload = () => ({ url: url.value, body: desc.value });
+    }
+
+    fieldsBox.append(el('div', { style:{ marginTop:'10px', display:'flex', gap:'8px' }},
+      el('button', { class:'btn btn-teal',
+        onclick: async () => {
+          const payload = Object.assign({
+            type: t,
+            emoji: emojiInput.value.trim() || '📌',
+            title: titleInput.value.trim() || null
+          }, extra.getPayload());
+          await addWarmupBlock(day.id, payload);
+        }
+      }, '＋ Сохранить блок')));
+  }
+  typeSel.onchange = rebuildFields;
+  box.append(
+    el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', fontWeight:'700', marginBottom:'8px' }},
+      el('span', null, '＋ Добавить блок:'),
+      typeSel),
+    fieldsBox);
+  rebuildFields();
+  return box;
+}
+
+/* === Ученик: открытие дня в полноэкранном overlay === */
+function openWarmupDayFullscreen(day){
+  STATE.openWarmupDayId = day.id;
+  loadWarmupBlocks(day.id).then(() => renderWarmupOverlay(day));
+}
+function closeWarmupOverlay(){
+  STATE.openWarmupDayId = null;
+  const ov = document.getElementById('zebrus-warmup-overlay');
+  if(ov) ov.remove();
+}
+function renderWarmupOverlay(day){
+  const existing = document.getElementById('zebrus-warmup-overlay');
+  if(existing) existing.remove();
+  const blocks = (STATE.warmupBlocksByDay && STATE.warmupBlocksByDay[day.id]) || [];
+  const overlay = el('div', { id:'zebrus-warmup-overlay',
+    style:{ position:'fixed', inset:'0', background:'var(--bg)', zIndex:'9999',
+            overflowY:'auto', display:'flex', flexDirection:'column' }},
+    el('div', { style:{ position:'sticky', top:'0', background:'var(--surface)', borderBottom:'1px solid var(--border-2)',
+                        padding:'14px 18px', display:'flex', justifyContent:'space-between', alignItems:'center', zIndex:'10' }},
+      el('div', null,
+        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.06em', fontWeight:'700' }},
+          'День ' + day.ord + ' · ' + day.day_date),
+        el('div', { style:{ fontWeight:'800', fontSize:'18px' }}, (day.emoji || '☀️') + ' ' + day.title)),
+      el('button', { class:'btn btn-secondary', onclick: () => closeWarmupOverlay() }, '✕ Закрыть')),
+    el('div', { style:{ flex:1, padding:'20px', maxWidth:'800px', width:'100%', margin:'0 auto' }},
+      ...(blocks.length
+        ? blocks.map(b => renderWarmupBlockStudent(b))
+        : [el('div', { style:{ padding:'40px', textAlign:'center', color:'var(--ink-3)' }},
+            'В этом дне пока нет материалов. Загляни попозже.')])));
+  document.body.appendChild(overlay);
+}
+
+function renderWarmupBlockStudent(b){
+  const baseCard = (...children) => el('div', { class:'card',
+    style:{ marginBottom:'14px', padding:'18px 20px' }}, ...children);
+  if(b.type === 'text'){
+    return baseCard(
+      el('div', { style:{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'10px' }},
+        el('span', { style:{ fontSize:'1.6rem' }}, b.emoji || '📝'),
+        b.title ? el('h3', { style:{ margin:0 }}, b.title) : null),
+      b.body ? el('div', { style:{ fontSize:'15px', lineHeight:'1.55', whiteSpace:'pre-wrap', color:'var(--ink)' }}, b.body) : null);
+  }
+  if(b.type === 'game'){
+    const game = (STATE.studentGamesList || []).find(g => g.id === b.game_id)
+              || (STATE.gamesList || []).find(g => g.id === b.game_id);
+    if(!game) return baseCard(el('div', { style:{ color:'var(--ink-3)' }}, '⚠ Игра не найдена'));
+    return el('div', { class:'card',
+      style:{ marginBottom:'14px', padding:'18px 20px', cursor:'pointer',
+              background:'linear-gradient(135deg, #FFFBEB, #FED7AA)', borderColor:'#FB923C' },
+      onclick: () => openGameModal(game)
+    },
+      el('div', { style:{ display:'flex', alignItems:'center', gap:'12px' }},
+        el('span', { style:{ fontSize:'2.2rem' }}, game.emoji || '🎮'),
+        el('div', { style:{ flex:1 }},
+          b.title ? el('div', { style:{ fontWeight:'800', fontSize:'15px' }}, b.title) : null,
+          el('div', { style:{ fontWeight:'700', fontSize:'17px' }}, game.title),
+          b.body ? el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', marginTop:'4px' }}, b.body) : null,
+          el('div', { style:{ marginTop:'8px', color:'#9A3412', fontWeight:'700', fontSize:'13px' }}, '▶ Играть'))));
+  }
+  if(b.type === 'link'){
+    return baseCard(
+      el('div', { style:{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'8px' }},
+        el('span', { style:{ fontSize:'1.6rem' }}, b.emoji || '🔗'),
+        b.title ? el('h3', { style:{ margin:0 }}, b.title) : null),
+      b.body ? el('div', { style:{ fontSize:'14px', color:'var(--ink-2)', marginBottom:'10px', whiteSpace:'pre-wrap' }}, b.body) : null,
+      b.url ? el('a', { href:b.url, target:'_blank', rel:'noopener', class:'btn btn-p btn-sm',
+        style:{ textDecoration:'none', display:'inline-block' }
+      }, '↗ Открыть') : null);
+  }
+  if(b.type === 'image'){
+    return baseCard(
+      b.title ? el('h3', { style:{ marginBottom:'10px' }}, (b.emoji || '🖼') + ' ' + b.title) : null,
+      b.url ? el('img', { src:b.url, alt: b.title || '',
+        style:{ display:'block', width:'100%', maxHeight:'500px', objectFit:'contain', borderRadius:'10px', background:'var(--bg)' }}) : null,
+      b.body ? el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', marginTop:'8px', textAlign:'center', fontStyle:'italic' }}, b.body) : null);
+  }
+  return baseCard(el('div', null, 'Блок типа «' + b.type + '» (не поддерживается)'));
+}
+
 function viewTeacherGames(){
   const wrap = el('div', { class:'fade-in' });
 
@@ -21510,6 +21828,7 @@ function _renderNow(){
       { key:'analytics', label:'Аналитика', ic:'📈' },
       { key:'variants', label:'Варианты', ic:'📋' },
       { key:'games', label:'Игры', ic:'🎮' },
+      { key:'warmup', label:'Разогрев', ic:'🔥' },
       { key:'content', label:'Контент', ic:'📚' },
       { key:'days', label:'Дни', ic:'📅' },
     ];
@@ -21522,6 +21841,7 @@ function _renderNow(){
       analytics: viewTeacherAnalytics,
       variants: viewTeacherVariants,
       games: viewTeacherGames,
+      warmup: viewTeacherWarmup,
       content: viewTeacherContent,
       days: viewTeacherDays,
     };
