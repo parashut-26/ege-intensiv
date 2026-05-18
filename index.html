@@ -18620,6 +18620,9 @@ function closeWarmupOverlay(){
 }
 function renderWarmupOverlay(day){
   const existing = document.getElementById('zebrus-warmup-overlay');
+  /* Запоминаем текущую позицию скролла, чтобы после перерисовки
+     (например, после голосования в опросе) экран не прыгал наверх. */
+  const savedScroll = existing ? existing.scrollTop : 0;
   if(existing) existing.remove();
   const blocks = (STATE.warmupBlocksByDay && STATE.warmupBlocksByDay[day.id]) || [];
   const overlay = el('div', { id:'zebrus-warmup-overlay',
@@ -18638,6 +18641,10 @@ function renderWarmupOverlay(day){
         : [el('div', { style:{ padding:'40px', textAlign:'center', color:'var(--ink-3)' }},
             'В этом дне пока нет материалов. Загляни попозже.')])));
   document.body.appendChild(overlay);
+  /* Восстанавливаем сохранённую позицию скролла */
+  if(savedScroll){
+    requestAnimationFrame(() => { overlay.scrollTop = savedScroll; });
+  }
 }
 
 function renderWarmupBlockStudent(b){
