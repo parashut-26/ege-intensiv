@@ -18203,7 +18203,9 @@ async function addWarmupBlock(dayId, payload){
     if(!payload.type) payload.type = 'mixed';
     await restRequest('POST', '/warmup_blocks', payload, { prefer: 'return=minimal' });
     await loadWarmupBlocks(dayId);
-    showToast('✓ Блок добавлен');
+    /* После успешного сохранения сворачиваем форму обратно в кнопку */
+    STATE.addingPostToDayId = null;
+    showToast('✓ Пост добавлен');
     render();
   } catch(e){
     console.error('addWarmupBlock', e);
@@ -18257,13 +18259,23 @@ async function voteWarmupPoll(blockId, optionIndex){
     const day = (STATE.warmupDays || []).find(d => d.id === dayId);
     if(day) renderWarmupOverlay(day);
   }
-  /* Пишем в БД */
+  /* Пишем в БД через RPC: ученикам напрямую PATCH запрещён RLS,
+     поэтому используем SECURITY DEFINER-функцию vote_warmup_poll,
+     которая меняет ТОЛЬКО config.poll.votes (безопасно). */
   try {
-    await restRequest('PATCH', '/warmup_blocks?id=eq.' + blockId,
-      { config: newConfig }, { prefer: 'return=minimal' });
+    await restRequest('POST', '/rpc/vote_warmup_poll',
+      { p_block_id: blockId, p_option_index: optionIndex },
+      { prefer: 'return=minimal' });
   } catch(e){
     console.error('voteWarmupPoll', e);
     showToast('Не получилось проголосовать');
+    /* Откатываем оптимистичное обновление */
+    delete newConfig.poll.votes[MY_PROFILE.id];
+    block.config = newConfig;
+    if(STATE.openWarmupDayId === dayId){
+      const day = (STATE.warmupDays || []).find(d => d.id === dayId);
+      if(day) renderWarmupOverlay(day);
+    }
   }
 }
 async function deleteWarmupBlock(block){
@@ -18351,11 +18363,19 @@ function viewTeacherWarmup(){
       const blocks = STATE.warmupBlocksByDay[d.id];
       if(!blocks.length){
         det.append(el('div', { style:{ padding:'12px', color:'var(--ink-3)', fontSize:'13px' }},
-          'Пока ни одного блока. Добавь первый — кнопка ниже.'));
+          'Пока ни одного поста. Нажми «＋ Добавить пост» ниже.'));
       } else {
         blocks.forEach(b => det.append(renderWarmupBlockTeacher(b, d)));
       }
-      det.append(renderAddBlockForm(d));
+      /* Форма создания нового поста: либо кнопка, либо развёрнутая форма */
+      if(STATE.addingPostToDayId === d.id){
+        det.append(renderAddBlockForm(d));
+      } else {
+        det.append(el('div', { style:{ marginTop:'12px', textAlign:'center' }},
+          el('button', { class:'btn btn-teal',
+            onclick: () => { STATE.addingPostToDayId = d.id; STATE.editingBlockId = null; render(); }
+          }, '＋ Добавить пост в этот день')));
+      }
     } else {
       loadWarmupBlocks(d.id).then(render);
       det.append(el('div', { style:{ padding:'10px', color:'var(--ink-3)' }}, '⏳ загружаю блоки…'));
@@ -18578,7 +18598,9 @@ function renderAddBlockForm(day, editingBlock){
         ? el('button', { class:'btn btn-secondary',
             onclick: () => { STATE.editingBlockId = null; render(); }
           }, '✕ Отмена')
-        : null));
+        : el('button', { class:'btn btn-secondary',
+            onclick: () => { STATE.addingPostToDayId = null; render(); }
+          }, '✕ Отмена')));
   return box;
 }
 
