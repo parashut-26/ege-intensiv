@@ -8173,6 +8173,21 @@ function viewStudentDays(){
       'Каждый день открывается по расписанию. Ты можешь проходить задания в свободном порядке внутри дня.'));
   /* Подгружаем игры — нужны для секции «Игры дня» */
   if(!STATE.studentGamesList) loadStudentGamesList().then(() => render());
+  /* Подгружаем варианты-пробники независимо от карточки «Мои пробники»
+     (она грузит их сама, но только если ученик зашёл сначала на Главную). */
+  if(!STATE.availableVariants){
+    (async () => {
+      try {
+        const pdfVariants = await restRequest('GET',
+          '/test_variants?source=eq.pdf_import&is_published=eq.true&select=id,title,questions_count,created_at,day_id&order=created_at.desc');
+        STATE.availableVariants = Array.isArray(pdfVariants) ? pdfVariants : [];
+        render();
+      } catch(e){
+        console.warn('[student days] variants load error:', e.message);
+        STATE.availableVariants = [];
+      }
+    })();
+  }
   DAYS.filter(d => d.kind === 'work').forEach(d => wrap.append(dayBlock(d)));
   DAYS.filter(d => d.kind === 'walk').forEach(d => wrap.append(walkBlock(d)));
   wrap.append(examBlock());
