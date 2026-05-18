@@ -475,39 +475,75 @@ const CONFIG = {
   gameTitle: 'Гонка за фразеологизмами',
 };
 
+/* В каждом задании phraseologisms — массив (один или несколько фразеологизмов).
+   Балл за задание засчитывается, если ученик нашёл ХОТЯ БЫ ОДИН целиком. */
 const TASKS = [
   { sentence: "Он стоял у стены и наблюдал. Она медленно ходила между рядами, выбирая платье. Он не сводил глаз, не замечая, как проходит время. Это было почти невыносимо.",
-    phraseologism: { phrase: "не сводил глаз", meaning: "пристально, неотрывно смотрел" } },
+    phraseologisms: [
+      { phrase: "не сводил глаз", meaning: "пристально, неотрывно смотрел" }
+    ] },
   { sentence: "Он всегда приносил ей кофе с молоком, без сахара. Для кого-то это мелочь. А для неё это имело значение. Это был его способ сказать «я помню».",
-    phraseologism: { phrase: "имело значение", meaning: "было важно, существенно" } },
+    phraseologisms: [
+      { phrase: "имело значение", meaning: "было важно, существенно" }
+    ] },
   { sentence: "Он третий день сидел над задачей. В голове всё путалось, ручка скользила по бумаге беспорядочно. Уже в который раз он начинал сначала. Он устал ломать голову.",
-    phraseologism: { phrase: "ломать голову", meaning: "напряжённо думать, мучительно искать решение" } },
+    phraseologisms: [
+      { phrase: "ломать голову", meaning: "напряжённо думать, мучительно искать решение" }
+    ] },
   { sentence: "Он закрыл ноутбук и встал. По правде говоря, он устал. Хотелось тишины и покоя. Но впереди была ещё одна встреча.",
-    phraseologism: { phrase: "По правде говоря", meaning: "если быть честным, откровенно" } },
+    phraseologisms: [
+      { phrase: "По правде говоря", meaning: "если быть честным, откровенно" }
+    ] },
   { sentence: "Он хотел сказать, что не приедет. Подготовился, даже репетировал перед зеркалом. Но когда услышал её голос, язык не повернулся. Он просто сказал, что занят.",
-    phraseologism: { phrase: "язык не повернулся", meaning: "не хватило решимости сказать что-то" } },
+    phraseologisms: [
+      { phrase: "язык не повернулся", meaning: "не хватило решимости сказать что-то" }
+    ] },
   { sentence: "Парень носился по коридору, хлопал дверями, мешал всем заниматься. Учитель остановил его и устало сказал: «Ты совсем без царя в голове». Тот только усмехнулся и побежал дальше.",
-    phraseologism: { phrase: "без царя в голове", meaning: "легкомысленный, безрассудный человек" } },
+    phraseologisms: [
+      { phrase: "без царя в голове", meaning: "легкомысленный, безрассудный человек" }
+    ] },
   { sentence: "Он проводил в библиотеке почти весь день. Ему было важно не просто прочитать книгу, а понять каждую деталь. Истина для него начиналась и заканчивалась там — это была его альфа и омега. Он жил этим.",
-    phraseologism: { phrase: "альфа и омега", meaning: "самое главное, основа, суть чего-либо" } },
+    phraseologisms: [
+      { phrase: "альфа и омега", meaning: "самое главное, основа, суть чего-либо" }
+    ] },
   { sentence: "Она сидела перед дверью аудитории, обхватив колени. Было страшно, сердце стучало в груди. Она глубоко вздохнула, выпрямилась и попыталась взять себя в руки. Так начинался её экзамен.",
-    phraseologism: { phrase: "взять себя в руки", meaning: "успокоиться, овладеть собой" } },
-  { sentence: "Представь себе, ты просыпаешься, а за окном пустыня. Ни домов, ни людей, только песок и небо. Именно так он описывал своё первое утро в экспедиции. Было странно и немного страшно: всё-таки не каждый день такое случается.",
-    phraseologism: { phrase: "Представь себе", meaning: "вообрази, вдумайся" } },
+    phraseologisms: [
+      { phrase: "взять себя в руки", meaning: "успокоиться, овладеть собой" }
+    ] },
+  { sentence: "Представь себе, ты просыпаешься, а за окном пустыня. Ни домов, ни людей, только песок и небо. Именно так он описывал своё первое утро в экспедиции. Было странно и немного страшно: всё-таки не каждый день такое случается. И это действительно заставляло подумать о многом.",
+    phraseologisms: [
+      { phrase: "Представь себе", meaning: "вообрази, вдумайся" }
+    ] },
   { sentence: "Перед выходом он повернулся к сестре: «Если я задержусь, не жди меня к ужину». Она кивнула, не отрываясь от телефона. Он тихо повторил: «Серьёзно, имей в виду». И ушёл.",
-    phraseologism: { phrase: "имей в виду", meaning: "учти, прими во внимание" } },
+    phraseologisms: [
+      { phrase: "имей в виду", meaning: "учти, прими во внимание" }
+    ] },
   { sentence: "Она открыла дверь и застыла. На пороге стоял её брат, которого считали пропавшим. Она не верила глазам. Несколько секунд она просто смотрела, не двигаясь.",
-    phraseologism: { phrase: "не верила глазам", meaning: "крайне удивлялась увиденному" } },
+    phraseologisms: [
+      { phrase: "не верила глазам", meaning: "крайне удивлялась увиденному" }
+    ] },
   { sentence: "Он уже не работал в школе, но каждый раз приходил на выпускные. Сидел в последнем ряду, внимательно слушал и иногда вытирал глаза. Он продолжал болеть душой за своих учеников. Для него они навсегда остались важными.",
-    phraseologism: { phrase: "болеть душой", meaning: "сильно переживать, беспокоиться" } },
+    phraseologisms: [
+      { phrase: "каждый раз", meaning: "всегда, в любой ситуации (наречие частоты)" },
+      { phrase: "болеть душой", meaning: "сильно переживать, беспокоиться" }
+    ] },
   { sentence: "Как правило, он начинал утро с газеты и чашки кофе. Его нельзя было трогать в это время. Он читал медленно, внимательно, постранично. Это был его личный ритуал.",
-    phraseologism: { phrase: "Как правило", meaning: "обычно, в большинстве случаев" } },
+    phraseologisms: [
+      { phrase: "Как правило", meaning: "обычно, в большинстве случаев" }
+    ] },
   { sentence: "Он остановился на середине лестницы. Вдруг ему пришло в голову, что ключи остались в машине. Он спустился обратно. День начинался с мелочей.",
-    phraseologism: { phrase: "пришло в голову", meaning: "внезапно подумалось, возникла мысль" } },
+    phraseologisms: [
+      { phrase: "пришло в голову", meaning: "внезапно подумалось, возникла мысль" }
+    ] },
   { sentence: "Она ждала его у входа. Когда он появился, она сразу начала говорить. Без крика, но с упрёком. Она умела читать мораль так, что становилось не по себе.",
-    phraseologism: { phrase: "читать мораль", meaning: "поучать, наставлять (часто навязчиво)" } },
+    phraseologisms: [
+      { phrase: "читать мораль", meaning: "поучать, наставлять (часто навязчиво)" },
+      { phrase: "не по себе", meaning: "неловко, тревожно, не в своей тарелке" }
+    ] },
   { sentence: "Он вошёл в кабинет и сразу понял, что что-то не так. Все смотрели на него, ждали ответа. А он не имел понятия, о чём речь. Было неловко.",
-    phraseologism: { phrase: "не имел понятия", meaning: "совершенно не знал, не был осведомлён" } }
+    phraseologisms: [
+      { phrase: "не имел понятия", meaning: "совершенно не знал, не был осведомлён" }
+    ] }
 ];
 
 function tokenize(text) {
@@ -537,7 +573,9 @@ function findPhraseIndices(tokens, phrase) {
 }
 TASKS.forEach(task => {
   task.tokens = tokenize(task.sentence);
-  task.phraseologism.indices = findPhraseIndices(task.tokens, task.phraseologism.phrase);
+  task.phraseologisms.forEach(p => {
+    p.indices = findPhraseIndices(task.tokens, p.phrase);
+  });
 });
 
 /* ===== ЗВУК (Web Audio — без файлов) ===== */
@@ -905,31 +943,49 @@ function checkAnswer() {
   if (state.answered) return;
   state.answered = true;
   const task = TASKS[state.current];
-  const correctIndices = new Set(task.phraseologism.indices);
   const selectedIndices = state.selected;
 
-  const allCorrectFound = [...correctIndices].every(i => selectedIndices.has(i));
-  const noExtra = [...selectedIndices].every(i => correctIndices.has(i));
-  const isFullyCorrect = allCorrectFound && noExtra && correctIndices.size === selectedIndices.size;
-  const isPartial = !isFullyCorrect && [...selectedIndices].some(i => correctIndices.has(i));
+  /* Все индексы всех фразеологизмов задания (объединение). */
+  const allCorrectIndices = new Set();
+  task.phraseologisms.forEach(p => p.indices.forEach(i => allCorrectIndices.add(i)));
 
+  /* Найденные = те фразеологизмы, ВСЕ слова которых выделены. */
+  const foundPhrases = task.phraseologisms.filter(p =>
+    p.indices.length > 0 && p.indices.every(i => selectedIndices.has(i))
+  );
+  const isAnyFound  = foundPhrases.length > 0;
+  const isAllFound  = foundPhrases.length === task.phraseologisms.length;
+  /* Был ли частичный «правильный» клик (часть слов какого-то фразеологизма) — без полного? */
+  const hasPartial  = !isAnyFound && [...selectedIndices].some(i => allCorrectIndices.has(i));
+
+  /* Подсветка слов */
   document.querySelectorAll('.word').forEach(el => {
     const idx = parseInt(el.dataset.idx);
     el.classList.remove('selected');
-    if (correctIndices.has(idx) && selectedIndices.has(idx)) el.classList.add('correct');
-    else if (!correctIndices.has(idx) && selectedIndices.has(idx)) el.classList.add('wrong');
-    else if (correctIndices.has(idx) && !selectedIndices.has(idx)) el.classList.add('missed');
-    else el.classList.add('disabled');
+    if (allCorrectIndices.has(idx) && selectedIndices.has(idx))      el.classList.add('correct');
+    else if (!allCorrectIndices.has(idx) && selectedIndices.has(idx)) el.classList.add('wrong');
+    else if (allCorrectIndices.has(idx) && !selectedIndices.has(idx)) el.classList.add('missed');
+    else                                                              el.classList.add('disabled');
   });
 
+  /* Статус-сообщение и звук */
   let statusText, cssClass;
-  if (isFullyCorrect) {
+  if (isAllFound) {
     state.score++;
     document.getElementById('score-value').textContent = state.score;
-    statusText = '🏁 Чистая победа!';
+    statusText = task.phraseologisms.length > 1
+      ? '🏁 Все фразеологизмы найдены!'
+      : '🏁 Чистая победа!';
     cssClass = 'correct';
     Sound.success();
-  } else if (isPartial) {
+  } else if (isAnyFound) {
+    /* Балл засчитан, но не все фразеологизмы найдены */
+    state.score++;
+    document.getElementById('score-value').textContent = state.score;
+    statusText = '🥈 Балл засчитан — в этом задании был ещё один';
+    cssClass = 'partial';
+    Sound.success();
+  } else if (hasPartial) {
     state.wrongTasks.push(state.current + 1);
     statusText = '⚠️ Почти, но не идеально';
     cssClass = 'partial';
@@ -941,11 +997,19 @@ function checkAnswer() {
     Sound.fail();
   }
 
+  /* Список всех фразеологизмов задания со статусом (✓ нашла / ✗ пропустила) */
+  const phrasesHTML = task.phraseologisms.map(p => {
+    const found = foundPhrases.includes(p);
+    return `
+      <div class="phrase">${found ? '✓ ' : '✗ '}${escapeHtml(p.phrase)}</div>
+      <div class="meaning"><strong>Значение:</strong> ${escapeHtml(p.meaning)}</div>
+    `;
+  }).join('<div style="height:8px"></div>');
+
   document.getElementById('feedback').innerHTML = `
     <div class="feedback ${cssClass}">
       <div class="status">${statusText}</div>
-      <div class="phrase">${escapeHtml(task.phraseologism.phrase)}</div>
-      <div class="meaning"><strong>Значение:</strong> ${escapeHtml(task.phraseologism.meaning)}</div>
+      ${phrasesHTML}
     </div>
   `;
 

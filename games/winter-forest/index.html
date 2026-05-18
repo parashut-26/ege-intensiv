@@ -484,39 +484,78 @@ const CONFIG = {
   gameTitle: 'Зимняя гонка',
 };
 
+/* В каждом задании phraseologisms — массив. Балл за задание засчитывается,
+   если ученик нашёл ХОТЯ БЫ ОДИН фразеологизм целиком. */
 const TASKS = [
   { sentence: "Он стоял у окна и думал, звонить ли ей. Грешным делом подумал, что она могла бы сама написать. Но тут же прогнал эту мысль. Ему не хотелось быть мелочным.",
-    phraseologism: { phrase: "Грешным делом", meaning: "признаюсь, каюсь; иногда так бывает (с оттенком самокритики)" } },
+    phraseologisms: [
+      { phrase: "Грешным делом", meaning: "признаюсь, каюсь; иногда так бывает (с оттенком самокритики)" }
+    ] },
   { sentence: "Он вернулся домой, не раздеваясь прошёл на кухню и сел. Мать сразу поняла: что-то случилось. Он был сам не свой, отвечал коротко и смотрел в пол. Она молча поставила чайник.",
-    phraseologism: { phrase: "сам не свой", meaning: "крайне расстроен, не в нормальном состоянии" } },
+    phraseologisms: [
+      { phrase: "сам не свой", meaning: "крайне расстроен, не в нормальном состоянии" }
+    ] },
   { sentence: "Он хлопнул дверью так, что посуда на полке дрогнула. Слова вылетели сами, он не выбирал выражений. Он сказал это в сердцах, и уже через минуту пожалел. Но было поздно.",
-    phraseologism: { phrase: "в сердцах", meaning: "в порыве гнева, раздражения; не сдержавшись" } },
+    phraseologisms: [
+      { phrase: "в сердцах", meaning: "в порыве гнева, раздражения; не сдержавшись" }
+    ] },
   { sentence: "Он зашёл в кабинет и сразу почувствовал холодный взгляд начальника. В комнате было тихо, слишком тихо. Ему стало не по себе, хотя он ничего не сделал. Хотелось выйти.",
-    phraseologism: { phrase: "не по себе", meaning: "неловко, тревожно, не в своей тарелке" } },
+    phraseologisms: [
+      { phrase: "не по себе", meaning: "неловко, тревожно, не в своей тарелке" }
+    ] },
   { sentence: "Она слушала его речь спокойно. Но одно слово зацепило за живое. Она отвела глаза и больше не произнесла ни слова. Всё остальное стало неважным.",
-    phraseologism: { phrase: "зацепило за живое", meaning: "задело самое важное, чувствительное; вызвало сильные переживания" } },
+    phraseologisms: [
+      { phrase: "зацепило за живое", meaning: "задело самое важное, чувствительное; вызвало сильные переживания" },
+      { phrase: "отвела глаза", meaning: "перестала смотреть, обычно от смущения, неловкости, нежелания продолжать разговор взглядом" }
+    ] },
   { sentence: "Он вышел на улицу — и тут начался дождь. Как назло, зонт остался дома, а автобус уехал у него из-под носа. День начался неудачно. Он устало вытер лицо рукавом.",
-    phraseologism: { phrase: "Как назло", meaning: "словно нарочно, в самый неподходящий момент" } },
+    phraseologisms: [
+      { phrase: "Как назло", meaning: "словно нарочно, в самый неподходящий момент" },
+      { phrase: "из-под носа", meaning: "прямо рядом, у самого человека (часто — упустил то, что было совсем близко)" }
+    ] },
   { sentence: "Девочка сидела тихо, но глаза у неё были яркие, живые. Когда она начинала говорить, в комнате становилось светлее. В ней была та самая искра божья, которую не спутаешь ни с чем. Учителя это сразу заметили.",
-    phraseologism: { phrase: "искра божья", meaning: "талант, природная одарённость" } },
+    phraseologisms: [
+      { phrase: "искра божья", meaning: "талант, природная одарённость" }
+    ] },
   { sentence: "Они прожили вместе тридцать лет. Не ругались, не спорили по пустякам, делили всё поровну. Жили душа в душу, как говорили соседи. Их считали редким примером согласия.",
-    phraseologism: { phrase: "душа в душу", meaning: "в полном согласии, очень дружно" } },
+    phraseologisms: [
+      { phrase: "душа в душу", meaning: "в полном согласии, очень дружно" }
+    ] },
   { sentence: "Он долго держал письмо в руках. Скрепя сердце, открыл конверт и начал читать. Там было именно то, чего он боялся. И всё равно легче стало, когда знал точно.",
-    phraseologism: { phrase: "Скрепя сердце", meaning: "против своей воли, с большим нежеланием" } },
+    phraseologisms: [
+      { phrase: "Скрепя сердце", meaning: "против своей воли, с большим нежеланием" },
+      { phrase: "всё равно", meaning: "несмотря ни на что; в любом случае" }
+    ] },
   { sentence: "Она услышала, что его переводят в другой город. Сердце сжалось, но она не подала виду. Пожала плечами и спросила: «Когда уезжаешь?» Он так и не понял, как ей было трудно.",
-    phraseologism: { phrase: "не подала виду", meaning: "не показала своих чувств, скрыла переживания" } },
+    phraseologisms: [
+      { phrase: "Сердце сжалось", meaning: "внезапная тоска, тревога, печаль" },
+      { phrase: "не подала виду", meaning: "не показала своих чувств, скрыла переживания" }
+    ] },
   { sentence: "Он всегда был в команде первым. Никогда не жаловался, не просил замену, не опаздывал. Он был в игре душой и телом, это чувствовали все. Тренер ценил его больше остальных.",
-    phraseologism: { phrase: "душой и телом", meaning: "полностью, всем существом отдаваясь делу" } },
+    phraseologisms: [
+      { phrase: "душой и телом", meaning: "полностью, всем существом отдаваясь делу" }
+    ] },
   { sentence: "Каждый раз, проходя мимо старого дома, он невольно замедлял шаг. Там теперь жила чужая семья. Но душа болит: будто предал кого-то. Хотел забыть, но не получалось.",
-    phraseologism: { phrase: "душа болит", meaning: "сильно переживать, тревожиться о чём-либо" } },
+    phraseologisms: [
+      { phrase: "душа болит", meaning: "сильно переживать, тревожиться о чём-либо" }
+    ] },
   { sentence: "Она смотрела на сына, как будто он был единственным человеком на свете. Знала каждую привычку, чувствовала любое его настроение. Внуки говорили, что она души не чает в нём. И это была правда.",
-    phraseologism: { phrase: "души не чает", meaning: "очень сильно любит, обожает" } },
+    phraseologisms: [
+      { phrase: "души не чает", meaning: "очень сильно любит, обожает" }
+    ] },
   { sentence: "Он попробовал себя в разных делах — торговля, стройка, даже курсы кройки. Но всё было не то. Только когда начал преподавать, понял: душа лежит именно к этому. С тех пор не сомневался в выборе.",
-    phraseologism: { phrase: "душа лежит", meaning: "нравится, имеется внутренняя склонность к чему-либо" } },
+    phraseologisms: [
+      { phrase: "душа лежит", meaning: "нравится, имеется внутренняя склонность к чему-либо" },
+      { phrase: "С тех пор", meaning: "начиная с того момента в прошлом" }
+    ] },
   { sentence: "Он молча смотрел, как она смеётся. Всё в ней казалось ему чудесным, даже то, что раньше раздражало. Он был без ума от неё. И сам это прекрасно понимал.",
-    phraseologism: { phrase: "без ума", meaning: "очень сильно влюблён, в восторге от кого-либо или чего-либо" } },
+    phraseologisms: [
+      { phrase: "без ума", meaning: "очень сильно влюблён, в восторге от кого-либо или чего-либо" }
+    ] },
   { sentence: "Предложение казалось разумным, выгодным и перспективным. Но что-то в нём было не по нутру. Он не мог объяснить, почему. Просто не хотел соглашаться.",
-    phraseologism: { phrase: "не по нутру", meaning: "не нравится, противно по внутреннему ощущению" } }
+    phraseologisms: [
+      { phrase: "не по нутру", meaning: "не нравится, противно по внутреннему ощущению" }
+    ] }
 ];
 
 function tokenize(text) {
@@ -546,7 +585,9 @@ function findPhraseIndices(tokens, phrase) {
 }
 TASKS.forEach(task => {
   task.tokens = tokenize(task.sentence);
-  task.phraseologism.indices = findPhraseIndices(task.tokens, task.phraseologism.phrase);
+  task.phraseologisms.forEach(p => {
+    p.indices = findPhraseIndices(task.tokens, p.phrase);
+  });
 });
 
 /* ===== ЗВУК (Web Audio — без файлов) ===== */
@@ -930,31 +971,47 @@ function checkAnswer() {
   if (state.answered) return;
   state.answered = true;
   const task = TASKS[state.current];
-  const correctIndices = new Set(task.phraseologism.indices);
   const selectedIndices = state.selected;
 
-  const allCorrectFound = [...correctIndices].every(i => selectedIndices.has(i));
-  const noExtra = [...selectedIndices].every(i => correctIndices.has(i));
-  const isFullyCorrect = allCorrectFound && noExtra && correctIndices.size === selectedIndices.size;
-  const isPartial = !isFullyCorrect && [...selectedIndices].some(i => correctIndices.has(i));
+  /* Все индексы всех фразеологизмов задания (объединение). */
+  const allCorrectIndices = new Set();
+  task.phraseologisms.forEach(p => p.indices.forEach(i => allCorrectIndices.add(i)));
 
+  /* Найденные = те фразеологизмы, ВСЕ слова которых выделены. */
+  const foundPhrases = task.phraseologisms.filter(p =>
+    p.indices.length > 0 && p.indices.every(i => selectedIndices.has(i))
+  );
+  const isAnyFound  = foundPhrases.length > 0;
+  const isAllFound  = foundPhrases.length === task.phraseologisms.length;
+  const hasPartial  = !isAnyFound && [...selectedIndices].some(i => allCorrectIndices.has(i));
+
+  /* Подсветка слов */
   document.querySelectorAll('.word').forEach(el => {
     const idx = parseInt(el.dataset.idx);
     el.classList.remove('selected');
-    if (correctIndices.has(idx) && selectedIndices.has(idx)) el.classList.add('correct');
-    else if (!correctIndices.has(idx) && selectedIndices.has(idx)) el.classList.add('wrong');
-    else if (correctIndices.has(idx) && !selectedIndices.has(idx)) el.classList.add('missed');
-    else el.classList.add('disabled');
+    if (allCorrectIndices.has(idx) && selectedIndices.has(idx))      el.classList.add('correct');
+    else if (!allCorrectIndices.has(idx) && selectedIndices.has(idx)) el.classList.add('wrong');
+    else if (allCorrectIndices.has(idx) && !selectedIndices.has(idx)) el.classList.add('missed');
+    else                                                              el.classList.add('disabled');
   });
 
+  /* Статус-сообщение и звук — зимняя тематика */
   let statusText, cssClass;
-  if (isFullyCorrect) {
+  if (isAllFound) {
     state.score++;
     document.getElementById('score-value').textContent = state.score;
-    statusText = '✨ В точку!';
+    statusText = task.phraseologisms.length > 1
+      ? '✨ Все фразеологизмы найдены!'
+      : '✨ В точку!';
     cssClass = 'correct';
     Sound.success();
-  } else if (isPartial) {
+  } else if (isAnyFound) {
+    state.score++;
+    document.getElementById('score-value').textContent = state.score;
+    statusText = '🥈 Балл засчитан — в задании был ещё один';
+    cssClass = 'partial';
+    Sound.success();
+  } else if (hasPartial) {
     state.wrongTasks.push(state.current + 1);
     statusText = '🌨 Почти — снег не там';
     cssClass = 'partial';
@@ -966,11 +1023,19 @@ function checkAnswer() {
     Sound.fail();
   }
 
+  /* Список всех фразеологизмов задания со статусом (✓ нашла / ✗ пропустила) */
+  const phrasesHTML = task.phraseologisms.map(p => {
+    const found = foundPhrases.includes(p);
+    return `
+      <div class="phrase">${found ? '✓ ' : '✗ '}${escapeHtml(p.phrase)}</div>
+      <div class="meaning"><strong>Значение:</strong> ${escapeHtml(p.meaning)}</div>
+    `;
+  }).join('<div style="height:8px"></div>');
+
   document.getElementById('feedback').innerHTML = `
     <div class="feedback ${cssClass}">
       <div class="status">${statusText}</div>
-      <div class="phrase">${escapeHtml(task.phraseologism.phrase)}</div>
-      <div class="meaning"><strong>Значение:</strong> ${escapeHtml(task.phraseologism.meaning)}</div>
+      ${phrasesHTML}
     </div>
   `;
 
