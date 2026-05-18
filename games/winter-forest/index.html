@@ -3,28 +3,29 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>ZebRus · Тропа фразеологизмов</title>
+<title>ZebRus · Зимняя гонка</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Marck+Script&family=Manrope:wght@400;500;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
   :root {
-    /* Зимний лес: глубокий тёмно-синий фон + одно тёплое золотое
-       пятно (огонёк свечи) + бирюза северного сияния. */
-    --bg-0: #0a1226;
-    --bg-1: #122042;
-    --bg-2: #1b2d54;
-    --asphalt: #18223e;            /* «снег под звёздами» */
-    --line-yellow: #f5d182;        /* огонёк свечи — главный акцент */
-    --racing-red: #c084fc;         /* северное сияние — фиолетовый */
-    --neon-cyan: #7dd3fc;          /* морозная синева */
-    --neon-lime: #a3e635;          /* северный мох */
-    --gold: #fbbf24;
-    --text: #f4f5fa;
-    --text-dim: #94a3b0;
-    --correct: #4ade80;
-    --wrong: #f87171;
-    --partial: #fbbf24;
+    /* Зимний полдень: светлый ледяной фон + красные/золотые акценты
+       (как ягоды рябины на снегу и солнце в инее). Гоночная серия,
+       тема — зимняя гонка на санях. */
+    --bg-0: #f0f9ff;
+    --bg-1: #e0f2fe;
+    --bg-2: #cffafe;
+    --asphalt: #cbd5e1;            /* укатанная снежная трасса */
+    --line-yellow: #f59e0b;        /* солнечный акцент */
+    --racing-red: #dc2626;         /* красные ягоды рябины */
+    --neon-cyan: #0891b2;          /* морозная глубокая бирюза */
+    --neon-lime: #15803d;          /* зелёная хвоя */
+    --gold: #d97706;
+    --text: #0f172a;
+    --text-dim: #64748b;
+    --correct: #16a34a;
+    --wrong: #dc2626;
+    --partial: #d97706;
     --font-display: 'Marck Script', 'Comic Sans MS', system-ui, cursive;
     --font-body: 'Manrope', system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', monospace;
@@ -40,21 +41,21 @@
   body::before {
     content: ""; position: fixed; inset: 0;
     background:
-      radial-gradient(ellipse at top, rgba(192, 132, 252, 0.18), transparent 50%),
-      radial-gradient(ellipse at bottom right, rgba(125, 211, 252, 0.12), transparent 50%),
-      linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
+      radial-gradient(ellipse at top, rgba(8, 145, 178, 0.10), transparent 50%),
+      radial-gradient(ellipse at bottom right, rgba(245, 158, 11, 0.08), transparent 50%),
+      linear-gradient(180deg, var(--bg-0) 0%, var(--bg-2) 100%);
     z-index: -2;
   }
   body::after {
-    /* падающие снежинки-точки */
+    /* падающие снежинки-точки (тёмные на светлом фоне) */
     content: ""; position: fixed; inset: 0;
     background-image:
-      radial-gradient(circle at 10% 20%, rgba(255,255,255,0.4) 1px, transparent 1.5px),
-      radial-gradient(circle at 80% 60%, rgba(255,255,255,0.3) 1px, transparent 1.5px),
-      radial-gradient(circle at 50% 80%, rgba(255,255,255,0.4) 1px, transparent 1.5px),
-      radial-gradient(circle at 30% 50%, rgba(255,255,255,0.25) 1px, transparent 1.5px),
-      radial-gradient(circle at 70% 10%, rgba(255,255,255,0.35) 1px, transparent 1.5px);
-    background-size: 200px 200px;
+      radial-gradient(circle at 10% 20%, rgba(255,255,255,0.9) 2px, transparent 2.5px),
+      radial-gradient(circle at 80% 60%, rgba(255,255,255,0.8) 2px, transparent 2.5px),
+      radial-gradient(circle at 50% 80%, rgba(255,255,255,0.9) 2px, transparent 2.5px),
+      radial-gradient(circle at 30% 50%, rgba(255,255,255,0.7) 2px, transparent 2.5px),
+      radial-gradient(circle at 70% 10%, rgba(255,255,255,0.85) 2px, transparent 2.5px);
+    background-size: 240px 240px;
     z-index: -1; pointer-events: none;
     opacity: 0.6;
   }
@@ -250,12 +251,12 @@
 
   /* КАРТА ЗАДАНИЯ */
   .card {
-    background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: linear-gradient(180deg, #ffffff, #f8fafc);
+    border: 1px solid rgba(8, 145, 178, 0.15);
     border-radius: 20px;
     padding: 36px 32px;
     position: relative;
-    box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    box-shadow: 0 20px 40px -20px rgba(8, 145, 178, 0.25), 0 4px 12px rgba(15, 23, 42, 0.05), inset 0 1px 0 rgba(255, 255, 255, 0.8);
   }
   .card::before {
     content: attr(data-num);
@@ -350,16 +351,16 @@
   }
   .btn-primary {
     background: var(--racing-red);
-    color: var(--text);
-    box-shadow: 0 4px 0 #b81e3f, 0 10px 30px -10px rgba(255, 46, 85, 0.6);
+    color: #ffffff;
+    box-shadow: 0 4px 0 #991b1b, 0 10px 30px -10px rgba(220, 38, 38, 0.5);
   }
   .btn-primary:hover:not(:disabled) {
     transform: translateY(-2px);
-    box-shadow: 0 6px 0 #b81e3f, 0 14px 36px -10px rgba(255, 46, 85, 0.7);
+    box-shadow: 0 6px 0 #991b1b, 0 14px 36px -10px rgba(220, 38, 38, 0.6);
   }
   .btn-primary:active:not(:disabled) {
     transform: translateY(2px);
-    box-shadow: 0 2px 0 #b81e3f;
+    box-shadow: 0 2px 0 #991b1b;
   }
   .btn-primary:disabled {
     background: var(--asphalt);
@@ -480,7 +481,7 @@
 <script>
 const CONFIG = {
   gameName: 'winter-forest',
-  gameTitle: 'Тропа фразеологизмов',
+  gameTitle: 'Зимняя гонка',
 };
 
 const TASKS = [
@@ -621,55 +622,72 @@ const Sound = {
     this.engineOscillator.osc1.frequency.linearRampToValueAtTime(55, now + 0.4);
   },
 
+  /* ===== ЗИМНИЕ ЗВУКИ ===== */
   success() {
+    /* Звон хрустальной сосульки: 4 тона по октаве вверх,
+       синусоида, очень короткое атакование, длинный «звенящий» хвост. */
     if (!this.enabled) return;
     this.init();
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
-    [523.25, 659.25, 783.99].forEach((freq, i) => {
+    [1046.5, 1318.5, 1568.0, 2093.0].forEach((freq, i) => {
       const o = this.ctx.createOscillator();
       const g = this.ctx.createGain();
-      o.type = 'triangle';
+      o.type = 'sine';
       o.frequency.value = freq;
       g.gain.value = 0;
-      g.gain.linearRampToValueAtTime(0.13, now + i * 0.1 + 0.02);
-      g.gain.linearRampToValueAtTime(0, now + i * 0.1 + 0.3);
+      g.gain.linearRampToValueAtTime(0.10, now + i * 0.06 + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.06 + 0.8);
       o.connect(g); g.connect(this.ctx.destination);
-      o.start(now + i * 0.1); o.stop(now + i * 0.1 + 0.35);
+      o.start(now + i * 0.06); o.stop(now + i * 0.06 + 0.85);
     });
   },
 
   fail() {
+    /* Звук падения в сугроб: мягкий «пуф» — низкая частота
+       с быстрым затуханием + узкополосный шум через фильтр. */
     if (!this.enabled) return;
     this.init();
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
+    /* низкий «упал»: */
     const o = this.ctx.createOscillator();
     const g = this.ctx.createGain();
-    o.type = 'sawtooth';
-    o.frequency.setValueAtTime(220, now);
-    o.frequency.linearRampToValueAtTime(80, now + 0.4);
-    g.gain.value = 0.12;
-    g.gain.linearRampToValueAtTime(0, now + 0.4);
-    o.connect(g); g.connect(this.ctx.destination);
+    const filt = this.ctx.createBiquadFilter();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(180, now);
+    o.frequency.exponentialRampToValueAtTime(60, now + 0.25);
+    filt.type = 'lowpass';
+    filt.frequency.value = 400;
+    g.gain.value = 0;
+    g.gain.linearRampToValueAtTime(0.18, now + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    o.connect(filt); filt.connect(g); g.connect(this.ctx.destination);
     o.start(now); o.stop(now + 0.4);
   },
 
   finish() {
+    /* Бубенцы русской тройки на финиш: 6 высоких звонких нот,
+       синусоида с лёгкой инкрементной модуляцией. */
     if (!this.enabled) return;
     this.init();
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
-    [523.25, 659.25, 783.99, 1046.5].forEach((freq, i) => {
+    const bells = [1568.0, 1318.5, 1760.0, 2093.0, 1760.0, 2349.3];
+    bells.forEach((freq, i) => {
       const o = this.ctx.createOscillator();
+      const o2 = this.ctx.createOscillator();
       const g = this.ctx.createGain();
-      o.type = 'square';
+      o.type = 'sine';
+      o2.type = 'sine';
       o.frequency.value = freq;
+      o2.frequency.value = freq * 2.01;  // лёгкий призвук
       g.gain.value = 0;
-      g.gain.linearRampToValueAtTime(0.08, now + i * 0.15 + 0.02);
-      g.gain.linearRampToValueAtTime(0, now + i * 0.15 + 0.5);
-      o.connect(g); g.connect(this.ctx.destination);
-      o.start(now + i * 0.15); o.stop(now + i * 0.15 + 0.55);
+      g.gain.linearRampToValueAtTime(0.09, now + i * 0.13 + 0.005);
+      g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.13 + 0.6);
+      o.connect(g); o2.connect(g); g.connect(this.ctx.destination);
+      o.start(now + i * 0.13); o.stop(now + i * 0.13 + 0.65);
+      o2.start(now + i * 0.13); o2.stop(now + i * 0.13 + 0.65);
     });
   },
 
@@ -763,23 +781,23 @@ function renderStart() {
   const savedName = localStorage.getItem('zebrus_player_name') || '';
   document.getElementById('app').innerHTML = `
     <div class="start-screen">
-      <div class="car-anim">❄️</div>
-      <h1 class="title">Тропа<span class="accent">.</span><br>фразеологизмов</h1>
-      <p class="subtitle">Зимний лес · ZebRus · 2026</p>
+      <div class="car-anim">🛷</div>
+      <h1 class="title">Зимняя<span class="accent">.</span><br>гонка</h1>
+      <p class="subtitle">Сани · ZebRus · 2026</p>
       <div class="input-group">
-        <label for="name-input">Имя путника</label>
+        <label for="name-input">Имя гонщика</label>
         <input type="text" id="name-input" placeholder="Например: Аня"
                value="${escapeAttr(savedName)}" maxlength="40" autocomplete="off">
       </div>
-      <button class="btn btn-primary btn-large" id="start-btn">🌲 В путь</button>
+      <button class="btn btn-primary btn-large" id="start-btn">🏁 На старт</button>
       <div class="rules">
-        <h3>Правила тропы</h3>
+        <h3>Правила гонки</h3>
         <ul>
-          <li>В каждом тексте спрятан один фразеологизм</li>
+          <li>В каждом тексте спрятан фразеологизм</li>
           <li>Кликай по словам, чтобы выделить весь фразеологизм</li>
-          <li>Жми «Проверить», когда уверена</li>
+          <li>Жми «На финиш!», когда уверена</li>
           <li>За каждый правильный ответ — ❄ снежинка</li>
-          <li>Время в пути тоже считается — постарайся быстрее</li>
+          <li>Время гонки тоже считается — постарайся быстрее</li>
         </ul>
       </div>
     </div>
@@ -800,7 +818,7 @@ function renderStart() {
     state.playerName = name;
     localStorage.setItem('zebrus_player_name', name);
     Sound.init();
-    Sound.startEngine();
+    /* двигатель НЕ запускаем — звуки только дискретные */
     startTimer();
     renderGame();
   });
@@ -813,8 +831,8 @@ function renderGame() {
   document.getElementById('app').innerHTML = `
     <header class="header">
       <div class="logo">
-        Тропа<span class="accent">.</span>
-        <span class="player">❄ ${escapeHtml(state.playerName)}</span>
+        Зимняя гонка<span class="accent">.</span>
+        <span class="player">🛷 ${escapeHtml(state.playerName)}</span>
       </div>
       <div class="stats">
         <div class="stat">
@@ -834,11 +852,11 @@ function renderGame() {
       <div class="track-info">
         <span>Старт</span>
         <span class="current" id="track-label"></span>
-        <span>Костёр 🔥</span>
+        <span>Финиш 🏁</span>
       </div>
       <div class="track-bar">
         <div class="track-fill" id="track-fill"></div>
-        <div class="track-car" id="track-car">🦌</div>
+        <div class="track-car" id="track-car">🛷</div>
       </div>
     </div>
     <main id="game-area"></main>
@@ -848,7 +866,7 @@ function renderGame() {
     const enabled = Sound.toggle();
     e.currentTarget.textContent = enabled ? '🔊' : '🔇';
     e.currentTarget.classList.toggle('muted', !enabled);
-    if (enabled) Sound.startEngine();
+    /* двигатель не запускаем */
   });
 
   updateTrack();
@@ -876,7 +894,7 @@ function renderTask() {
       </div>
       <p class="sentence">${wordsHTML}</p>
       <div class="actions">
-        <button class="btn btn-primary" id="check-btn" disabled>Проверить ❄</button>
+        <button class="btn btn-primary" id="check-btn" disabled>На финиш!</button>
         <button class="btn btn-secondary" id="reset-btn">Сбросить</button>
       </div>
       <div id="feedback"></div>
@@ -943,7 +961,7 @@ function checkAnswer() {
     Sound.fail();
   } else {
     state.wrongTasks.push(state.current + 1);
-    statusText = '🌲 Сбилась с тропы';
+    statusText = '❄️ Авария в сугробе!';
     cssClass = 'wrong';
     Sound.fail();
   }
@@ -958,12 +976,16 @@ function checkAnswer() {
 
   const checkBtn = document.getElementById('check-btn');
   checkBtn.disabled = false;
-  checkBtn.textContent = state.current === TASKS.length - 1 ? 'К костру 🔥' : 'Дальше по тропе →';
+  checkBtn.textContent = state.current === TASKS.length - 1 ? 'К финишу 🏁' : 'Следующий поворот →';
   const newBtn = checkBtn.cloneNode(true);
   checkBtn.parentNode.replaceChild(newBtn, checkBtn);
   newBtn.addEventListener('click', () => {
     state.current++;
-    renderTask();
+    if (state.current >= TASKS.length) {
+      renderFinish();
+    } else {
+      renderTask();
+    }
   });
   document.getElementById('reset-btn').remove();
 }
@@ -976,13 +998,13 @@ function updateTrack() {
   const label = document.getElementById('track-label');
   if (fill) fill.style.width = progress + '%';
   if (car) car.style.left = progress + '%';
-  if (label) label.textContent = `Поляна ${state.current + 1} / ${total}`;
+  if (label) label.textContent = `Чекпоинт ${state.current + 1} / ${total}`;
 }
 
 /* ===== РЕНДЕР: ФИНИШ ===== */
 function renderFinish() {
   stopTimer();
-  Sound.stopEngine();
+  /* двигатель не запускали — останавливать нечего */
   setTimeout(() => Sound.finish(), 300);
 
   const total = TASKS.length;
@@ -996,9 +1018,9 @@ function renderFinish() {
 
   document.getElementById('app').innerHTML = `
     <div class="finish">
-      <div class="flag">🔥</div>
-      <h2>Тропа пройдена</h2>
-      <div class="player-name">🦌 ${escapeHtml(state.playerName)}</div>
+      <div class="flag">🏁</div>
+      <h2>Гонка завершена</h2>
+      <div class="player-name">🛷 ${escapeHtml(state.playerName)}</div>
       <div class="finish-stats">
         <div class="finish-stat">
           <div class="label">Снежинки</div>
@@ -1011,7 +1033,7 @@ function renderFinish() {
       </div>
       <div class="medal">${medal}</div>
       <div style="margin-top: 20px;">
-        <button class="btn btn-primary" id="restart-btn">${EMBED ? 'Закрыть' : 'Новая тропа'}</button>
+        <button class="btn btn-primary" id="restart-btn">${EMBED ? 'Закрыть' : 'Новый заезд'}</button>
       </div>
     </div>
   `;
@@ -1024,7 +1046,7 @@ function renderFinish() {
     state.current = 0;
     state.score = 0;
     state.wrongTasks = [];
-    Sound.startEngine();
+    /* двигатель не запускаем */
     startTimer();
     renderGame();
   });
@@ -1044,7 +1066,7 @@ function escapeAttr(str) {
    стартовый экран ввода имени не показываем.
    В standalone-режиме — обычный стартовый экран. */
 if (EMBED) {
-  Sound.enabled = false;            // в iframe платформы звук по умолчанию выключен
+  Sound.init();
   startTimer();
   renderGame();
 } else {
