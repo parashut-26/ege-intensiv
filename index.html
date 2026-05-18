@@ -18172,6 +18172,7 @@ async function addWarmupBlock(dayId, payload){
       const cur = (STATE.warmupBlocksByDay && STATE.warmupBlocksByDay[dayId]) || [];
       payload.ord = cur.length;
     }
+    if(!payload.type) payload.type = 'mixed';
     await restRequest('POST', '/warmup_blocks', payload, { prefer: 'return=minimal' });
     await loadWarmupBlocks(dayId);
     showToast('✓ Блок добавлен');
@@ -18179,6 +18180,54 @@ async function addWarmupBlock(dayId, payload){
   } catch(e){
     console.error('addWarmupBlock', e);
     showToast('⚠ ' + e.message);
+  }
+}
+
+/* Загрузка картинки в Supabase Storage (bucket: warmup) и возврат public URL */
+async function uploadWarmupImage(file){
+  const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const path = 'images/' + Date.now() + '_' + Math.random().toString(36).slice(2,8) + '.' + (ext || 'png');
+  const baseUrl = await uploadToStorage('warmup', path, file, file.type || 'image/png');
+  return baseUrl + '/storage/v1/object/public/warmup/' + path;
+}
+
+/* Голоса в опросе: подгрузить + проголосовать (или сменить голос). */
+async function loadWarmupVotes(blockId){
+  try {
+    const list = await restRequest('GET',
+      '/warmup_poll_votes?block_id=eq.' + blockId +
+      '&select=id,student_id,option_index');
+    if(!STATE.warmupVotesByBlock) STATE.warmupVotesByBlock = {};
+    STATE.warmupVotesByBlock[blockId] = list || [];
+  } catch(e){
+    console.error('loadWarmupVotes', e);
+    if(!STATE.warmupVotesByBlock) STATE.warmupVotesByBlock = {};
+    STATE.warmupVotesByBlock[blockId] = [];
+  }
+}
+async function voteWarmupPoll(blockId, optionIndex){
+  if(!MY_PROFILE || !MY_PROFILE.id) return;
+  try {
+    /* Удаляем старый голос (если был), потом вставляем новый — самый
+       простой способ, поддерживается даже без RPC. */
+    await restRequest('DELETE',
+      '/warmup_poll_votes?block_id=eq.' + blockId + '&student_id=eq.' + MY_PROFILE.id,
+      null, { prefer: 'return=minimal' });
+    await restRequest('POST', '/warmup_poll_votes',
+      { block_id: blockId, student_id: MY_PROFILE.id, option_index: optionIndex },
+      { prefer: 'return=minimal' });
+    await loadWarmupVotes(blockId);
+    /* Перерисовать только этот блок проще через render() — overlay в DOM,
+       но он формируется заново только при открытии. Поэтому обновим
+       inline-разметку голосов. */
+    const overlay = document.getElementById('zebrus-warmup-overlay');
+    if(overlay){
+      const day = (STATE.warmupDays || []).find(d => d.id === STATE.openWarmupDayId);
+      if(day) renderWarmupOverlay(day);
+    }
+  } catch(e){
+    console.error('voteWarmupPoll', e);
+    showToast('Не получилось проголосовать');
   }
 }
 async function deleteWarmupBlock(block){
@@ -18246,90 +18295,161 @@ function viewTeacherWarmup(){
 }
 
 function renderWarmupBlockTeacher(b){
-  const labels = { text:'📝 Текст', game:'🎮 Игра', link:'🔗 Ссылка', image:'🖼 Картинка', poll:'📊 Опрос' };
-  const card = el('div', { style:{ padding:'12px 14px', border:'1px solid var(--border)', borderRadius:'10px', marginTop:'8px', background:'var(--bg)' }},
-    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'6px' }},
-      el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', fontWeight:'700', textTransform:'uppercase', letterSpacing:'.04em' }},
-        labels[b.type] || b.type),
+  /* Композитная превьюшка: показываем все непустые части. */
+  const cfg = (b.config && typeof b.config === 'object') ? b.config : {};
+  const card = el('div', { style:{ padding:'12px 14px', border:'1px solid var(--border)', borderRadius:'10px', marginTop:'8px', background:'var(--bg)' }});
+  card.append(
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }},
+      el('div', { style:{ display:'flex', gap:'6px', alignItems:'center', fontSize:'12px', color:'var(--ink-3)', fontWeight:'700', textTransform:'uppercase', letterSpacing:'.04em' }},
+        el('span', { style:{ fontSize:'1.4rem' }}, b.emoji || '📌'),
+        'Пост #' + b.ord),
       el('button', { class:'btn btn-secondary btn-sm', style:{ padding:'2px 8px', fontSize:'12px' },
         onclick: () => deleteWarmupBlock(b)
-      }, '🗑')),
-    el('div', { style:{ display:'flex', gap:'8px', alignItems:'flex-start' }},
-      el('span', { style:{ fontSize:'1.4rem' }}, b.emoji || '📌'),
-      el('div', { style:{ flex:1, minWidth:0 }},
-        b.title ? el('div', { style:{ fontWeight:'700', marginBottom:'4px' }}, b.title) : null,
-        b.body  ? el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', whiteSpace:'pre-wrap' }}, b.body) : null,
-        b.url   ? el('div', { style:{ fontSize:'12px', color:'var(--p-deep)', marginTop:'4px', wordBreak:'break-all' }}, '🔗 ' + b.url) : null,
-        b.game_id ? el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px' }},
-          '🎮 ' + (((STATE.gamesList || []).find(g => g.id === b.game_id) || {}).title || '(игра не найдена)')) : null)));
+      }, '🗑')));
+  if(b.image_url){
+    card.append(el('img', { src:b.image_url, alt:'',
+      style:{ display:'block', width:'100%', maxHeight:'200px', objectFit:'cover', borderRadius:'8px', marginBottom:'8px' }}));
+  }
+  if(b.title) card.append(el('div', { style:{ fontWeight:'700', marginBottom:'4px' }}, b.title));
+  if(b.body)  card.append(el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', whiteSpace:'pre-wrap', marginBottom:'6px' }}, b.body));
+  if(b.url)   card.append(el('div', { style:{ fontSize:'12px', color:'var(--p-deep)', wordBreak:'break-all' }}, '🔗 ' + b.url));
+  if(b.game_id){
+    const g = (STATE.gamesList || []).find(x => x.id === b.game_id);
+    card.append(el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px' }},
+      '🎮 ' + (g ? (g.emoji + ' ' + g.title) : '(игра не найдена)')));
+  }
+  if(cfg.poll && cfg.poll.question && Array.isArray(cfg.poll.options) && cfg.poll.options.length){
+    /* Показываем количество голосов по каждому варианту */
+    if(STATE.warmupVotesByBlock == null || STATE.warmupVotesByBlock[b.id] == null){
+      loadWarmupVotes(b.id).then(render);
+    }
+    const votes = (STATE.warmupVotesByBlock && STATE.warmupVotesByBlock[b.id]) || [];
+    const total = votes.length;
+    card.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'var(--p-soft)', borderRadius:'6px', fontSize:'13px' }},
+      el('div', { style:{ fontWeight:'700', marginBottom:'6px' }}, '📊 ' + cfg.poll.question),
+      ...cfg.poll.options.map((opt, idx) => {
+        const count = votes.filter(v => v.option_index === idx).length;
+        const pct = total ? Math.round(count / total * 100) : 0;
+        return el('div', { style:{ marginBottom:'4px' }},
+          opt + ' — ' + count + (total ? ' (' + pct + '%)' : ''));
+      }),
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'4px' }},
+        'всего голосов: ' + total)));
+  }
   return card;
 }
 
 function renderAddBlockForm(day){
-  const box = el('div', { style:{ marginTop:'12px', padding:'12px', background:'var(--p-soft)', borderRadius:'10px', border:'1px dashed var(--p-deep)' }});
-  const typeSel = el('select', { style:{ padding:'6px 10px', borderRadius:'6px', border:'1px solid var(--border-2)', fontSize:'13px' }},
-    el('option', { value:'text'  }, '📝 Текст'),
-    el('option', { value:'game'  }, '🎮 Игра'),
-    el('option', { value:'link'  }, '🔗 Ссылка'),
-    el('option', { value:'image' }, '🖼 Картинка'));
-  const fieldsBox = el('div', { style:{ marginTop:'10px' }});
-  function rebuildFields(){
-    fieldsBox.innerHTML = '';
-    const t = typeSel.value;
-    const emojiInput = el('input', { type:'text', placeholder:'эмодзи 📌', style:{ width:'80px', padding:'6px 10px', borderRadius:'6px', border:'1px solid var(--border-2)' }});
-    const titleInput = el('input', { type:'text', placeholder:'Заголовок', style:{ flex:1, padding:'6px 10px', borderRadius:'6px', border:'1px solid var(--border-2)' }});
-    fieldsBox.append(el('div', { style:{ display:'flex', gap:'8px', marginBottom:'8px' }}, emojiInput, titleInput));
+  /* Единая форма «как пост в Telegram»: все поля опциональны,
+     можно совмещать картинку + текст + игру + опрос. */
+  const box = el('div', { style:{ marginTop:'12px', padding:'14px', background:'var(--p-soft)', borderRadius:'10px', border:'1px dashed var(--p-deep)' }});
+  const ss = { padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border-2)', fontSize:'13px' };
+  const sectionLabel = (text) => el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', fontWeight:'700', textTransform:'uppercase', letterSpacing:'.05em', marginTop:'10px', marginBottom:'4px' }}, text);
 
-    let extra = {};
-    if(t === 'text'){
-      const ta = el('textarea', { placeholder:'Текст карточки (можно многострочный)',
-        style:{ width:'100%', minHeight:'80px', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)', fontFamily:'inherit', fontSize:'13px' }});
-      fieldsBox.append(ta);
-      extra.getPayload = () => ({ body: ta.value });
-    } else if(t === 'game'){
-      const sel = el('select', { style:{ width:'100%', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)' }},
-        el('option', { value:'' }, '— выбери игру —'),
-        ...((STATE.gamesList || []).map(g => el('option', { value: String(g.id) }, (g.emoji || '🎮') + ' ' + g.title))));
-      fieldsBox.append(sel);
-      const desc = el('textarea', { placeholder:'Короткое описание (необязательно)',
-        style:{ width:'100%', minHeight:'50px', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)', marginTop:'6px', fontFamily:'inherit', fontSize:'13px' }});
-      fieldsBox.append(desc);
-      extra.getPayload = () => ({ game_id: sel.value ? parseInt(sel.value,10) : null, body: desc.value });
-    } else if(t === 'link'){
-      const url = el('input', { type:'url', placeholder:'https://… (видео, Яндекс.Диск)',
-        style:{ width:'100%', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)' }});
-      const desc = el('textarea', { placeholder:'Описание (необязательно)',
-        style:{ width:'100%', minHeight:'50px', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)', marginTop:'6px', fontFamily:'inherit', fontSize:'13px' }});
-      fieldsBox.append(url, desc);
-      extra.getPayload = () => ({ url: url.value, body: desc.value });
-    } else if(t === 'image'){
-      const url = el('input', { type:'url', placeholder:'URL картинки (можно вставить с Яндекс.Диска)',
-        style:{ width:'100%', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)' }});
-      const desc = el('textarea', { placeholder:'Подпись (необязательно)',
-        style:{ width:'100%', minHeight:'50px', padding:'8px', borderRadius:'6px', border:'1px solid var(--border-2)', marginTop:'6px', fontFamily:'inherit', fontSize:'13px' }});
-      fieldsBox.append(url, desc);
-      extra.getPayload = () => ({ url: url.value, body: desc.value });
+  /* === Поля === */
+  const emojiInput = el('input', { type:'text', placeholder:'📌', style:Object.assign({}, ss, { width:'70px', textAlign:'center', fontSize:'18px' })});
+  const titleInput = el('input', { type:'text', placeholder:'Заголовок поста (необязательно)', style:Object.assign({}, ss, { flex:1 })});
+  const bodyTextarea = el('textarea', { placeholder:'Текст поста — что хочешь сказать ученикам',
+    style:Object.assign({}, ss, { width:'100%', minHeight:'90px', fontFamily:'inherit' })});
+  /* Картинка с upload */
+  const imgPreview = el('div', { style:{ marginTop:'6px' }});
+  let uploadedImageUrl = null;
+  const fileInput = el('input', { type:'file', accept:'image/*', style:{ display:'none' },
+    onchange: async (ev) => {
+      const f = ev.target.files && ev.target.files[0];
+      if(!f) return;
+      imgPreview.innerHTML = '⏳ загружаю…';
+      try {
+        uploadedImageUrl = await uploadWarmupImage(f);
+        imgPreview.innerHTML = '';
+        imgPreview.append(
+          el('img', { src:uploadedImageUrl, alt:'', style:{ maxWidth:'200px', maxHeight:'140px', borderRadius:'6px', display:'block' }}),
+          el('button', { class:'btn btn-secondary btn-sm', style:{ marginTop:'4px', fontSize:'12px' },
+            onclick: () => { uploadedImageUrl = null; imgPreview.innerHTML = ''; fileInput.value = ''; }
+          }, '✕ убрать'));
+      } catch(e){
+        console.error('uploadWarmupImage', e);
+        imgPreview.innerHTML = '⚠ не получилось загрузить: ' + e.message;
+      }
     }
+  });
+  const pickImgBtn = el('button', { class:'btn btn-secondary',
+    onclick: () => fileInput.click()
+  }, '📎 Прикрепить картинку');
+  /* Ссылка-кнопка */
+  const urlInput = el('input', { type:'url', placeholder:'https://… (Яндекс.Диск, видео, любая ссылка)', style:Object.assign({}, ss, { width:'100%' })});
+  /* Игра */
+  const gameSelect = el('select', { style:Object.assign({}, ss, { width:'100%' })},
+    el('option', { value:'' }, '— без игры —'),
+    ...((STATE.gamesList || []).map(g => el('option', { value: String(g.id) }, (g.emoji || '🎮') + ' ' + g.title))));
+  /* Опрос */
+  const pollQuestion = el('input', { type:'text', placeholder:'Вопрос опроса (необязательно)', style:Object.assign({}, ss, { width:'100%', marginBottom:'6px' })});
+  const pollOptionsBox = el('div', null);
+  let pollOptions = ['', ''];   // минимум 2 пустых поля
+  function rebuildPollOptions(){
+    pollOptionsBox.innerHTML = '';
+    pollOptions.forEach((val, idx) => {
+      const inp = el('input', { type:'text', placeholder:'Вариант ' + (idx+1),
+        value: val,
+        style:Object.assign({}, ss, { flex:1 }),
+        oninput: (e) => { pollOptions[idx] = e.target.value; }
+      });
+      const row = el('div', { style:{ display:'flex', gap:'6px', marginBottom:'4px' }}, inp);
+      if(pollOptions.length > 2){
+        row.append(el('button', { class:'btn btn-secondary btn-sm', style:{ padding:'2px 8px', fontSize:'12px' },
+          onclick: () => { pollOptions.splice(idx,1); rebuildPollOptions(); }
+        }, '✕'));
+      }
+      pollOptionsBox.append(row);
+    });
+    if(pollOptions.length < 6){
+      pollOptionsBox.append(el('button', { class:'btn btn-secondary btn-sm', style:{ fontSize:'12px', marginTop:'4px' },
+        onclick: () => { pollOptions.push(''); rebuildPollOptions(); }
+      }, '＋ Ещё вариант'));
+    }
+  }
+  rebuildPollOptions();
 
-    fieldsBox.append(el('div', { style:{ marginTop:'10px', display:'flex', gap:'8px' }},
+  /* === Сборка формы === */
+  box.append(
+    el('div', { style:{ fontWeight:'700', marginBottom:'8px', fontSize:'14px' }},
+      '＋ Новый пост ко Дню ' + day.ord),
+    el('div', { style:{ display:'flex', gap:'8px', marginBottom:'8px' }}, emojiInput, titleInput),
+    sectionLabel('📝 Текст'),
+    bodyTextarea,
+    sectionLabel('🖼 Картинка (с твоего телефона)'),
+    el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }}, pickImgBtn, fileInput),
+    imgPreview,
+    sectionLabel('🔗 Ссылка (видео, Яндекс.Диск, любая)'),
+    urlInput,
+    sectionLabel('🎮 Игра из каталога'),
+    gameSelect,
+    sectionLabel('📊 Опрос'),
+    pollQuestion,
+    pollOptionsBox,
+    el('div', { style:{ marginTop:'12px' }},
       el('button', { class:'btn btn-teal',
         onclick: async () => {
-          const payload = Object.assign({
-            type: t,
+          const validPollOptions = pollOptions.map(o => (o || '').trim()).filter(Boolean);
+          const hasPoll = pollQuestion.value.trim() && validPollOptions.length >= 2;
+          const payload = {
+            type: 'mixed',
             emoji: emojiInput.value.trim() || '📌',
-            title: titleInput.value.trim() || null
-          }, extra.getPayload());
+            title: titleInput.value.trim() || null,
+            body: bodyTextarea.value.trim() || null,
+            image_url: uploadedImageUrl || null,
+            url: urlInput.value.trim() || null,
+            game_id: gameSelect.value ? parseInt(gameSelect.value,10) : null,
+            config: hasPoll ? { poll: { question: pollQuestion.value.trim(), options: validPollOptions } } : null
+          };
+          /* Проверим что хотя бы что-то заполнено */
+          if(!payload.title && !payload.body && !payload.image_url && !payload.url && !payload.game_id && !hasPoll){
+            showToast('Заполни хотя бы одно поле');
+            return;
+          }
           await addWarmupBlock(day.id, payload);
         }
-      }, '＋ Сохранить блок')));
-  }
-  typeSel.onchange = rebuildFields;
-  box.append(
-    el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', fontWeight:'700', marginBottom:'8px' }},
-      el('span', null, '＋ Добавить блок:'),
-      typeSel),
-    fieldsBox);
-  rebuildFields();
+      }, '＋ Опубликовать пост')));
   return box;
 }
 
@@ -18366,50 +18486,102 @@ function renderWarmupOverlay(day){
 }
 
 function renderWarmupBlockStudent(b){
-  const baseCard = (...children) => el('div', { class:'card',
-    style:{ marginBottom:'14px', padding:'18px 20px' }}, ...children);
-  if(b.type === 'text'){
-    return baseCard(
-      el('div', { style:{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'10px' }},
-        el('span', { style:{ fontSize:'1.6rem' }}, b.emoji || '📝'),
-        b.title ? el('h3', { style:{ margin:0 }}, b.title) : null),
-      b.body ? el('div', { style:{ fontSize:'15px', lineHeight:'1.55', whiteSpace:'pre-wrap', color:'var(--ink)' }}, b.body) : null);
+  /* Композитная карточка-«пост»: показываем по очереди всё, что заполнено,
+     сверху картинка, потом заголовок/текст, потом ссылка/игра, потом опрос. */
+  const cfg = (b.config && typeof b.config === 'object') ? b.config : {};
+  const card = el('div', { class:'card', style:{ marginBottom:'16px', padding:'0', overflow:'hidden' }});
+
+  /* Картинка */
+  if(b.image_url){
+    card.append(el('img', { src:b.image_url, alt: b.title || '',
+      style:{ display:'block', width:'100%', maxHeight:'420px', objectFit:'cover', background:'var(--bg)' }}));
   }
-  if(b.type === 'game'){
+
+  const inner = el('div', { style:{ padding:'16px 20px' }});
+
+  /* Шапка с эмодзи + заголовком */
+  if(b.title){
+    inner.append(el('div', { style:{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'10px' }},
+      el('span', { style:{ fontSize:'1.6rem' }}, b.emoji || '📌'),
+      el('h3', { style:{ margin:0 }}, b.title)));
+  } else if(b.emoji){
+    inner.append(el('div', { style:{ fontSize:'1.6rem', marginBottom:'8px' }}, b.emoji));
+  }
+
+  /* Текст */
+  if(b.body){
+    inner.append(el('div', { style:{ fontSize:'15px', lineHeight:'1.55', whiteSpace:'pre-wrap', color:'var(--ink)', marginBottom:'12px' }}, b.body));
+  }
+
+  /* Кнопка-игра */
+  if(b.game_id){
     const game = (STATE.studentGamesList || []).find(g => g.id === b.game_id)
               || (STATE.gamesList || []).find(g => g.id === b.game_id);
-    if(!game) return baseCard(el('div', { style:{ color:'var(--ink-3)' }}, '⚠ Игра не найдена'));
-    return el('div', { class:'card',
-      style:{ marginBottom:'14px', padding:'18px 20px', cursor:'pointer',
-              background:'linear-gradient(135deg, #FFFBEB, #FED7AA)', borderColor:'#FB923C' },
-      onclick: () => openGameModal(game)
-    },
-      el('div', { style:{ display:'flex', alignItems:'center', gap:'12px' }},
-        el('span', { style:{ fontSize:'2.2rem' }}, game.emoji || '🎮'),
-        el('div', { style:{ flex:1 }},
-          b.title ? el('div', { style:{ fontWeight:'800', fontSize:'15px' }}, b.title) : null,
-          el('div', { style:{ fontWeight:'700', fontSize:'17px' }}, game.title),
-          b.body ? el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', marginTop:'4px' }}, b.body) : null,
-          el('div', { style:{ marginTop:'8px', color:'#9A3412', fontWeight:'700', fontSize:'13px' }}, '▶ Играть'))));
+    if(game){
+      inner.append(el('div', { style:{ marginBottom:'10px' }},
+        el('div', { class:'card',
+          style:{ cursor:'pointer', padding:'14px', background:'linear-gradient(135deg, #FFFBEB, #FED7AA)', borderColor:'#FB923C',
+                  display:'flex', alignItems:'center', gap:'12px' },
+          onclick: () => openGameModal(game)
+        },
+          el('span', { style:{ fontSize:'2rem' }}, game.emoji || '🎮'),
+          el('div', { style:{ flex:1 }},
+            el('div', { style:{ fontWeight:'700', fontSize:'15px' }}, game.title),
+            el('div', { style:{ marginTop:'4px', color:'#9A3412', fontWeight:'700', fontSize:'13px' }}, '▶ Играть')))));
+    }
   }
-  if(b.type === 'link'){
-    return baseCard(
-      el('div', { style:{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'8px' }},
-        el('span', { style:{ fontSize:'1.6rem' }}, b.emoji || '🔗'),
-        b.title ? el('h3', { style:{ margin:0 }}, b.title) : null),
-      b.body ? el('div', { style:{ fontSize:'14px', color:'var(--ink-2)', marginBottom:'10px', whiteSpace:'pre-wrap' }}, b.body) : null,
-      b.url ? el('a', { href:b.url, target:'_blank', rel:'noopener', class:'btn btn-p btn-sm',
+
+  /* Кнопка-ссылка */
+  if(b.url){
+    inner.append(el('div', { style:{ marginBottom:'10px' }},
+      el('a', { href:b.url, target:'_blank', rel:'noopener', class:'btn btn-p',
         style:{ textDecoration:'none', display:'inline-block' }
-      }, '↗ Открыть') : null);
+      }, '↗ Открыть ссылку')));
   }
-  if(b.type === 'image'){
-    return baseCard(
-      b.title ? el('h3', { style:{ marginBottom:'10px' }}, (b.emoji || '🖼') + ' ' + b.title) : null,
-      b.url ? el('img', { src:b.url, alt: b.title || '',
-        style:{ display:'block', width:'100%', maxHeight:'500px', objectFit:'contain', borderRadius:'10px', background:'var(--bg)' }}) : null,
-      b.body ? el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', marginTop:'8px', textAlign:'center', fontStyle:'italic' }}, b.body) : null);
+
+  /* Опрос */
+  if(cfg.poll && cfg.poll.question && Array.isArray(cfg.poll.options) && cfg.poll.options.length >= 2){
+    if(STATE.warmupVotesByBlock == null || STATE.warmupVotesByBlock[b.id] == null){
+      loadWarmupVotes(b.id).then(() => {
+        const overlay = document.getElementById('zebrus-warmup-overlay');
+        const day = (STATE.warmupDays || []).find(d => d.id === STATE.openWarmupDayId);
+        if(overlay && day) renderWarmupOverlay(day);
+      });
+    }
+    const votes = (STATE.warmupVotesByBlock && STATE.warmupVotesByBlock[b.id]) || [];
+    const myVote = MY_PROFILE && votes.find(v => v.student_id === MY_PROFILE.id);
+    const total = votes.length;
+    const pollBox = el('div', { style:{ padding:'14px', background:'var(--p-soft)', borderRadius:'10px', marginTop:'10px' }},
+      el('div', { style:{ fontWeight:'700', fontSize:'15px', marginBottom:'10px' }}, '📊 ' + cfg.poll.question));
+    cfg.poll.options.forEach((opt, idx) => {
+      const count = votes.filter(v => v.option_index === idx).length;
+      const pct = total ? Math.round(count / total * 100) : 0;
+      const isMine = myVote && myVote.option_index === idx;
+      const row = el('div', { style:{ position:'relative', padding:'10px 14px', marginBottom:'6px',
+                                      border:'2px solid ' + (isMine ? 'var(--p-deep)' : 'var(--border-2)'),
+                                      borderRadius:'8px', cursor:'pointer', overflow:'hidden',
+                                      background:'#fff' },
+        onclick: () => voteWarmupPoll(b.id, idx)
+      });
+      /* Полоска % на фоне (если уже проголосовал кто-то) */
+      if(myVote){
+        row.append(el('div', { style:{ position:'absolute', inset:'0', width: pct + '%',
+                                       background: isMine ? 'var(--p-soft)' : 'var(--bg)',
+                                       transition:'width .3s ease', zIndex:'0' }}));
+      }
+      row.append(el('div', { style:{ position:'relative', zIndex:'1', display:'flex', justifyContent:'space-between', alignItems:'center' }},
+        el('span', null, (isMine ? '✓ ' : '') + opt),
+        myVote ? el('span', { style:{ fontWeight:'700', fontSize:'13px', color:'var(--ink-3)' }}, count + ' · ' + pct + '%') : null));
+      pollBox.append(row);
+    });
+    pollBox.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'6px' }},
+      myVote ? ('Ты выбрал(а) вариант ' + (myVote.option_index + 1) + '. Можешь сменить — нажми другой.')
+             : 'Тапни вариант, чтобы проголосовать.'));
+    inner.append(pollBox);
   }
-  return baseCard(el('div', null, 'Блок типа «' + b.type + '» (не поддерживается)'));
+
+  card.append(inner);
+  return card;
 }
 
 function viewTeacherGames(){
