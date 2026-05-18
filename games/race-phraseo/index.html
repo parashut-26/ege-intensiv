@@ -792,7 +792,8 @@ function renderStart() {
     state.playerName = name;
     localStorage.setItem('zebrus_player_name', name);
     Sound.init();
-    Sound.startEngine();
+    /* двигатель больше не запускаем — раздражает; оставляем
+       только дискретные звуки success / fail / finish */
     startTimer();
     renderGame();
   });
@@ -840,7 +841,7 @@ function renderGame() {
     const enabled = Sound.toggle();
     e.currentTarget.textContent = enabled ? '🔊' : '🔇';
     e.currentTarget.classList.toggle('muted', !enabled);
-    if (enabled) Sound.startEngine();
+    /* движок больше не запускаем — звуки только дискретные (success/fail/finish) */
   });
 
   updateTrack();
@@ -955,7 +956,11 @@ function checkAnswer() {
   checkBtn.parentNode.replaceChild(newBtn, checkBtn);
   newBtn.addEventListener('click', () => {
     state.current++;
-    renderTask();
+    if (state.current >= TASKS.length) {
+      renderFinish();
+    } else {
+      renderTask();
+    }
   });
   document.getElementById('reset-btn').remove();
 }
@@ -974,7 +979,7 @@ function updateTrack() {
 /* ===== РЕНДЕР: ФИНИШ ===== */
 function renderFinish() {
   stopTimer();
-  Sound.stopEngine();
+  /* двигатель не запускали — останавливать нечего */
   setTimeout(() => Sound.finish(), 300);
 
   const total = TASKS.length;
@@ -1016,7 +1021,7 @@ function renderFinish() {
     state.current = 0;
     state.score = 0;
     state.wrongTasks = [];
-    Sound.startEngine();
+    /* двигатель больше не запускаем */
     startTimer();
     renderGame();
   });
@@ -1036,7 +1041,9 @@ function escapeAttr(str) {
    стартовый экран ввода имени не показываем.
    В standalone-режиме — обычный стартовый экран. */
 if (EMBED) {
-  Sound.enabled = false;            // в iframe платформы звук по умолчанию выключен
+  /* Sound.enabled оставляем true — ученики в кабинете тоже хотят звук.
+     Если в будущем понадобится выключить, можно передавать ?sound=off */
+  Sound.init();
   startTimer();
   renderGame();
 } else {
