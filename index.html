@@ -10456,20 +10456,21 @@ function studentVariantsCard(){
    postMessage с результатом — пишем в game_attempts.
    ======================================================================= */
 async function loadStudentGamesList(){
+  /* Независимые try/catch, чтобы падение одного запроса не ломало другой. */
   try {
-    const [list, assigns] = await Promise.all([
-      restRequest('GET',
-        '/games?is_published=eq.true&select=id,slug,title,grade,topic,emoji,description,url,day_id' +
-        '&order=grade.asc,topic.asc,created_at.desc'),
-      restRequest('GET',
-        '/game_day_assignments?select=id,game_id,day_id')
-    ]);
-    STATE.studentGamesList = list || [];
-    STATE.gameDayAssignments = assigns || [];   // одно место хранения, удобно
+    STATE.studentGamesList = await restRequest('GET',
+      '/games?is_published=eq.true&select=id,slug,title,grade,topic,emoji,description,url,day_id' +
+      '&order=grade.asc,topic.asc,created_at.desc') || [];
   } catch(e){
-    console.error('loadStudentGamesList', e);
+    console.error('loadStudentGamesList (games)', e);
     STATE.studentGamesList = [];
-    STATE.gameDayAssignments = [];
+  }
+  try {
+    STATE.gameDayAssignments = await restRequest('GET',
+      '/game_day_assignments?select=id,game_id,day_id') || [];
+  } catch(e){
+    console.error('loadStudentGamesList (assignments)', e);
+    if(!Array.isArray(STATE.gameDayAssignments)) STATE.gameDayAssignments = [];
   }
 }
 
@@ -17993,20 +17994,22 @@ async function importOtpFile(file, title){
    ========================================================================== */
 
 async function loadGamesList(){
+  /* Независимые try/catch: если /game_day_assignments отдаст 502
+     (прокси / schema cache), сам каталог игр всё равно загрузится. */
   try {
-    const [list, assigns] = await Promise.all([
-      restRequest('GET',
-        '/games?select=id,slug,title,grade,topic,emoji,description,url,is_published,day_id,created_at' +
-        '&order=grade.asc,topic.asc,created_at.desc'),
-      restRequest('GET',
-        '/game_day_assignments?select=id,game_id,day_id')
-    ]);
-    STATE.gamesList = list || [];
-    STATE.gameDayAssignments = assigns || [];
+    STATE.gamesList = await restRequest('GET',
+      '/games?select=id,slug,title,grade,topic,emoji,description,url,is_published,day_id,created_at' +
+      '&order=grade.asc,topic.asc,created_at.desc') || [];
   } catch(e){
-    console.error('loadGamesList', e);
+    console.error('loadGamesList (games)', e);
     STATE.gamesList = [];
-    STATE.gameDayAssignments = [];
+  }
+  try {
+    STATE.gameDayAssignments = await restRequest('GET',
+      '/game_day_assignments?select=id,game_id,day_id') || [];
+  } catch(e){
+    console.error('loadGamesList (assignments)', e);
+    if(!Array.isArray(STATE.gameDayAssignments)) STATE.gameDayAssignments = [];
   }
 }
 
