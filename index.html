@@ -18476,6 +18476,7 @@ function renderAddBlockForm(day, editingBlock){
     }
   }
   rebuildPollOptions();
+  redrawImgGrid();   // покажем уже загруженные картинки в режиме редактирования
 
   /* === Сборка формы === */
   box.append(
@@ -18484,9 +18485,9 @@ function renderAddBlockForm(day, editingBlock){
     el('div', { style:{ display:'flex', gap:'8px', marginBottom:'8px' }}, emojiInput, titleInput),
     sectionLabel('📝 Текст'),
     bodyTextarea,
-    sectionLabel('🖼 Картинка (с твоего телефона)'),
+    sectionLabel('🖼 Картинки (можно несколько)'),
     el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }}, pickImgBtn, fileInput),
-    imgPreview,
+    imgGrid,
     sectionLabel('🔗 Ссылка (видео, Яндекс.Диск, любая)'),
     urlInput,
     sectionLabel('🎮 Игра из каталога'),
