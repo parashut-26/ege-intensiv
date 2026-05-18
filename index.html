@@ -8251,6 +8251,20 @@ function dayBlock(d){
         onclick: () => { startSolvingVariant(attachedVariant.id); }
       }, '▶ Решить пробник')));
   }
+  /* Посты, прикреплённые к этому дню (как в Разогреве) */
+  if(!STATE.intensivePostsByOrd || !STATE.intensivePostsByOrd[d.id]){
+    loadIntensivePosts(d.id).then(render);
+  }
+  const dayPosts = (STATE.intensivePostsByOrd && STATE.intensivePostsByOrd[d.id]) || [];
+  if(dayPosts.length){
+    const postsWrap = el('div', { class:'card',
+      style:{ background:'#FEF3C7', borderColor:'#D97706', marginBottom:'14px', padding:'14px 16px' }},
+      el('div', { style:{ fontSize:'11px', color:'#92400E', textTransform:'uppercase',
+                          letterSpacing:'.06em', fontWeight:'700', marginBottom:'10px' }},
+        '📝 Посты к этому дню'));
+    dayPosts.forEach(b => postsWrap.append(renderWarmupBlockStudent(b)));
+    card.append(postsWrap);
+  }
   /* Игры, прикреплённые к этому дню */
   const dayGames = getDayGames(d.id, STATE.studentGamesList || []);
   if(dayGames.length){
@@ -18624,7 +18638,7 @@ function renderAddBlockForm(day, editingBlock, target){
           if(isEdit){
             await updateWarmupBlock(editingBlock.id, payload);
           } else {
-            await addWarmupBlock(day.id, payload);
+            await addWarmupBlock(tgt, payload);
           }
         }
       }, isEdit ? '💾 Сохранить' : '＋ Опубликовать пост'),
@@ -18633,7 +18647,11 @@ function renderAddBlockForm(day, editingBlock, target){
             onclick: () => { STATE.editingBlockId = null; render(); }
           }, '✕ Отмена')
         : el('button', { class:'btn btn-secondary',
-            onclick: () => { STATE.addingPostToDayId = null; render(); }
+            onclick: () => {
+              STATE.addingPostToDayId = null;
+              STATE.addingPostToIntensiveOrd = null;
+              render();
+            }
           }, '✕ Отмена')));
   return box;
 }
@@ -21248,6 +21266,33 @@ function viewTeacherDays(){
       });
     }
     det.append(gamesBox);
+
+    /* === Блок «📝 Посты дня» (как в Разогреве) === */
+    const postsBox = el('div', { style:{ marginTop:'10px', padding:'12px', background:'#FEF3C7', border:'1px solid #D97706', borderRadius:'10px' }});
+    postsBox.append(el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E', marginBottom:'8px', textTransform:'uppercase', letterSpacing:'.05em' }},
+      '📝 Посты дня'));
+    if(STATE.intensivePostsByOrd && STATE.intensivePostsByOrd[d.id]){
+      const posts = STATE.intensivePostsByOrd[d.id];
+      if(!posts.length){
+        postsBox.append(el('div', { style:{ padding:'8px 0', color:'var(--ink-3)', fontSize:'13px' }},
+          'Пока ни одного поста к этому дню.'));
+      } else {
+        posts.forEach(b => postsBox.append(renderWarmupBlockTeacher(b, { ord: d.id })));
+      }
+      /* Кнопка / форма добавления */
+      if(STATE.addingPostToIntensiveOrd === d.id){
+        postsBox.append(renderAddBlockForm({ ord: d.id }, null, { intensiveOrd: d.id }));
+      } else {
+        postsBox.append(el('div', { style:{ marginTop:'10px', textAlign:'center' }},
+          el('button', { class:'btn btn-teal',
+            onclick: () => { STATE.addingPostToIntensiveOrd = d.id; STATE.editingBlockId = null; render(); }
+          }, '＋ Добавить пост в этот день')));
+      }
+    } else {
+      loadIntensivePosts(d.id).then(render);
+      postsBox.append(el('div', { style:{ padding:'8px 0', color:'var(--ink-3)' }}, '⏳ загружаю посты…'));
+    }
+    det.append(postsBox);
 
     const inner = el('div', { style:{ marginTop:'14px', display:'flex', flexDirection:'column', gap:'8px' }});
     d.tasks.forEach(t => {
