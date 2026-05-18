@@ -20463,7 +20463,7 @@ function viewTeacherDays(){
   if(!STATE.gamesList) loadGamesList().then(() => render());
 
   DAYS.filter(d => d.kind === 'work').forEach(d => {
-    const det = el('details', { class:'card', style:{ marginBottom:'12px' }});
+    const det = el('details', { class:'card', open:true, style:{ marginBottom:'12px' }});
     det.append(
       el('summary', { style:{ cursor:'pointer', listStyle:'none', display:'flex', justifyContent:'space-between', alignItems:'center' }},
         el('div', null,
