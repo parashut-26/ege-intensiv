@@ -8171,6 +8171,8 @@ function viewStudentDays(){
     el('h1', null, 'Дни интенсива'),
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'24px' }},
       'Каждый день открывается по расписанию. Ты можешь проходить задания в свободном порядке внутри дня.'));
+  /* Подгружаем игры — нужны для секции «Игры дня» */
+  if(!STATE.studentGamesList) loadStudentGamesList().then(() => render());
   DAYS.filter(d => d.kind === 'work').forEach(d => wrap.append(dayBlock(d)));
   DAYS.filter(d => d.kind === 'walk').forEach(d => wrap.append(walkBlock(d)));
   wrap.append(examBlock());
@@ -8205,6 +8207,26 @@ function dayBlock(d){
       el('button', { class:'btn btn-p btn-sm',
         onclick: () => { startSolvingVariant(attachedVariant.id); }
       }, '▶ Решить пробник')));
+  }
+  /* Игры, прикреплённые к этому дню */
+  const dayGames = getDayGames(d.id, STATE.studentGamesList || []);
+  if(dayGames.length){
+    const gamesBox = el('div', { class:'card', style:{ background:'#FFF7ED', borderColor:'#FB923C', marginBottom:'14px' }},
+      el('div', { style:{ fontSize:'11px', color:'#9A3412', textTransform:'uppercase', letterSpacing:'.06em', fontWeight:'700', marginBottom:'10px' }},
+        '🎮 Игры к этому дню'),
+      el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(220px, 1fr))', gap:'10px' }},
+        ...dayGames.map(g =>
+          el('div', { class:'card',
+            style:{ cursor:'pointer', padding:'12px 14px',
+                    background:'linear-gradient(135deg, #FFFBEB, #FED7AA)',
+                    borderColor:'#FB923C', display:'flex', alignItems:'center', gap:'10px' },
+            onclick: () => openGameModal(g)
+          },
+            el('span', { style:{ fontSize:'1.8rem' }}, g.emoji || '🎮'),
+            el('div', { style:{ flex:1, minWidth:0 }},
+              el('div', { style:{ fontWeight:'700', fontSize:'14px' }}, g.title),
+              el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, '▶ Играть'))))));
+    card.append(gamesBox);
   }
   const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'10px' }});
   d.tasks.forEach(t => list.append(taskRow(d, t, locked)));
@@ -10435,12 +10457,19 @@ function studentVariantsCard(){
    ======================================================================= */
 async function loadStudentGamesList(){
   try {
-    STATE.studentGamesList = await restRequest('GET',
-      '/games?is_published=eq.true&select=id,slug,title,topic,emoji,description,url,day_id' +
-      '&order=topic.asc,created_at.desc');
+    const [list, assigns] = await Promise.all([
+      restRequest('GET',
+        '/games?is_published=eq.true&select=id,slug,title,grade,topic,emoji,description,url,day_id' +
+        '&order=grade.asc,topic.asc,created_at.desc'),
+      restRequest('GET',
+        '/game_day_assignments?select=id,game_id,day_id')
+    ]);
+    STATE.studentGamesList = list || [];
+    STATE.gameDayAssignments = assigns || [];   // одно место хранения, удобно
   } catch(e){
     console.error('loadStudentGamesList', e);
     STATE.studentGamesList = [];
+    STATE.gameDayAssignments = [];
   }
 }
 
@@ -10527,20 +10556,32 @@ function viewStudentGames(){
     return wrap;
   }
 
-  /* Группа по теме */
-  const byTopic = {};
+  /* Двухуровневая группировка: класс → тема → карточки */
+  const byGradeTopic = {};
   games.forEach(g => {
-    const k = g.topic || 'Без темы';
-    (byTopic[k] = byTopic[k] || []).push(g);
+    const gr = g.grade || 'Без класса';
+    const tp = g.topic || 'Без темы';
+    (byGradeTopic[gr] = byGradeTopic[gr] || {});
+    (byGradeTopic[gr][tp] = byGradeTopic[gr][tp] || []).push(g);
   });
 
-  Object.keys(byTopic).forEach(topic => {
-    wrap.append(el('h3', { style:{ marginTop:'18px', marginBottom:'10px', color:'var(--ink-2)' }},
-      topic));
-    const grid = el('div', { style:{ display:'grid',
-      gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:'12px' }});
-    byTopic[topic].forEach(g => grid.append(renderStudentGameCard(g)));
-    wrap.append(grid);
+  Object.keys(byGradeTopic).forEach(grade => {
+    /* Сворачиваемая секция класса */
+    const det = el('details', { class:'card', open:true,
+      style:{ marginTop:'14px', marginBottom:'8px', padding:'14px 18px',
+              background:'linear-gradient(135deg, #FAF5FF, #F5F3FF)' }});
+    det.append(el('summary', { style:{ cursor:'pointer', fontSize:'18px', fontWeight:'800', color:'var(--ink)', listStyle:'none' }},
+      '🎓 ' + grade));
+    /* Темы и карточки внутри */
+    Object.keys(byGradeTopic[grade]).forEach(topic => {
+      det.append(el('h4', { style:{ marginTop:'14px', marginBottom:'8px', color:'var(--ink-2)', fontSize:'14px', textTransform:'uppercase', letterSpacing:'.05em' }},
+        '📁 ' + topic));
+      const grid = el('div', { style:{ display:'grid',
+        gridTemplateColumns:'repeat(auto-fill, minmax(240px, 1fr))', gap:'12px' }});
+      byGradeTopic[grade][topic].forEach(g => grid.append(renderStudentGameCard(g)));
+      det.append(grid);
+    });
+    wrap.append(det);
   });
 
   return wrap;
@@ -17953,12 +17994,55 @@ async function importOtpFile(file, title){
 
 async function loadGamesList(){
   try {
-    STATE.gamesList = await restRequest('GET',
-      '/games?select=id,slug,title,topic,emoji,description,url,is_published,day_id,created_at' +
-      '&order=created_at.desc');
+    const [list, assigns] = await Promise.all([
+      restRequest('GET',
+        '/games?select=id,slug,title,grade,topic,emoji,description,url,is_published,day_id,created_at' +
+        '&order=grade.asc,topic.asc,created_at.desc'),
+      restRequest('GET',
+        '/game_day_assignments?select=id,game_id,day_id')
+    ]);
+    STATE.gamesList = list || [];
+    STATE.gameDayAssignments = assigns || [];
   } catch(e){
     console.error('loadGamesList', e);
     STATE.gamesList = [];
+    STATE.gameDayAssignments = [];
+  }
+}
+
+/* Helpers: какие дни у игры, какие игры у дня */
+function getGameDays(gameId){
+  return (STATE.gameDayAssignments || [])
+    .filter(a => a.game_id === gameId)
+    .map(a => a.day_id);
+}
+function getDayGames(dayId, fromList){
+  const list = fromList || STATE.gamesList || [];
+  const gameIds = (STATE.gameDayAssignments || [])
+    .filter(a => a.day_id === dayId)
+    .map(a => a.game_id);
+  return list.filter(g => gameIds.includes(g.id));
+}
+
+/* Toggle привязки: добавляет/удаляет game_day_assignments. */
+async function toggleGameDayAssignment(gameId, dayId, attach){
+  try {
+    if(attach){
+      const row = await restRequest('POST', '/game_day_assignments',
+        { game_id: gameId, day_id: dayId },
+        { prefer: 'return=representation' });
+      const inserted = Array.isArray(row) ? row[0] : row;
+      if(inserted) (STATE.gameDayAssignments = STATE.gameDayAssignments || []).push(inserted);
+    } else {
+      await restRequest('DELETE',
+        '/game_day_assignments?game_id=eq.' + gameId + '&day_id=eq.' + dayId,
+        null, { prefer: 'return=minimal' });
+      STATE.gameDayAssignments = (STATE.gameDayAssignments || [])
+        .filter(a => !(a.game_id === gameId && a.day_id === dayId));
+    }
+  } catch(e){
+    console.error('toggleGameDayAssignment', e);
+    showToast('Не получилось — попробуй ещё раз');
   }
 }
 
@@ -18030,17 +18114,27 @@ function viewTeacherGames(){
     return wrap;
   }
 
-  /* Группируем по теме */
-  const byTopic = {};
+  /* Двухуровневая группировка: класс → тема → игры */
+  const byGradeTopic = {};
   games.forEach(g => {
-    const k = g.topic || 'Без темы';
-    (byTopic[k] = byTopic[k] || []).push(g);
+    const gr = g.grade || 'Без класса';
+    const tp = g.topic || 'Без темы';
+    (byGradeTopic[gr] = byGradeTopic[gr] || {});
+    (byGradeTopic[gr][tp] = byGradeTopic[gr][tp] || []).push(g);
   });
 
-  Object.keys(byTopic).forEach(topic => {
-    wrap.append(el('h3', { style:{ marginTop:'18px', marginBottom:'10px', color:'var(--ink-2)' }},
-      topic));
-    byTopic[topic].forEach(g => wrap.append(renderTeacherGameCard(g)));
+  Object.keys(byGradeTopic).forEach(grade => {
+    /* Сворачиваемая секция класса */
+    const det = el('details', { class:'card', open:true, style:{ marginTop:'14px', marginBottom:'8px', padding:'14px 18px' }});
+    det.append(el('summary', { style:{ cursor:'pointer', fontSize:'18px', fontWeight:'800', color:'var(--ink)', listStyle:'none' }},
+      '🎓 ' + grade));
+    /* Внутри — темы и игры */
+    Object.keys(byGradeTopic[grade]).forEach(topic => {
+      det.append(el('h4', { style:{ marginTop:'12px', marginBottom:'8px', color:'var(--ink-2)', fontSize:'14px', textTransform:'uppercase', letterSpacing:'.05em' }},
+        '📁 ' + topic));
+      byGradeTopic[grade][topic].forEach(g => det.append(renderTeacherGameCard(g)));
+    });
+    wrap.append(det);
   });
 
   return wrap;
@@ -18069,6 +18163,31 @@ function renderTeacherGameCard(g){
         el('button', { class:'btn btn-secondary',
           onclick: () => { STATE.selectedGameId = g.id; STATE.gameAttempts = null; render(); }
         }, '📊 Результаты'))));
+
+  /* === Привязка к дням интенсива (чекбоксы) === */
+  const attached = getGameDays(g.id);
+  const workDays = (typeof DAYS !== 'undefined' ? DAYS : []).filter(d => d.kind === 'work');
+  if(workDays.length){
+    const daysBox = el('div', { style:{ marginTop:'10px', padding:'8px 12px', background:'#F5F3FF', border:'1px solid #A78BFA', borderRadius:'10px', display:'flex', gap:'12px', alignItems:'center', flexWrap:'wrap' }},
+      el('span', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--p-deep)' }}, '📅 Дни интенсива:'));
+    workDays.forEach(d => {
+      const isOn = attached.includes(d.id);
+      const lbl = el('label', { style:{ display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'13px', cursor:'pointer' }});
+      const cb = el('input', { type:'checkbox',
+        onchange: async (ev) => {
+          const next = ev.target.checked;
+          await toggleGameDayAssignment(g.id, d.id, next);
+          showToast(next ? '✓ Игра добавлена в день ' + d.id : '✓ Игра убрана из дня ' + d.id);
+          render();
+        }
+      });
+      cb.checked = isOn;
+      lbl.append(cb, el('span', null, 'День ' + d.id));
+      daysBox.append(lbl);
+    });
+    card.append(daysBox);
+  }
+
   return card;
 }
 
@@ -20336,6 +20455,8 @@ function viewTeacherDays(){
 
   /* Догружаем список вариантов если ещё не было — нужны для dropdown'а */
   if(!STATE.variantsListLoaded) loadVariantsList().then(() => render());
+  /* Догружаем игры и привязки для блока «Игры дня» */
+  if(!STATE.gamesList) loadGamesList().then(() => render());
 
   DAYS.filter(d => d.kind === 'work').forEach(d => {
     const det = el('details', { class:'card', style:{ marginBottom:'12px' }});
@@ -20387,6 +20508,32 @@ function viewTeacherDays(){
     det.append(el('div', { style:{ marginTop:'10px', padding:'10px 12px', background:'#F5F3FF', border:'1px solid #A78BFA', borderRadius:'10px', display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }},
       el('span', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--p-deep)' }}, '📋 Вариант-пробник для дня:'),
       variantSelect));
+
+    /* === Блок «Игры дня» — чекбоксы всех игр === */
+    const allGames = STATE.gamesList || [];
+    const gamesBox = el('div', { style:{ marginTop:'10px', padding:'10px 12px', background:'#FFF7ED', border:'1px solid #FB923C', borderRadius:'10px', display:'flex', gap:'10px', alignItems:'flex-start', flexWrap:'wrap' }},
+      el('span', { style:{ fontSize:'12px', fontWeight:'700', color:'#9A3412', minWidth:'120px' }}, '🎮 Игры дня:'));
+    if(!allGames.length){
+      gamesBox.append(el('span', { style:{ color:'var(--ink-3)', fontSize:'12px' }}, '⏳ загружаю каталог…'));
+    } else {
+      allGames.forEach(g => {
+        const isOn = getGameDays(g.id).includes(d.id);
+        const lbl = el('label', { style:{ display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'13px', cursor:'pointer', padding:'3px 8px', borderRadius:'6px', background: isOn ? '#FED7AA' : 'transparent' }});
+        const cb = el('input', { type:'checkbox',
+          onchange: async (ev) => {
+            const next = ev.target.checked;
+            await toggleGameDayAssignment(g.id, d.id, next);
+            showToast(next ? '✓ «' + g.title + '» добавлена в день ' + d.id : '✓ Игра убрана');
+            render();
+          }
+        });
+        cb.checked = isOn;
+        lbl.append(cb, el('span', null, (g.emoji || '🎮') + ' ' + g.title));
+        gamesBox.append(lbl);
+      });
+    }
+    det.append(gamesBox);
+
     const inner = el('div', { style:{ marginTop:'14px', display:'flex', flexDirection:'column', gap:'8px' }});
     d.tasks.forEach(t => {
       const actMats = MATERIALS.filter(m => m.activityId === t.id);
