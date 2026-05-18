@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ZebRus · Венецианская гонка</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Yeseva+One&family=Manrope:wght@400;500;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    /* Венеция, карнавал: глубокий бордо-чёрный фон + золото масок
+       + лазурь Адриатики. Серия — гонка, тема — яркие эмоции
+       и драматичные действия. */
+    --bg-0: #1a0810;
+    --bg-1: #2e1018;
+    --bg-2: #3d1825;
+    --asphalt: #2a1218;            /* мокрая брусчатка */
+    --line-yellow: #facc15;        /* золото карнавальных масок */
+    --racing-red: #1e3a8a;         /* лазурь канала */
+    --neon-cyan: #d4af37;          /* старое золото */
+    --neon-lime: #c084fc;          /* фиолетовая маска */
+    --gold: #fde047;
+    --text: #fef3c7;
+    --text-dim: #c4a574;
+    --correct: #4ade80;
+    --wrong: #ef4444;
+    --partial: #f59e0b;
+    --font-display: 'Yeseva One', Georgia, serif;
+    --font-body: 'Manrope', system-ui, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    min-height: 100vh;
+    background: var(--bg-0);
+    color: var(--text);
+    font-family: var(--font-body);
+    overflow-x: hidden;
+  }
+  body::before {
+    /* золотые огни карнавала сверху + лазурь канала снизу */
+    content: ""; position: fixed; inset: 0;
+    background:
+      radial-gradient(ellipse at top, rgba(250, 204, 21, 0.22), transparent 55%),
+      radial-gradient(ellipse at bottom, rgba(30, 58, 138, 0.20), transparent 55%),
+      linear-gradient(180deg, var(--bg-0) 0%, var(--bg-1) 100%);
+    z-index: -2;
+  }
+  body::after {
+    /* мерцающие огоньки гирлянд и блики на воде */
+    content: ""; position: fixed; inset: 0;
+    background-image:
+      radial-gradient(circle at 15% 18%, rgba(250, 204, 21, 0.7) 1.5px, transparent 2px),
+      radial-gradient(circle at 78% 55%, rgba(212, 175, 55, 0.6) 1.5px, transparent 2px),
+      radial-gradient(circle at 48% 82%, rgba(250, 204, 21, 0.7) 1.5px, transparent 2px),
+      radial-gradient(circle at 30% 50%, rgba(192, 132, 252, 0.4) 1.5px, transparent 2px),
+      radial-gradient(circle at 70% 12%, rgba(250, 204, 21, 0.6) 1.5px, transparent 2px),
+      radial-gradient(circle at 90% 35%, rgba(30, 58, 138, 0.4) 1.5px, transparent 2px);
+    background-size: 260px 260px;
+    z-index: -1; pointer-events: none;
+    opacity: 0.7;
+  }
+  .app { max-width: 980px; margin: 0 auto; padding: 32px 20px 80px; position: relative; }
+
+  /* СТАРТОВЫЙ ЭКРАН */
+  .start-screen { text-align: center; padding: 50px 20px 30px; animation: slideIn 0.5s ease; }
+  .start-screen .title {
+    font-family: var(--font-display);
+    font-size: clamp(2.2rem, 6vw, 4rem);
+    line-height: 0.95;
+    color: var(--line-yellow);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 12px;
+    text-shadow: 0 0 40px rgba(255, 216, 61, 0.3);
+  }
+  .start-screen .title .accent { color: var(--racing-red); }
+  .start-screen .subtitle {
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    color: var(--text-dim);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    margin-bottom: 40px;
+  }
+  .start-screen .car-anim {
+    font-size: 5rem;
+    margin-bottom: 30px;
+    display: inline-block;
+    animation: drive 3s ease-in-out infinite;
+  }
+  @keyframes drive {
+    0%, 100% { transform: translateX(-30px); }
+    50% { transform: translateX(30px); }
+  }
+  .start-screen .input-group { max-width: 400px; margin: 0 auto 24px; text-align: left; }
+  .start-screen label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--neon-cyan);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .start-screen input {
+    width: 100%;
+    padding: 16px 20px;
+    background: var(--bg-2);
+    border: 2px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    color: var(--text);
+    font-family: var(--font-body);
+    font-size: 1.1rem;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    outline: none;
+  }
+  .start-screen input:focus {
+    border-color: var(--line-yellow);
+    box-shadow: 0 0 0 4px rgba(255, 216, 61, 0.1);
+  }
+  .start-screen input::placeholder { color: var(--text-dim); }
+  .rules {
+    max-width: 500px;
+    margin: 28px auto;
+    padding: 24px;
+    background: rgba(0, 229, 255, 0.05);
+    border: 1px dashed rgba(0, 229, 255, 0.3);
+    border-radius: 12px;
+    text-align: left;
+  }
+  .rules h3 {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    color: var(--neon-cyan);
+    letter-spacing: 3px;
+    margin-bottom: 12px;
+  }
+  .rules ul { list-style: none; }
+  .rules li { padding: 6px 0; color: var(--text-dim); font-size: 0.95rem; }
+  .rules li::before { content: "▸ "; color: var(--line-yellow); margin-right: 6px; }
+
+  /* ШАПКА */
+  .header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 24px;
+    padding-bottom: 16px;
+    border-bottom: 2px dashed rgba(255, 216, 61, 0.3);
+    position: relative;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .header::after {
+    content: ""; position: absolute;
+    left: 0; right: 0; bottom: -2px;
+    height: 6px;
+    background-image: repeating-conic-gradient(var(--text) 0% 25%, transparent 0% 50%);
+    background-size: 12px 12px;
+    opacity: 0.4;
+  }
+  .logo {
+    font-family: var(--font-display);
+    font-size: clamp(1.2rem, 2.5vw, 1.6rem);
+    line-height: 0.95;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+  }
+  .logo .accent { color: var(--racing-red); }
+  .logo .player {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    margin-top: 4px;
+    font-weight: 500;
+  }
+  .stats { display: flex; gap: 20px; align-items: center; font-family: var(--font-mono); }
+  .stat .label {
+    font-size: 0.65rem;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .stat .value { font-family: var(--font-display); font-size: 1.5rem; line-height: 1; }
+  .stat .value.bees { color: var(--line-yellow); }
+  .stat .value.timer { color: var(--neon-cyan); }
+  .sound-toggle {
+    background: transparent;
+    border: 1px solid var(--text-dim);
+    color: var(--text-dim);
+    padding: 8px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 1rem;
+    transition: all 0.2s ease;
+  }
+  .sound-toggle:hover {
+    color: var(--line-yellow);
+    border-color: var(--line-yellow);
+  }
+  .sound-toggle.muted { opacity: 0.4; }
+
+  /* ТРАССА */
+  .track { margin-bottom: 28px; position: relative; }
+  .track-info {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+  .track-info .current { color: var(--neon-cyan); }
+  .track-bar {
+    height: 22px;
+    background: var(--asphalt);
+    border-radius: 11px;
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+  }
+  .track-bar::before {
+    content: "";
+    position: absolute;
+    top: 50%; left: 0; right: 0;
+    height: 3px;
+    transform: translateY(-50%);
+    background-image: repeating-linear-gradient(90deg,
+      var(--line-yellow) 0 16px, transparent 16px 28px);
+    opacity: 0.4;
+  }
+  .track-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--racing-red), var(--gold));
+    transition: width 0.6s cubic-bezier(.2, .9, .3, 1);
+  }
+  .track-car {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 1.3rem;
+    transition: left 0.6s cubic-bezier(.2, .9, .3, 1);
+    filter: drop-shadow(0 0 8px rgba(255, 216, 61, 0.6));
+    z-index: 2;
+  }
+
+  /* КАРТА ЗАДАНИЯ */
+  .card {
+    background: linear-gradient(180deg, var(--bg-2), var(--bg-1));
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 20px;
+    padding: 36px 32px;
+    position: relative;
+    box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+  .card::before {
+    content: attr(data-num);
+    position: absolute;
+    top: -14px;
+    left: 28px;
+    background: var(--line-yellow);
+    color: var(--bg-0);
+    font-family: var(--font-display);
+    font-size: 0.9rem;
+    padding: 4px 14px;
+    border-radius: 4px;
+    letter-spacing: 2px;
+    transform: skewX(-12deg);
+  }
+  .task-label {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    color: var(--neon-cyan);
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .task-label .hint { color: var(--text-dim); margin-left: 8px; }
+  .sentence {
+    font-size: clamp(1.1rem, 2.2vw, 1.45rem);
+    line-height: 1.7;
+    font-weight: 500;
+    margin-bottom: 28px;
+    color: var(--text);
+  }
+  .word {
+    display: inline-block;
+    padding: 4px 8px;
+    margin: 2px 1px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    border: 1.5px solid transparent;
+    user-select: none;
+  }
+  .word:hover {
+    background: rgba(255, 216, 61, 0.1);
+    border-color: rgba(255, 216, 61, 0.4);
+  }
+  .word.selected {
+    background: rgba(255, 216, 61, 0.2);
+    border-color: var(--line-yellow);
+    color: var(--line-yellow);
+    box-shadow: 0 0 12px rgba(255, 216, 61, 0.4);
+  }
+  .word.correct {
+    background: rgba(0, 255, 136, 0.2);
+    border-color: var(--correct);
+    color: var(--correct);
+    box-shadow: 0 0 16px rgba(0, 255, 136, 0.5);
+    pointer-events: none;
+  }
+  .word.wrong {
+    background: rgba(255, 56, 96, 0.2);
+    border-color: var(--wrong);
+    color: var(--wrong);
+    text-decoration: line-through;
+    pointer-events: none;
+  }
+  .word.missed {
+    background: rgba(255, 184, 0, 0.15);
+    border-color: var(--partial);
+    color: var(--partial);
+    pointer-events: none;
+    animation: pulseMiss 1s ease 2;
+  }
+  @keyframes pulseMiss {
+    0%, 100% { box-shadow: 0 0 0 rgba(255, 184, 0, 0); }
+    50% { box-shadow: 0 0 18px rgba(255, 184, 0, 0.6); }
+  }
+  .word.disabled { pointer-events: none; opacity: 0.5; }
+  .punct { display: inline; color: var(--text-dim); }
+
+  /* КНОПКИ */
+  .actions { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .btn {
+    font-family: var(--font-display);
+    font-size: 1rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 14px 28px;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+  }
+  .btn-primary {
+    background: var(--racing-red);
+    color: var(--text);
+    box-shadow: 0 4px 0 #b81e3f, 0 10px 30px -10px rgba(255, 46, 85, 0.6);
+  }
+  .btn-primary:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 0 #b81e3f, 0 14px 36px -10px rgba(255, 46, 85, 0.7);
+  }
+  .btn-primary:active:not(:disabled) {
+    transform: translateY(2px);
+    box-shadow: 0 2px 0 #b81e3f;
+  }
+  .btn-primary:disabled {
+    background: var(--asphalt);
+    color: var(--text-dim);
+    box-shadow: none;
+    cursor: not-allowed;
+  }
+  .btn-secondary {
+    background: transparent;
+    color: var(--text-dim);
+    border: 1.5px solid var(--text-dim);
+  }
+  .btn-secondary:hover {
+    color: var(--neon-cyan);
+    border-color: var(--neon-cyan);
+  }
+  .btn-large { font-size: 1.3rem; padding: 20px 48px; }
+
+  /* ФИДБЕК */
+  .feedback {
+    margin-top: 24px;
+    padding: 20px 24px;
+    border-radius: 12px;
+    border-left: 4px solid;
+    animation: slideIn 0.4s cubic-bezier(.2, .9, .3, 1);
+  }
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .feedback.correct { background: rgba(0, 255, 136, 0.08); border-color: var(--correct); }
+  .feedback.partial { background: rgba(255, 184, 0, 0.08); border-color: var(--partial); }
+  .feedback.wrong { background: rgba(255, 56, 96, 0.08); border-color: var(--wrong); }
+  .feedback .status {
+    font-family: var(--font-display);
+    font-size: 1.1rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+  .feedback.correct .status { color: var(--correct); }
+  .feedback.partial .status { color: var(--partial); }
+  .feedback.wrong .status { color: var(--wrong); }
+  .phrase {
+    font-family: var(--font-mono);
+    font-size: 1.1rem;
+    color: var(--line-yellow);
+    margin-bottom: 6px;
+  }
+  .phrase::before { content: "» "; color: var(--text-dim); }
+  .meaning { color: var(--text); line-height: 1.6; }
+  .meaning strong { color: var(--neon-cyan); }
+
+  /* ФИНИШ */
+  .finish { text-align: center; padding: 50px 20px; animation: slideIn 0.6s ease; }
+  .finish .flag { font-size: 4rem; margin-bottom: 16px; animation: wave 2s ease-in-out infinite; }
+  @keyframes wave {
+    0%, 100% { transform: rotate(-10deg); }
+    50% { transform: rotate(10deg); }
+  }
+  .finish h2 {
+    font-family: var(--font-display);
+    font-size: clamp(2rem, 5vw, 3rem);
+    color: var(--line-yellow);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  .finish .player-name {
+    font-family: var(--font-mono);
+    color: var(--neon-cyan);
+    font-size: 1.1rem;
+    margin-bottom: 32px;
+  }
+  .finish-stats {
+    display: flex;
+    justify-content: center;
+    gap: 40px;
+    margin-bottom: 32px;
+    flex-wrap: wrap;
+  }
+  .finish-stat .label {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-bottom: 6px;
+  }
+  .finish-stat .value { font-family: var(--font-display); font-size: 2.5rem; }
+  .finish-stat .value.bees { color: var(--gold); }
+  .finish-stat .value.time { color: var(--neon-cyan); }
+  .finish .medal {
+    display: inline-block;
+    padding: 12px 32px;
+    background: linear-gradient(135deg, var(--racing-red), var(--gold));
+    color: var(--bg-0);
+    font-family: var(--font-display);
+    letter-spacing: 3px;
+    border-radius: 8px;
+    margin-bottom: 28px;
+    transform: skewX(-8deg);
+  }
+
+  @media (max-width: 600px) {
+    .app { padding: 20px 14px 60px; }
+    .card { padding: 28px 20px; }
+    .stats { gap: 14px; }
+    .stat .value { font-size: 1.2rem; }
+    .btn { font-size: 0.85rem; padding: 12px 20px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="app" id="app"></div>
+
+<script>
+const CONFIG = {
+  gameName: 'venice',
+  gameTitle: 'Венецианская гонка',
+};
+
+/* Тема партии: яркие действия, эмоциональные состояния, образное
+   и библейское. 19 заданий, в № 17 — два фразеологизма
+   (рано или поздно + конец пришёл). «Затаив дыхание» в № 2 и № 16. */
+const TASKS = [
+  { sentence: "Он не стал спорить, не стал объяснять. Просто встал и ушёл, решив поставить крест на всём, что их связывало.",
+    phraseologisms: [
+      { phrase: "поставить крест", meaning: "окончательно прекратить что-либо, считать дело конченым" }
+    ] },
+  { sentence: "Она открыла папку, глубоко вдохнула и, затаив дыхание, начала читать протокол совещания.",
+    phraseologisms: [
+      { phrase: "затаив дыхание", meaning: "очень напряжённо, сосредоточенно (с большим вниманием или волнением)" }
+    ] },
+  { sentence: "Когда всё закончилось, он сел у стены и вспомнил, что за эти годы многое осталось за плечами.",
+    phraseologisms: [
+      { phrase: "за плечами", meaning: "в прошлом; пережитое, накопленный опыт" }
+    ] },
+  { sentence: "Его голос дрогнул. Слова были уже на языке, но в горле всё сжалось — тревога буквально подступила к горлу.",
+    phraseologisms: [
+      { phrase: "подступила к горлу", meaning: "охватила, нахлынула с большой силой (о чувстве или ощущении)" }
+    ] },
+  { sentence: "Они никогда не ладили, и очередная попытка наладить отношения закончилась предсказуемо: с этим человеком просто не получится взять в свои руки ситуацию.",
+    phraseologisms: [
+      { phrase: "взять в свои руки", meaning: "получить контроль, начать управлять чем-либо" }
+    ] },
+  { sentence: "Он молчал, но чувствовалось, что каждый её упрёк будто бы начинал его брать за горло.",
+    phraseologisms: [
+      { phrase: "брать за горло", meaning: "оказывать сильное давление, заставлять что-либо сделать" }
+    ] },
+  { sentence: "Дождь шёл уже третий час подряд, стены промокли, а с крыши текло так, будто лилось как из ведра.",
+    phraseologisms: [
+      { phrase: "как из ведра", meaning: "очень сильно, обильно (о дожде, ливне; было на ЕГЭ 2019)" }
+    ] },
+  { sentence: "Решение далось непросто, но он знал: оно принято раз и навсегда, пути назад нет.",
+    phraseologisms: [
+      { phrase: "раз и навсегда", meaning: "окончательно, бесповоротно, без права на пересмотр" }
+    ] },
+  { sentence: "Он усмехнулся, пожал плечами и просто развёл руками, показывая, что сказать тут нечего.",
+    phraseologisms: [
+      { phrase: "развёл руками", meaning: "выразил удивление, недоумение или беспомощность жестом" }
+    ] },
+  { sentence: "В ту весну она входила с надеждой, ведь именно тогда ей казалось, что можно начать всё с начала — прямо-таки с чистого листа.",
+    phraseologisms: [
+      { phrase: "с чистого листа", meaning: "заново, с нуля, забыв всё прошлое и начав сначала" }
+    ] },
+  { sentence: "Она исчезла тихо: отключила телефон, удалила аккаунты и буквально пропала без вести.",
+    phraseologisms: [
+      { phrase: "пропала без вести", meaning: "исчезла, не оставив никаких следов и сведений о себе" }
+    ] },
+  { sentence: "Он действовал резко, без раздумий и компромиссов: умел, как никто другой, рубить с плеча.",
+    phraseologisms: [
+      { phrase: "рубить с плеча", meaning: "действовать прямо, резко, не задумываясь о последствиях" }
+    ] },
+  { sentence: "Она не жаловалась: просто знала, что это её путь, и нужно нести крест, даже если тяжело.",
+    phraseologisms: [
+      { phrase: "нести крест", meaning: "терпеливо переносить тяжёлые жизненные испытания" }
+    ] },
+  { sentence: "На седьмом небе от счастья она ходила весь день после звонка: то были самые долгожданные новости за последние месяцы.",
+    phraseologisms: [
+      { phrase: "На седьмом небе", meaning: "в состоянии глубочайшего счастья, восторга" }
+    ] },
+  { sentence: "Кто-то снова пытался перебежать дорогу ему в проекте, но теперь он не собирался уступать — хватит играть по чужим правилам.",
+    phraseologisms: [
+      { phrase: "перебежать дорогу", meaning: "помешать чьим-либо планам, опередить и забрать желаемое" }
+    ] },
+  { sentence: "Затаив дыхание, они ждали объявления результатов: ни один из них не решался взглянуть на экран.",
+    phraseologisms: [
+      { phrase: "Затаив дыхание", meaning: "очень напряжённо, сосредоточенно (с большим вниманием или волнением)" }
+    ] },
+  { sentence: "Конечно, он понимал, что всё рано или поздно закончится. Но не думал, что так внезапно и именно сейчас конец пришёл.",
+    phraseologisms: [
+      { phrase: "рано или поздно", meaning: "когда-нибудь обязательно, неизбежно (есть в словаре ФИПИ)" },
+      { phrase: "конец пришёл", meaning: "наступило завершение, всё закончилось окончательно" }
+    ] },
+  { sentence: "Он отвечал неуверенно, перескакивал с темы на тему. Собеседование он прошёл, но всё вышло, мягко говоря, с грехом пополам.",
+    phraseologisms: [
+      { phrase: "с грехом пополам", meaning: "кое-как, едва-едва, с большим трудом и недостатками" }
+    ] },
+  { sentence: "Сначала он нервничал, но потом осознал: ложь не раскрыли, и всё, что он сказал, ему просто-таки сошло с рук.",
+    phraseologisms: [
+      { phrase: "сошло с рук", meaning: "осталось безнаказанным, не повлекло за собой последствий" }
+    ] }
+];
+
+function tokenize(text) {
+  const tokens = [];
+  const regex = /([А-Яа-яЁё\-]+|[.,!?;:«»—…"']+|\s+)/g;
+  let m;
+  while ((m = regex.exec(text)) !== null) {
+    const t = m[0];
+    if (/^\s+$/.test(t)) tokens.push({ type: 'space', text: ' ' });
+    else if (/^[А-Яа-яЁё\-]+$/.test(t)) tokens.push({ type: 'word', text: t });
+    else tokens.push({ type: 'punct', text: t });
+  }
+  return tokens;
+}
+function findPhraseIndices(tokens, phrase) {
+  const phraseWords = phrase.toLowerCase().split(/\s+/).filter(Boolean);
+  const wordIndices = [];
+  tokens.forEach((tok, idx) => { if (tok.type === 'word') wordIndices.push(idx); });
+  for (let i = 0; i <= wordIndices.length - phraseWords.length; i++) {
+    let match = true;
+    for (let j = 0; j < phraseWords.length; j++) {
+      if (tokens[wordIndices[i + j]].text.toLowerCase() !== phraseWords[j]) { match = false; break; }
+    }
+    if (match) return phraseWords.map((_, j) => wordIndices[i + j]);
+  }
+  return [];
+}
+TASKS.forEach(task => {
+  task.tokens = tokenize(task.sentence);
+  task.phraseologisms.forEach(p => {
+    p.indices = findPhraseIndices(task.tokens, p.phrase);
+  });
+});
+
+/* ===== ЗВУК (Web Audio — без файлов) ===== */
+const Sound = {
+  ctx: null,
+  engineOscillator: null,
+  engineGain: null,
+  enabled: true,
+
+  init() {
+    if (this.ctx) return;
+    try {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) { this.enabled = false; }
+  },
+
+  startEngine() {
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx || this.engineOscillator) return;
+
+    const osc1 = this.ctx.createOscillator();
+    const osc2 = this.ctx.createOscillator();
+    const lfo = this.ctx.createOscillator();
+    const lfoGain = this.ctx.createGain();
+    const masterGain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
+
+    osc1.type = 'sawtooth';
+    osc1.frequency.value = 55;
+    osc2.type = 'square';
+    osc2.frequency.value = 82;
+
+    lfo.frequency.value = 8;
+    lfoGain.gain.value = 4;
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc1.frequency);
+
+    filter.type = 'lowpass';
+    filter.frequency.value = 280;
+    filter.Q.value = 5;
+
+    masterGain.gain.value = 0;
+    masterGain.gain.linearRampToValueAtTime(0.05, this.ctx.currentTime + 0.5);
+
+    osc1.connect(filter);
+    osc2.connect(filter);
+    filter.connect(masterGain);
+    masterGain.connect(this.ctx.destination);
+
+    osc1.start(); osc2.start(); lfo.start();
+    this.engineOscillator = { osc1, osc2, lfo };
+    this.engineGain = masterGain;
+  },
+
+  stopEngine() {
+    if (!this.engineOscillator) return;
+    const now = this.ctx.currentTime;
+    this.engineGain.gain.linearRampToValueAtTime(0, now + 0.4);
+    const refs = this.engineOscillator;
+    this.engineOscillator = null;
+    setTimeout(() => {
+      try { refs.osc1.stop(); refs.osc2.stop(); refs.lfo.stop(); } catch(e) {}
+    }, 500);
+  },
+
+  rev() {
+    if (!this.enabled || !this.engineOscillator) return;
+    const now = this.ctx.currentTime;
+    this.engineOscillator.osc1.frequency.cancelScheduledValues(now);
+    this.engineOscillator.osc1.frequency.setValueAtTime(55, now);
+    this.engineOscillator.osc1.frequency.linearRampToValueAtTime(110, now + 0.08);
+    this.engineOscillator.osc1.frequency.linearRampToValueAtTime(55, now + 0.4);
+  },
+
+  /* ===== ВЕНЕЦИАНСКИЕ ЗВУКИ ===== */
+  success() {
+    /* Колокольчик карнавала: 4 высоких звонких ноты sin
+       с короткой быстрой атакой и мерцающим длинным затухом. */
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    /* Мажорная триада на высоких частотах */
+    [2093, 2637, 3136, 2093].forEach((freq, i) => {  // C7-E7-G7-C7
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      g.gain.value = 0;
+      g.gain.linearRampToValueAtTime(0.08, now + i * 0.05 + 0.003);
+      g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.05 + 0.55);
+      o.connect(g); g.connect(this.ctx.destination);
+      o.start(now + i * 0.05); o.stop(now + i * 0.05 + 0.6);
+    });
+  },
+
+  fail() {
+    /* Плюх в канал: короткий низкий «плёп» с быстрым нисходящим
+       глиссандо + лёгкий шум через фильтр (волна). */
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    /* Удар воды */
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    const filt = this.ctx.createBiquadFilter();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(280, now);
+    o.frequency.exponentialRampToValueAtTime(90, now + 0.18);
+    filt.type = 'lowpass';
+    filt.frequency.value = 500;
+    g.gain.value = 0;
+    g.gain.linearRampToValueAtTime(0.18, now + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+    o.connect(filt); filt.connect(g); g.connect(this.ctx.destination);
+    o.start(now); o.stop(now + 0.3);
+    /* Лёгкий «шшш» волны */
+    [400, 600].forEach((freq, i) => {
+      const o2 = this.ctx.createOscillator();
+      const g2 = this.ctx.createGain();
+      const filt2 = this.ctx.createBiquadFilter();
+      o2.type = 'triangle';
+      o2.frequency.value = freq;
+      filt2.type = 'highpass';
+      filt2.frequency.value = 300;
+      g2.gain.value = 0;
+      g2.gain.linearRampToValueAtTime(0.05, now + 0.2);
+      g2.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+      o2.connect(filt2); filt2.connect(g2); g2.connect(this.ctx.destination);
+      o2.start(now + 0.15); o2.stop(now + 0.55);
+    });
+  },
+
+  finish() {
+    /* Фанфары + повторы: восходящая мажорная гамма на square wave
+       (имитация труб), потом аккорд + второй удар фанфар. */
+    if (!this.enabled) return;
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    /* Восходящие фанфары: 5 нот */
+    const fanfare = [523.25, 659.25, 783.99, 1046.5, 1318.5];
+    fanfare.forEach((freq, i) => {
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      o.type = 'square';
+      o.frequency.value = freq;
+      g.gain.value = 0;
+      g.gain.linearRampToValueAtTime(0.08, now + i * 0.13 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, now + i * 0.13 + 0.35);
+      o.connect(g); g.connect(this.ctx.destination);
+      o.start(now + i * 0.13); o.stop(now + i * 0.13 + 0.4);
+    });
+    /* Финальный мажорный аккорд (триада + октава) — праздничный звон */
+    const chord = [523.25, 659.25, 783.99, 1046.5];
+    chord.forEach(freq => {
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      o.type = 'sine';
+      o.frequency.value = freq;
+      g.gain.value = 0;
+      g.gain.linearRampToValueAtTime(0.07, now + 0.85);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 1.9);
+      o.connect(g); g.connect(this.ctx.destination);
+      o.start(now + 0.85); o.stop(now + 2.0);
+    });
+    /* Второй короткий фанфарный удар на октаву выше */
+    [1046.5, 1318.5, 1567.9].forEach((freq, i) => {
+      const o = this.ctx.createOscillator();
+      const g = this.ctx.createGain();
+      o.type = 'square';
+      o.frequency.value = freq;
+      g.gain.value = 0;
+      g.gain.linearRampToValueAtTime(0.06, now + 1.5 + i * 0.08 + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, now + 1.5 + i * 0.08 + 0.3);
+      o.connect(g); g.connect(this.ctx.destination);
+      o.start(now + 1.5 + i * 0.08); o.stop(now + 1.5 + i * 0.08 + 0.35);
+    });
+  },
+
+  toggle() {
+    this.enabled = !this.enabled;
+    if (!this.enabled) this.stopEngine();
+    return this.enabled;
+  }
+};
+
+/* ===== СОСТОЯНИЕ ===== */
+const state = {
+  playerName: '',
+  inviteCode: null,
+  current: 0,
+  score: 0,
+  selected: new Set(),
+  answered: false,
+  startTime: null,
+  elapsedSeconds: 0,
+  timerInterval: null,
+  wrongTasks: []
+};
+
+const urlParams = new URLSearchParams(window.location.search);
+state.inviteCode = urlParams.get('invite') || urlParams.get('id') || null;
+
+/* ===== РЕЖИМ ВСТРАИВАНИЯ В ПЛАТФОРМУ ZebRus =====
+   Если игра открыта в iframe платформы (`?mode=embed`):
+   - стартовый экран ввода имени пропускается;
+   - имя ученика берётся из ?name=... (передаёт платформа);
+   - по финишу шлём результат через postMessage родителю;
+   - кнопка «Новый заезд» заменяется на «Закрыть».
+   В standalone-режиме (без mode=embed) игра работает как обычно
+   — имя в localStorage, никаких отправок наружу. */
+const EMBED = urlParams.get('mode') === 'embed';
+if (EMBED) {
+  state.playerName = urlParams.get('name') || 'Гость';
+}
+
+/* ===== ТАЙМЕР ===== */
+function startTimer() {
+  state.startTime = Date.now();
+  state.timerInterval = setInterval(updateTimerDisplay, 1000);
+}
+function stopTimer() {
+  if (state.timerInterval) clearInterval(state.timerInterval);
+  state.elapsedSeconds = Math.floor((Date.now() - state.startTime) / 1000);
+}
+function updateTimerDisplay() {
+  const seconds = Math.floor((Date.now() - state.startTime) / 1000);
+  const el = document.getElementById('timer-value');
+  if (el) el.textContent = formatTime(seconds);
+}
+function formatTime(seconds) {
+  const m = Math.floor(seconds / 60).toString().padStart(2, '0');
+  const s = (seconds % 60).toString().padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+/* ===== СОХРАНЕНИЕ РЕЗУЛЬТАТА =====
+   В embed-режиме: шлём postMessage родителю (платформа ZebRus сама
+   запишет в Supabase в таблицу game_attempts с привязкой к ученику).
+   В standalone-режиме (внешняя ссылка, гостевая игра): ничего не
+   сохраняем — только лог в консоль.
+*/
+async function saveResult() {
+  const result = {
+    game_slug: CONFIG.gameName,        // 'venice'
+    game_title: CONFIG.gameTitle,
+    player_name: state.playerName,
+    score: state.score,
+    max_score: TASKS.length,
+    time_seconds: state.elapsedSeconds,
+    wrong_tasks: state.wrongTasks,
+    finished_at: new Date().toISOString()
+  };
+  console.log('📊 Результат:', result);
+
+  if (EMBED && window.parent && window.parent !== window) {
+    try {
+      window.parent.postMessage({ type: 'zebrus_game_result', payload: result }, '*');
+    } catch (e) {
+      console.warn('postMessage failed:', e);
+    }
+  }
+}
+
+/* ===== РЕНДЕР: СТАРТ ===== */
+function renderStart() {
+  const savedName = localStorage.getItem('zebrus_player_name') || '';
+  document.getElementById('app').innerHTML = `
+    <div class="start-screen">
+      <div class="car-anim">🛶</div>
+      <h1 class="title">Венецианская<span class="accent">.</span><br>гонка</h1>
+      <p class="subtitle">Карнавал на каналах · ZebRus · 2026</p>
+      <div class="input-group">
+        <label for="name-input">Имя гондольера</label>
+        <input type="text" id="name-input" placeholder="Например: Аня"
+               value="${escapeAttr(savedName)}" maxlength="40" autocomplete="off">
+      </div>
+      <button class="btn btn-primary btn-large" id="start-btn">🎭 На старт</button>
+      <div class="rules">
+        <h3>Правила гонки</h3>
+        <ul>
+          <li>В каждом тексте — один или несколько фразеологизмов</li>
+          <li>Кликай по словам, чтобы выделить весь фразеологизм</li>
+          <li>Балл засчитывается за любой полностью найденный</li>
+          <li>За каждый балл — 🎭 маска карнавала</li>
+          <li>Время гонки тоже считается — постарайся быстрее</li>
+        </ul>
+      </div>
+    </div>
+  `;
+
+  const input = document.getElementById('name-input');
+  const btn = document.getElementById('start-btn');
+  input.focus();
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') btn.click(); });
+  btn.addEventListener('click', () => {
+    const name = input.value.trim();
+    if (!name) {
+      input.focus();
+      input.style.borderColor = 'var(--racing-red)';
+      setTimeout(() => { input.style.borderColor = ''; }, 1500);
+      return;
+    }
+    state.playerName = name;
+    localStorage.setItem('zebrus_player_name', name);
+    Sound.init();
+    /* двигатель больше не запускаем — раздражает; оставляем
+       только дискретные звуки success / fail / finish */
+    startTimer();
+    renderGame();
+  });
+}
+
+/* ===== РЕНДЕР: ИГРА ===== */
+function renderGame() {
+  if (state.current >= TASKS.length) { renderFinish(); return; }
+
+  document.getElementById('app').innerHTML = `
+    <header class="header">
+      <div class="logo">
+        Венецианская гонка<span class="accent">.</span>
+        <span class="player">🛶 ${escapeHtml(state.playerName)}</span>
+      </div>
+      <div class="stats">
+        <div class="stat">
+          <div class="label">🎭 Маски</div>
+          <div class="value bees" id="score-value">${state.score}</div>
+        </div>
+        <div class="stat">
+          <div class="label">⏱️ Время</div>
+          <div class="value timer" id="timer-value">00:00</div>
+        </div>
+        <button class="sound-toggle ${Sound.enabled ? '' : 'muted'}" id="sound-btn">
+          ${Sound.enabled ? '🔊' : '🔇'}
+        </button>
+      </div>
+    </header>
+    <div class="track">
+      <div class="track-info">
+        <span>Старт</span>
+        <span class="current" id="track-label"></span>
+        <span>Бал 🎭</span>
+      </div>
+      <div class="track-bar">
+        <div class="track-fill" id="track-fill"></div>
+        <div class="track-car" id="track-car">🛶</div>
+      </div>
+    </div>
+    <main id="game-area"></main>
+  `;
+
+  document.getElementById('sound-btn').addEventListener('click', (e) => {
+    const enabled = Sound.toggle();
+    e.currentTarget.textContent = enabled ? '🔊' : '🔇';
+    e.currentTarget.classList.toggle('muted', !enabled);
+    /* движок больше не запускаем — звуки только дискретные (success/fail/finish) */
+  });
+
+  updateTrack();
+  updateTimerDisplay();
+  renderTask();
+}
+
+function renderTask() {
+  const task = TASKS[state.current];
+  state.selected = new Set();
+  state.answered = false;
+  updateTrack();
+
+  const wordsHTML = task.tokens.map((tok, idx) => {
+    if (tok.type === 'space') return ' ';
+    if (tok.type === 'punct') return `<span class="punct">${escapeHtml(tok.text)}</span>`;
+    return `<span class="word" data-idx="${idx}">${escapeHtml(tok.text)}</span>`;
+  }).join('');
+
+  document.getElementById('game-area').innerHTML = `
+    <div class="card" data-num="№ ${String(state.current + 1).padStart(2, '0')}">
+      <div class="task-label">
+        Задание · найди фразеологизм
+        <span class="hint">кликай по словам</span>
+      </div>
+      <p class="sentence">${wordsHTML}</p>
+      <div class="actions">
+        <button class="btn btn-primary" id="check-btn" disabled>На финиш!</button>
+        <button class="btn btn-secondary" id="reset-btn">Сбросить</button>
+      </div>
+      <div id="feedback"></div>
+    </div>
+  `;
+
+  document.querySelectorAll('.word').forEach(el => {
+    el.addEventListener('click', () => {
+      if (state.answered) return;
+      const idx = parseInt(el.dataset.idx);
+      Sound.rev();
+      if (state.selected.has(idx)) {
+        state.selected.delete(idx);
+        el.classList.remove('selected');
+      } else {
+        state.selected.add(idx);
+        el.classList.add('selected');
+      }
+      document.getElementById('check-btn').disabled = state.selected.size < 2;
+    });
+  });
+
+  document.getElementById('check-btn').addEventListener('click', checkAnswer);
+  document.getElementById('reset-btn').addEventListener('click', () => {
+    if (state.answered) return;
+    state.selected.clear();
+    document.querySelectorAll('.word').forEach(el => el.classList.remove('selected'));
+    document.getElementById('check-btn').disabled = true;
+  });
+}
+
+function checkAnswer() {
+  if (state.answered) return;
+  state.answered = true;
+  const task = TASKS[state.current];
+  const selectedIndices = state.selected;
+
+  /* Все индексы всех фразеологизмов задания (объединение). */
+  const allCorrectIndices = new Set();
+  task.phraseologisms.forEach(p => p.indices.forEach(i => allCorrectIndices.add(i)));
+
+  /* Найденные = те фразеологизмы, ВСЕ слова которых выделены. */
+  const foundPhrases = task.phraseologisms.filter(p =>
+    p.indices.length > 0 && p.indices.every(i => selectedIndices.has(i))
+  );
+  const isAnyFound  = foundPhrases.length > 0;
+  const isAllFound  = foundPhrases.length === task.phraseologisms.length;
+  /* Был ли частичный «правильный» клик (часть слов какого-то фразеологизма) — без полного? */
+  const hasPartial  = !isAnyFound && [...selectedIndices].some(i => allCorrectIndices.has(i));
+
+  /* Подсветка слов */
+  document.querySelectorAll('.word').forEach(el => {
+    const idx = parseInt(el.dataset.idx);
+    el.classList.remove('selected');
+    if (allCorrectIndices.has(idx) && selectedIndices.has(idx))      el.classList.add('correct');
+    else if (!allCorrectIndices.has(idx) && selectedIndices.has(idx)) el.classList.add('wrong');
+    else if (allCorrectIndices.has(idx) && !selectedIndices.has(idx)) el.classList.add('missed');
+    else                                                              el.classList.add('disabled');
+  });
+
+  /* Статус-сообщение и звук */
+  let statusText, cssClass;
+  if (isAllFound) {
+    state.score++;
+    document.getElementById('score-value').textContent = state.score;
+    statusText = task.phraseologisms.length > 1
+      ? '🎭 Все фразеологизмы найдены!'
+      : '🎭 В точку — bellissimo!';
+    cssClass = 'correct';
+    Sound.success();
+  } else if (isAnyFound) {
+    /* Балл засчитан, но не все фразеологизмы найдены */
+    state.score++;
+    document.getElementById('score-value').textContent = state.score;
+    statusText = '🥈 Балл засчитан — в задании был ещё один';
+    cssClass = 'partial';
+    Sound.success();
+  } else if (hasPartial) {
+    state.wrongTasks.push(state.current + 1);
+    statusText = '🥂 Почти, ещё кьянти?';
+    cssClass = 'partial';
+    Sound.fail();
+  } else {
+    state.wrongTasks.push(state.current + 1);
+    statusText = '🌊 Маска упала в канал';
+    cssClass = 'wrong';
+    Sound.fail();
+  }
+
+  /* Список всех фразеологизмов задания со статусом (✓ нашла / ✗ пропустила) */
+  const phrasesHTML = task.phraseologisms.map(p => {
+    const found = foundPhrases.includes(p);
+    return `
+      <div class="phrase">${found ? '✓ ' : '✗ '}${escapeHtml(p.phrase)}</div>
+      <div class="meaning"><strong>Значение:</strong> ${escapeHtml(p.meaning)}</div>
+    `;
+  }).join('<div style="height:8px"></div>');
+
+  document.getElementById('feedback').innerHTML = `
+    <div class="feedback ${cssClass}">
+      <div class="status">${statusText}</div>
+      ${phrasesHTML}
+    </div>
+  `;
+
+  const checkBtn = document.getElementById('check-btn');
+  checkBtn.disabled = false;
+  checkBtn.textContent = state.current === TASKS.length - 1 ? 'К балу 🎭' : 'Следующий канал →';
+  const newBtn = checkBtn.cloneNode(true);
+  checkBtn.parentNode.replaceChild(newBtn, checkBtn);
+  newBtn.addEventListener('click', () => {
+    state.current++;
+    if (state.current >= TASKS.length) {
+      renderFinish();
+    } else {
+      renderTask();
+    }
+  });
+  document.getElementById('reset-btn').remove();
+}
+
+function updateTrack() {
+  const total = TASKS.length;
+  const progress = ((state.current + 1) / total) * 100;
+  const fill = document.getElementById('track-fill');
+  const car = document.getElementById('track-car');
+  const label = document.getElementById('track-label');
+  if (fill) fill.style.width = progress + '%';
+  if (car) car.style.left = progress + '%';
+  if (label) label.textContent = `Чекпоинт ${state.current + 1} / ${total}`;
+}
+
+/* ===== РЕНДЕР: ФИНИШ ===== */
+function renderFinish() {
+  stopTimer();
+  /* двигатель не запускали — останавливать нечего */
+  setTimeout(() => Sound.finish(), 300);
+
+  const total = TASKS.length;
+  const pct = Math.round((state.score / total) * 100);
+  let medal = '🌊 Прохожий по каналу';
+  if (pct >= 90) medal = '🎭 Король карнавала!';
+  else if (pct >= 70) medal = '🥂 Гость дворца';
+  else if (pct >= 50) medal = '🛶 Гондольер';
+
+  saveResult();
+
+  document.getElementById('app').innerHTML = `
+    <div class="finish">
+      <div class="flag">🎭</div>
+      <h2>Гонка завершена</h2>
+      <div class="player-name">🛶 ${escapeHtml(state.playerName)}</div>
+      <div class="finish-stats">
+        <div class="finish-stat">
+          <div class="label">Маски</div>
+          <div class="value bees">🎭 ${state.score}/${total}</div>
+        </div>
+        <div class="finish-stat">
+          <div class="label">Время</div>
+          <div class="value time">${formatTime(state.elapsedSeconds)}</div>
+        </div>
+      </div>
+      <div class="medal">${medal}</div>
+      <div style="margin-top: 20px;">
+        <button class="btn btn-primary" id="restart-btn">${EMBED ? 'Закрыть' : 'Новый карнавал'}</button>
+      </div>
+    </div>
+  `;
+
+  document.getElementById('restart-btn').addEventListener('click', () => {
+    if (EMBED && window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'zebrus_game_close' }, '*');
+      return;
+    }
+    state.current = 0;
+    state.score = 0;
+    state.wrongTasks = [];
+    /* двигатель больше не запускаем */
+    startTimer();
+    renderGame();
+  });
+}
+
+function escapeHtml(str) {
+  return String(str)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+function escapeAttr(str) {
+  return String(str).replace(/"/g, '&quot;');
+}
+
+/* ===== ЗАПУСК =====
+   В embed-режиме сразу стартуем игру (имя уже взяли из ?name=…),
+   стартовый экран ввода имени не показываем.
+   В standalone-режиме — обычный стартовый экран. */
+if (EMBED) {
+  /* Sound.enabled оставляем true — ученики в кабинете тоже хотят звук.
+     Если в будущем понадобится выключить, можно передавать ?sound=off */
+  Sound.init();
+  startTimer();
+  renderGame();
+} else {
+  renderStart();
+}
+</script>
+
+</body>
+</html>
