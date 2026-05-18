@@ -18145,13 +18145,31 @@ async function loadWarmupBlocks(dayId){
   try {
     const list = await restRequest('GET',
       '/warmup_blocks?day_id=eq.' + dayId +
-      '&select=id,ord,type,title,body,url,game_id,emoji,config&order=ord.asc');
+      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config&order=ord.asc');
     if(!STATE.warmupBlocksByDay) STATE.warmupBlocksByDay = {};
     STATE.warmupBlocksByDay[dayId] = list || [];
   } catch(e){
     console.error('loadWarmupBlocks', e);
     if(!STATE.warmupBlocksByDay) STATE.warmupBlocksByDay = {};
     STATE.warmupBlocksByDay[dayId] = [];
+  }
+}
+
+async function updateWarmupBlock(blockId, payload){
+  try {
+    await restRequest('PATCH', '/warmup_blocks?id=eq.' + blockId, payload, { prefer: 'return=minimal' });
+    /* Найдём день этого блока, чтобы перезагрузить */
+    let dayId = null;
+    Object.keys(STATE.warmupBlocksByDay || {}).forEach(d => {
+      if((STATE.warmupBlocksByDay[d] || []).some(b => b.id === blockId)) dayId = parseInt(d, 10);
+    });
+    if(dayId != null) await loadWarmupBlocks(dayId);
+    showToast('✓ Сохранено');
+    STATE.editingBlockId = null;
+    render();
+  } catch(e){
+    console.error('updateWarmupBlock', e);
+    showToast('⚠ ' + e.message);
   }
 }
 
@@ -18282,7 +18300,7 @@ function viewTeacherWarmup(){
         det.append(el('div', { style:{ padding:'12px', color:'var(--ink-3)', fontSize:'13px' }},
           'Пока ни одного блока. Добавь первый — кнопка ниже.'));
       } else {
-        blocks.forEach(b => det.append(renderWarmupBlockTeacher(b)));
+        blocks.forEach(b => det.append(renderWarmupBlockTeacher(b, d)));
       }
       det.append(renderAddBlockForm(d));
     } else {
@@ -18294,7 +18312,11 @@ function viewTeacherWarmup(){
   return wrap;
 }
 
-function renderWarmupBlockTeacher(b){
+function renderWarmupBlockTeacher(b, day){
+  /* Если этот блок в режиме редактирования — показываем форму. */
+  if(STATE.editingBlockId === b.id){
+    return renderAddBlockForm(day || { id: b.day_id }, b);
+  }
   /* Композитная превьюшка: показываем все непустые части. */
   const cfg = (b.config && typeof b.config === 'object') ? b.config : {};
   const card = el('div', { style:{ padding:'12px 14px', border:'1px solid var(--border)', borderRadius:'10px', marginTop:'8px', background:'var(--bg)' }});
@@ -18303,12 +18325,22 @@ function renderWarmupBlockTeacher(b){
       el('div', { style:{ display:'flex', gap:'6px', alignItems:'center', fontSize:'12px', color:'var(--ink-3)', fontWeight:'700', textTransform:'uppercase', letterSpacing:'.04em' }},
         el('span', { style:{ fontSize:'1.4rem' }}, b.emoji || '📌'),
         'Пост #' + b.ord),
-      el('button', { class:'btn btn-secondary btn-sm', style:{ padding:'2px 8px', fontSize:'12px' },
-        onclick: () => deleteWarmupBlock(b)
-      }, '🗑')));
-  if(b.image_url){
-    card.append(el('img', { src:b.image_url, alt:'',
-      style:{ display:'block', width:'100%', maxHeight:'200px', objectFit:'cover', borderRadius:'8px', marginBottom:'8px' }}));
+      el('div', { style:{ display:'flex', gap:'6px' }},
+        el('button', { class:'btn btn-secondary btn-sm', style:{ padding:'2px 8px', fontSize:'12px' },
+          onclick: () => { STATE.editingBlockId = b.id; render(); }
+        }, '✎ Изменить'),
+        el('button', { class:'btn btn-secondary btn-sm', style:{ padding:'2px 8px', fontSize:'12px' },
+          onclick: () => deleteWarmupBlock(b)
+        }, '🗑'))));
+  /* Мульти-картинки (новое поле) + одиночная для совместимости */
+  const imgs = (Array.isArray(b.image_urls) && b.image_urls.length) ? b.image_urls
+             : (b.image_url ? [b.image_url] : []);
+  if(imgs.length){
+    const grid = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'4px', marginBottom:'8px' }});
+    imgs.forEach(u => grid.append(el('img', { src:u, alt:'',
+      style:{ width: imgs.length === 1 ? '100%' : '120px', height: imgs.length === 1 ? 'auto' : '90px',
+              maxHeight:'200px', objectFit:'cover', borderRadius:'6px' }})));
+    card.append(grid);
   }
   if(b.title) card.append(el('div', { style:{ fontWeight:'700', marginBottom:'4px' }}, b.title));
   if(b.body)  card.append(el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', whiteSpace:'pre-wrap', marginBottom:'6px' }}, b.body));
@@ -18339,53 +18371,88 @@ function renderWarmupBlockTeacher(b){
   return card;
 }
 
-function renderAddBlockForm(day){
+function renderAddBlockForm(day, editingBlock){
   /* Единая форма «как пост в Telegram»: все поля опциональны,
-     можно совмещать картинку + текст + игру + опрос. */
-  const box = el('div', { style:{ marginTop:'12px', padding:'14px', background:'var(--p-soft)', borderRadius:'10px', border:'1px dashed var(--p-deep)' }});
+     можно совмещать картинку + текст + игру + опрос.
+     editingBlock — если передан, форма работает в режиме правки
+     (поля предзаполнены, кнопка делает PATCH вместо POST). */
+  const isEdit = !!editingBlock;
+  const box = el('div', { style:{ marginTop:'12px', padding:'14px',
+    background: isEdit ? '#FEF3C7' : 'var(--p-soft)',
+    borderRadius:'10px', border:'1px dashed ' + (isEdit ? '#D97706' : 'var(--p-deep)') }});
   const ss = { padding:'8px 10px', borderRadius:'6px', border:'1px solid var(--border-2)', fontSize:'13px' };
   const sectionLabel = (text) => el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', fontWeight:'700', textTransform:'uppercase', letterSpacing:'.05em', marginTop:'10px', marginBottom:'4px' }}, text);
 
   /* === Поля === */
-  const emojiInput = el('input', { type:'text', placeholder:'📌', style:Object.assign({}, ss, { width:'70px', textAlign:'center', fontSize:'18px' })});
-  const titleInput = el('input', { type:'text', placeholder:'Заголовок поста (необязательно)', style:Object.assign({}, ss, { flex:1 })});
+  const emojiInput = el('input', { type:'text', placeholder:'📌', value: (editingBlock && editingBlock.emoji) || '',
+    style:Object.assign({}, ss, { width:'70px', textAlign:'center', fontSize:'18px' })});
+  const titleInput = el('input', { type:'text', placeholder:'Заголовок поста (необязательно)',
+    value: (editingBlock && editingBlock.title) || '',
+    style:Object.assign({}, ss, { flex:1 })});
   const bodyTextarea = el('textarea', { placeholder:'Текст поста — что хочешь сказать ученикам',
     style:Object.assign({}, ss, { width:'100%', minHeight:'90px', fontFamily:'inherit' })});
-  /* Картинка с upload */
-  const imgPreview = el('div', { style:{ marginTop:'6px' }});
-  let uploadedImageUrl = null;
-  const fileInput = el('input', { type:'file', accept:'image/*', style:{ display:'none' },
+  if(editingBlock && editingBlock.body) bodyTextarea.value = editingBlock.body;
+  /* Картинки — накопительный upload, несколько файлов в одном посте */
+  const imgGrid = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'6px', marginTop:'6px' }});
+  const uploadedImageUrls = editingBlock
+    ? ((Array.isArray(editingBlock.image_urls) && editingBlock.image_urls.length) ? editingBlock.image_urls.slice()
+       : (editingBlock.image_url ? [editingBlock.image_url] : []))
+    : [];
+  function redrawImgGrid(){
+    imgGrid.innerHTML = '';
+    uploadedImageUrls.forEach((url, idx) => {
+      const thumb = el('div', { style:{ position:'relative', width:'90px', height:'90px', borderRadius:'6px', overflow:'hidden', border:'1px solid var(--border-2)' }},
+        el('img', { src:url, alt:'', style:{ width:'100%', height:'100%', objectFit:'cover', display:'block' }}),
+        el('button', { class:'btn btn-secondary btn-sm',
+          style:{ position:'absolute', top:'2px', right:'2px', padding:'0 6px', fontSize:'11px', lineHeight:'18px', background:'rgba(255,255,255,0.9)' },
+          onclick: () => { uploadedImageUrls.splice(idx, 1); redrawImgGrid(); }
+        }, '✕'));
+      imgGrid.append(thumb);
+    });
+  }
+  const fileInput = el('input', { type:'file', accept:'image/*', multiple:true, style:{ display:'none' },
     onchange: async (ev) => {
-      const f = ev.target.files && ev.target.files[0];
-      if(!f) return;
-      imgPreview.innerHTML = '⏳ загружаю…';
-      try {
-        uploadedImageUrl = await uploadWarmupImage(f);
-        imgPreview.innerHTML = '';
-        imgPreview.append(
-          el('img', { src:uploadedImageUrl, alt:'', style:{ maxWidth:'200px', maxHeight:'140px', borderRadius:'6px', display:'block' }}),
-          el('button', { class:'btn btn-secondary btn-sm', style:{ marginTop:'4px', fontSize:'12px' },
-            onclick: () => { uploadedImageUrl = null; imgPreview.innerHTML = ''; fileInput.value = ''; }
-          }, '✕ убрать'));
-      } catch(e){
-        console.error('uploadWarmupImage', e);
-        imgPreview.innerHTML = '⚠ не получилось загрузить: ' + e.message;
+      const files = Array.from(ev.target.files || []);
+      if(!files.length) return;
+      const status = el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px' }}, '⏳ загружаю ' + files.length + ' …');
+      imgGrid.append(status);
+      for(const f of files){
+        try {
+          const url = await uploadWarmupImage(f);
+          uploadedImageUrls.push(url);
+        } catch(e){
+          console.error('uploadWarmupImage', f.name, e);
+          showToast('⚠ ' + f.name + ': ' + e.message);
+        }
       }
+      ev.target.value = '';
+      redrawImgGrid();
     }
   });
   const pickImgBtn = el('button', { class:'btn btn-secondary',
     onclick: () => fileInput.click()
-  }, '📎 Прикрепить картинку');
+  }, '📎 Прикрепить картинки');
   /* Ссылка-кнопка */
-  const urlInput = el('input', { type:'url', placeholder:'https://… (Яндекс.Диск, видео, любая ссылка)', style:Object.assign({}, ss, { width:'100%' })});
+  const urlInput = el('input', { type:'url', placeholder:'https://… (Яндекс.Диск, видео, любая ссылка)',
+    value: (editingBlock && editingBlock.url) || '',
+    style:Object.assign({}, ss, { width:'100%' })});
   /* Игра */
   const gameSelect = el('select', { style:Object.assign({}, ss, { width:'100%' })},
     el('option', { value:'' }, '— без игры —'),
-    ...((STATE.gamesList || []).map(g => el('option', { value: String(g.id) }, (g.emoji || '🎮') + ' ' + g.title))));
+    ...((STATE.gamesList || []).map(g => {
+      const opt = el('option', { value: String(g.id) }, (g.emoji || '🎮') + ' ' + g.title);
+      if(editingBlock && editingBlock.game_id === g.id) opt.selected = true;
+      return opt;
+    })));
   /* Опрос */
-  const pollQuestion = el('input', { type:'text', placeholder:'Вопрос опроса (необязательно)', style:Object.assign({}, ss, { width:'100%', marginBottom:'6px' })});
+  const existingPoll = (editingBlock && editingBlock.config && editingBlock.config.poll) || null;
+  const pollQuestion = el('input', { type:'text', placeholder:'Вопрос опроса (необязательно)',
+    value: (existingPoll && existingPoll.question) || '',
+    style:Object.assign({}, ss, { width:'100%', marginBottom:'6px' })});
   const pollOptionsBox = el('div', null);
-  let pollOptions = ['', ''];   // минимум 2 пустых поля
+  let pollOptions = (existingPoll && Array.isArray(existingPoll.options) && existingPoll.options.length >= 2)
+    ? existingPoll.options.slice()
+    : ['', ''];
   function rebuildPollOptions(){
     pollOptionsBox.innerHTML = '';
     pollOptions.forEach((val, idx) => {
@@ -18413,7 +18480,7 @@ function renderAddBlockForm(day){
   /* === Сборка формы === */
   box.append(
     el('div', { style:{ fontWeight:'700', marginBottom:'8px', fontSize:'14px' }},
-      '＋ Новый пост ко Дню ' + day.ord),
+      isEdit ? ('✎ Редактировать пост') : ('＋ Новый пост ко Дню ' + (day.ord || ''))),
     el('div', { style:{ display:'flex', gap:'8px', marginBottom:'8px' }}, emojiInput, titleInput),
     sectionLabel('📝 Текст'),
     bodyTextarea,
@@ -18427,7 +18494,7 @@ function renderAddBlockForm(day){
     sectionLabel('📊 Опрос'),
     pollQuestion,
     pollOptionsBox,
-    el('div', { style:{ marginTop:'12px' }},
+    el('div', { style:{ marginTop:'12px', display:'flex', gap:'8px' }},
       el('button', { class:'btn btn-teal',
         onclick: async () => {
           const validPollOptions = pollOptions.map(o => (o || '').trim()).filter(Boolean);
@@ -18437,26 +18504,39 @@ function renderAddBlockForm(day){
             emoji: emojiInput.value.trim() || '📌',
             title: titleInput.value.trim() || null,
             body: bodyTextarea.value.trim() || null,
-            image_url: uploadedImageUrl || null,
+            image_urls: uploadedImageUrls.length ? uploadedImageUrls : null,
+            image_url: uploadedImageUrls[0] || null,   // совместимость для старого рендера
             url: urlInput.value.trim() || null,
             game_id: gameSelect.value ? parseInt(gameSelect.value,10) : null,
             config: hasPoll ? { poll: { question: pollQuestion.value.trim(), options: validPollOptions } } : null
           };
-          /* Проверим что хотя бы что-то заполнено */
-          if(!payload.title && !payload.body && !payload.image_url && !payload.url && !payload.game_id && !hasPoll){
+          if(!payload.title && !payload.body && !uploadedImageUrls.length && !payload.url && !payload.game_id && !hasPoll){
             showToast('Заполни хотя бы одно поле');
             return;
           }
-          await addWarmupBlock(day.id, payload);
+          if(isEdit){
+            await updateWarmupBlock(editingBlock.id, payload);
+          } else {
+            await addWarmupBlock(day.id, payload);
+          }
         }
-      }, '＋ Опубликовать пост')));
+      }, isEdit ? '💾 Сохранить' : '＋ Опубликовать пост'),
+      isEdit
+        ? el('button', { class:'btn btn-secondary',
+            onclick: () => { STATE.editingBlockId = null; render(); }
+          }, '✕ Отмена')
+        : null));
   return box;
 }
 
 /* === Ученик: открытие дня в полноэкранном overlay === */
 function openWarmupDayFullscreen(day){
   STATE.openWarmupDayId = day.id;
-  loadWarmupBlocks(day.id).then(() => renderWarmupOverlay(day));
+  /* Подгружаем игры (для блоков типа 'игра' внутри постов) и блоки дня
+     параллельно, потом рендерим overlay. */
+  const tasks = [loadWarmupBlocks(day.id)];
+  if(!STATE.studentGamesList) tasks.push(loadStudentGamesList());
+  Promise.all(tasks).then(() => renderWarmupOverlay(day));
 }
 function closeWarmupOverlay(){
   STATE.openWarmupDayId = null;
@@ -18491,10 +18571,18 @@ function renderWarmupBlockStudent(b){
   const cfg = (b.config && typeof b.config === 'object') ? b.config : {};
   const card = el('div', { class:'card', style:{ marginBottom:'16px', padding:'0', overflow:'hidden' }});
 
-  /* Картинка */
-  if(b.image_url){
-    card.append(el('img', { src:b.image_url, alt: b.title || '',
+  /* Картинки (новое поле image_urls + старое image_url для совместимости) */
+  const imgs = (Array.isArray(b.image_urls) && b.image_urls.length) ? b.image_urls
+             : (b.image_url ? [b.image_url] : []);
+  if(imgs.length === 1){
+    card.append(el('img', { src:imgs[0], alt: b.title || '',
       style:{ display:'block', width:'100%', maxHeight:'420px', objectFit:'cover', background:'var(--bg)' }}));
+  } else if(imgs.length > 1){
+    /* Горизонтальный скролл-карусель для нескольких */
+    const carousel = el('div', { style:{ display:'flex', overflowX:'auto', gap:'4px', scrollSnapType:'x mandatory', background:'var(--bg)' }});
+    imgs.forEach(u => carousel.append(el('img', { src:u, alt:'',
+      style:{ flex:'0 0 100%', maxHeight:'420px', objectFit:'cover', scrollSnapAlign:'start' }})));
+    card.append(carousel);
   }
 
   const inner = el('div', { style:{ padding:'16px 20px' }});
@@ -18567,7 +18655,8 @@ function renderWarmupBlockStudent(b){
       if(myVote){
         row.append(el('div', { style:{ position:'absolute', inset:'0', width: pct + '%',
                                        background: isMine ? 'var(--p-soft)' : 'var(--bg)',
-                                       transition:'width .3s ease', zIndex:'0' }}));
+                                       transition:'width .3s ease', zIndex:'0',
+                                       pointerEvents:'none' }}));
       }
       row.append(el('div', { style:{ position:'relative', zIndex:'1', display:'flex', justifyContent:'space-between', alignItems:'center' }},
         el('span', null, (isMine ? '✓ ' : '') + opt),
