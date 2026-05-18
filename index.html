@@ -10456,21 +10456,14 @@ function studentVariantsCard(){
    postMessage с результатом — пишем в game_attempts.
    ======================================================================= */
 async function loadStudentGamesList(){
-  /* Независимые try/catch, чтобы падение одного запроса не ломало другой. */
+  /* День-привязки приходят в day_ids — одним запросом. */
   try {
     STATE.studentGamesList = await restRequest('GET',
-      '/games?is_published=eq.true&select=id,slug,title,grade,topic,emoji,description,url,day_id' +
+      '/games?is_published=eq.true&select=id,slug,title,grade,topic,emoji,description,url,day_ids' +
       '&order=grade.asc,topic.asc,created_at.desc') || [];
   } catch(e){
-    console.error('loadStudentGamesList (games)', e);
+    console.error('loadStudentGamesList', e);
     STATE.studentGamesList = [];
-  }
-  try {
-    STATE.gameDayAssignments = await restRequest('GET',
-      '/game_day_assignments?select=id,game_id,day_id') || [];
-  } catch(e){
-    console.error('loadStudentGamesList (assignments)', e);
-    if(!Array.isArray(STATE.gameDayAssignments)) STATE.gameDayAssignments = [];
   }
 }
 
@@ -17994,62 +17987,59 @@ async function importOtpFile(file, title){
    ========================================================================== */
 
 async function loadGamesList(){
-  /* Независимые try/catch: если /game_day_assignments отдаст 502
-     (прокси / schema cache), сам каталог игр всё равно загрузится. */
+  /* Привязки игр к дням теперь хранятся как массив day_ids INTEGER[]
+     прямо в таблице games — приходят одним запросом, без отдельной
+     таблицы game_day_assignments. Это обходит 502 от прокси reg.ru. */
   try {
     STATE.gamesList = await restRequest('GET',
-      '/games?select=id,slug,title,grade,topic,emoji,description,url,is_published,day_id,created_at' +
+      '/games?select=id,slug,title,grade,topic,emoji,description,url,is_published,day_ids,created_at' +
       '&order=grade.asc,topic.asc,created_at.desc') || [];
   } catch(e){
-    console.error('loadGamesList (games)', e);
+    console.error('loadGamesList', e);
     STATE.gamesList = [];
-  }
-  try {
-    STATE.gameDayAssignments = await restRequest('GET',
-      '/game_day_assignments?select=id,game_id,day_id') || [];
-  } catch(e){
-    console.error('loadGamesList (assignments)', e);
-    if(!Array.isArray(STATE.gameDayAssignments)) STATE.gameDayAssignments = [];
   }
 }
 
-/* Helpers: какие дни у игры, какие игры у дня */
+/* Helpers: какие дни у игры, какие игры у дня.
+   Привязки теперь живут как массив day_ids INTEGER[] прямо в games. */
+function findGame(gameId){
+  return (STATE.gamesList || []).find(g => g.id === gameId)
+      || (STATE.studentGamesList || []).find(g => g.id === gameId);
+}
 function getGameDays(gameId){
-  return (STATE.gameDayAssignments || [])
-    .filter(a => a.game_id === gameId)
-    .map(a => a.day_id);
+  const g = findGame(gameId);
+  return (g && Array.isArray(g.day_ids)) ? g.day_ids : [];
 }
 function getDayGames(dayId, fromList){
   const list = fromList || STATE.gamesList || [];
-  const gameIds = (STATE.gameDayAssignments || [])
-    .filter(a => a.day_id === dayId)
-    .map(a => a.game_id);
-  return list.filter(g => gameIds.includes(g.id));
+  return list.filter(g => Array.isArray(g.day_ids) && g.day_ids.includes(dayId));
 }
 
-/* Toggle привязки: добавляет/удаляет game_day_assignments.
-   После операции перезагружаем список с сервера — это надёжнее,
-   чем пытаться синхронизировать локальный state (Supabase может
-   не вернуть строку при некоторых RLS-конфигурациях, тогда чекбокс
-   «прыгает» обратно после render). */
+/* Toggle привязки: модифицирует g.day_ids и шлёт PATCH в games.
+   Не нужен отдельный запрос к game_day_assignments — обход 502
+   от прокси reg.ru на запросах к маленьким таблицам. */
 async function toggleGameDayAssignment(gameId, dayId, attach){
+  const g = findGame(gameId);
+  if(!g) return;
+  const cur = Array.isArray(g.day_ids) ? g.day_ids.slice() : [];
+  let next;
+  if(attach){
+    if(cur.includes(dayId)) return;     // уже привязана
+    next = cur.concat(dayId).sort((a,b) => a-b);
+  } else {
+    next = cur.filter(d => d !== dayId);
+  }
+  /* Оптимистичное обновление локально — UI откликается мгновенно */
+  g.day_ids = next;
   try {
-    if(attach){
-      await restRequest('POST', '/game_day_assignments',
-        { game_id: gameId, day_id: dayId },
-        { prefer: 'return=minimal' });
-    } else {
-      await restRequest('DELETE',
-        '/game_day_assignments?game_id=eq.' + gameId + '&day_id=eq.' + dayId,
-        null, { prefer: 'return=minimal' });
-    }
-    /* Перезагружаем актуальное состояние привязок */
-    const fresh = await restRequest('GET',
-      '/game_day_assignments?select=id,game_id,day_id');
-    STATE.gameDayAssignments = fresh || [];
+    await restRequest('PATCH', '/games?id=eq.' + gameId,
+      { day_ids: next }, { prefer: 'return=minimal' });
   } catch(e){
     console.error('toggleGameDayAssignment', e);
+    /* Откатываем локальное изменение, если PATCH провалился */
+    g.day_ids = cur;
     showToast('Не получилось — попробуй ещё раз');
+    render();
   }
 }
 
