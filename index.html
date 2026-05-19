@@ -16834,10 +16834,24 @@ function modalEditTheory(n){
           preview.setAttribute('data-theory-preview', '1');
           const renderPreview = () => {
             try {
-              preview.innerHTML = window.marked
-                ? window.marked.parse(ta.value || '')
-                : ('<pre style="white-space:pre-wrap">' + (ta.value || '').replace(/</g,'&lt;') + '</pre>');
-            } catch(_){ preview.textContent = ta.value || ''; }
+              let html;
+              if(window.marked){
+                html = window.marked.parse(ta.value || '');
+                /* Дополнительная страховка: если marked почему-то не превратил ![](url) в <img>,
+                   доводим вручную регуляркой. */
+                if(html.indexOf('<img') === -1 && /!\[[^\]]*\]\([^)]+\)/.test(ta.value || '')){
+                  console.warn('[theory image] marked did not render image — applying fallback');
+                  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g,
+                    '<img src="$2" alt="$1" style="max-width:100%;height:auto;border-radius:8px;margin:8px 0;display:block;">');
+                }
+              } else {
+                html = '<pre style="white-space:pre-wrap">' + (ta.value || '').replace(/</g,'&lt;') + '</pre>';
+              }
+              preview.innerHTML = html;
+            } catch(err){
+              console.warn('[theory preview] render error:', err);
+              preview.textContent = ta.value || '';
+            }
           };
           renderPreview();
           ta.addEventListener('input', renderPreview);
@@ -16917,19 +16931,21 @@ function modalEditTheory(n){
           });
 
           /* Хелпер: загружает изображение в storage 'chat-media' (уже настроен и публичный),
-             вставляет markdown-картинку в текстарею на месте курсора. */
+             вставляет markdown-картинку в текстарею. Работаем по индексу подстановки,
+             а не по replace — replace может не сработать если значения чуть отличаются. */
           let _theoryUploading = false;
           const insertTheoryImage = async (file) => {
             if(_theoryUploading){ showToast('⏳ Дождись завершения текущей загрузки'); return; }
             _theoryUploading = true;
             saveBtn.disabled = true;
             saveBtn.textContent = '⏳ Грузим фото…';
-            /* Уникальный плейсхолдер с timestamp — чтобы при параллельных загрузках
-               не путать какой плейсхолдер на какой URL заменить. */
-            const ph = '![Загружаю_' + Date.now() + ']()';
-            const s = ta.selectionStart, e = ta.selectionEnd;
+            /* Уникальный плейсхолдер — на случай если позиция в textarea сдвинется,
+               будем его искать через indexOf. */
+            const ph = '\n\n![Загружаю_' + Date.now() + ']()\n\n';
+            const s = ta.selectionStart || 0;
             const before = ta.value.slice(0, s);
-            const after  = ta.value.slice(e);
+            const after  = ta.value.slice(s);
+            const startIdx = before.length;
             ta.value = before + ph + after;
             renderPreview();
             try {
@@ -16939,27 +16955,34 @@ function modalEditTheory(n){
               if(!url || typeof url !== 'string' || !/^https?:\/\//.test(url)){
                 throw new Error('Пустой URL от upload — попробуй ещё раз');
               }
-              /* Лучше формат `![alt](url)` где alt = название файла без расширения —
-                 marked-парсер старых версий иногда теряет `![]()` с пустым alt. */
               const altText = (file.name || 'фото').replace(/\.[^.]+$/, '').slice(0, 40);
-              const md = '![' + altText + '](' + url + ')';
-              if(ta.value.indexOf(ph) === -1){
-                /* Плейсхолдер потерялся (пользователь стирал текст) — вставим в конец */
-                console.warn('[theory image] placeholder lost, append at end');
-                ta.value = (ta.value + '\n\n' + md).trim();
+              /* Картинку лучше вставлять отдельным абзацем, обрамлённым \n\n —
+                 marked гарантированно рендерит её как блок. */
+              const md = '\n\n![' + altText + '](' + url + ')\n\n';
+              const idx = ta.value.indexOf(ph);
+              if(idx >= 0){
+                ta.value = ta.value.slice(0, idx) + md + ta.value.slice(idx + ph.length);
+                console.log('[theory image] placeholder replaced at idx=' + idx);
               } else {
-                ta.value = ta.value.replace(ph, md);
+                /* Плейсхолдер съело редактирование — добавляем в конец */
+                ta.value = (ta.value.replace(/\n+$/, '') + md).trim() + '\n';
+                console.warn('[theory image] placeholder lost — appended at end');
               }
               renderPreview();
-              showToast('✓ Фото добавлено');
-              /* Курсор после вставки — за подписью alt-текста */
-              const pos = before.length + 2;
-              ta.focus();
-              try { ta.setSelectionRange(pos, pos); } catch(_){}
+              showToast('✓ Фото добавлено · можно сохранить');
+              /* Курсор после картинки — между «![» и «](» — чтобы можно было ввести описание */
+              try {
+                const caret = idx >= 0 ? idx + 4 + altText.length : ta.value.length;
+                ta.focus();
+                ta.setSelectionRange(caret, caret);
+              } catch(_){}
             } catch(err){
               console.error('[theory image] upload failed:', err);
-              ta.value = ta.value.replace(ph, '');
-              renderPreview();
+              const idx = ta.value.indexOf(ph);
+              if(idx >= 0){
+                ta.value = ta.value.slice(0, idx) + ta.value.slice(idx + ph.length);
+                renderPreview();
+              }
               showToast('⚠ ' + (err.message || 'не удалось загрузить фото'));
             } finally {
               _theoryUploading = false;
