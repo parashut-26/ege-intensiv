@@ -16940,15 +16940,17 @@ function modalEditTheory(n){
             _theoryUploading = true;
             saveBtn.disabled = true;
             saveBtn.textContent = '⏳ Грузим фото…';
-            /* Уникальный плейсхолдер — на случай если позиция в textarea сдвинется,
-               будем его искать через indexOf. */
+            /* Уникальный плейсхолдер. Вставляем В КОНЕЦ textarea (а не в позицию
+               курсора), чтобы Ольга гарантированно видела загружаемое фото,
+               не приходилось скроллить наверх и не ломались уже написанные абзацы. */
             const ph = '\n\n![Загружаю_' + Date.now() + ']()\n\n';
-            const s = ta.selectionStart || 0;
-            const before = ta.value.slice(0, s);
-            const after  = ta.value.slice(s);
-            const startIdx = before.length;
-            ta.value = before + ph + after;
+            const prevValue = (ta.value || '').replace(/\s+$/, '');
+            ta.value = prevValue + ph;
+            /* Прокручиваем textarea вниз — пользователь увидит вставленное */
+            ta.scrollTop = ta.scrollHeight;
             renderPreview();
+            /* Превью тоже скроллим вниз */
+            preview.scrollTop = preview.scrollHeight;
             try {
               showToast('⏳ Загружаю фото…');
               const url = await uploadChatImage(file);
@@ -16974,6 +16976,9 @@ function modalEditTheory(n){
                 console.warn('[theory image] placeholder lost — appended at end');
               }
               renderPreview();
+              /* Прокручиваем оба окна вниз — пользователь видит свежую картинку */
+              ta.scrollTop = ta.scrollHeight;
+              preview.scrollTop = preview.scrollHeight;
               showToast('✓ Фото добавлено · можно сохранить');
               /* Курсор после картинки — между «![» и «](» — чтобы можно было ввести описание */
               try {
