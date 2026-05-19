@@ -16797,12 +16797,20 @@ function modalEditTheory(n){
             style:{ width:'100%', padding:'14px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'400px', resize:'vertical', fontFamily:'inherit', fontSize:'14px', lineHeight:'1.55', boxSizing:'border-box' }
           }, THEORY[n] || '');
 
-          /* Предпросмотр — рядом или под textarea, обновляется по input */
+          /* Предпросмотр — рядом или под textarea, обновляется по input.
+             Картинки сжимаются под ширину блока (max-width:100%, height:auto). */
           const preview = el('div', {
             style:{ padding:'14px', borderRadius:'10px', border:'1px dashed var(--border-2)',
                     background:'#fff', minHeight:'400px', maxHeight:'600px', overflow:'auto',
                     fontSize:'14px', lineHeight:'1.55', boxSizing:'border-box' }
           });
+          /* Глобальное правило для картинок внутри превью */
+          if(!document.getElementById('theory-preview-img-style')){
+            document.head.append(el('style', { id:'theory-preview-img-style' },
+              '#root .theory-preview-imgs-mark + div img,' +
+              ' [data-theory-preview] img { max-width:100%; height:auto; border-radius:8px; margin:8px 0; display:block; }'));
+          }
+          preview.setAttribute('data-theory-preview', '1');
           const renderPreview = () => {
             try {
               preview.innerHTML = window.marked
@@ -16871,8 +16879,80 @@ function modalEditTheory(n){
             mkBtn('• список',  'Маркированный список',  () => insertAtLineStart('- '), { fontWeight:'400' }),
             mkBtn('1. список', 'Нумерованный список',   () => insertAtLineStart('1. '), { fontWeight:'400' }),
             mkBtn('—',         'Горизонтальная линия',  () => wrap('\n\n---\n\n','')),
-            mkBtn('🔗',        'Ссылка',                () => wrap('[','](https://)','текст ссылки'))
+            mkBtn('🔗',        'Ссылка',                () => wrap('[','](https://)','текст ссылки')),
+            mkBtn('📷 Фото',   'Прикрепить изображение из файла',
+                  () => fileInputTheoryImg.click(), { fontWeight:'400' })
           );
+
+          /* Скрытый <input type=file> для прикрепления фото к теории. */
+          const fileInputTheoryImg = el('input', { type:'file', accept:'image/*',
+            style:{ display:'none' },
+            onchange: async (ev) => {
+              const file = ev.target.files && ev.target.files[0];
+              if(!file) return;
+              fileInputTheoryImg.value = ''; /* чтобы повторно тот же файл триггерил onchange */
+              await insertTheoryImage(file);
+            }
+          });
+
+          /* Хелпер: загружает изображение в storage 'chat-media' (уже настроен и публичный),
+             вставляет markdown-картинку в текстарею на месте курсора. */
+          const insertTheoryImage = async (file) => {
+            const placeholder = '![Загружаю…]()';
+            /* Сразу подставляем плейсхолдер, чтобы пользователь видел прогресс */
+            const s = ta.selectionStart, e = ta.selectionEnd;
+            const before = ta.value.slice(0, s);
+            const after  = ta.value.slice(e);
+            ta.value = before + placeholder + after;
+            renderPreview();
+            try {
+              showToast('⏳ Загружаю фото…');
+              const url = await uploadChatImage(file);
+              const md = '![](' + url + ')';
+              ta.value = ta.value.replace(placeholder, md);
+              renderPreview();
+              showToast('✓ Фото добавлено');
+              /* Курсор после вставки — за подписью alt-текста, чтобы можно было ввести описание */
+              const pos = before.length + 2; /* «![» */
+              ta.focus();
+              ta.setSelectionRange(pos, pos);
+            } catch(err){
+              console.error(err);
+              ta.value = ta.value.replace(placeholder, '');
+              renderPreview();
+              showToast('⚠ ' + (err.message || 'не удалось загрузить фото'));
+            }
+          };
+
+          /* Drag & drop изображений прямо в textarea. */
+          ta.addEventListener('dragover', (ev) => { ev.preventDefault(); ta.style.outline = '2px dashed var(--p)'; });
+          ta.addEventListener('dragleave', () => { ta.style.outline = 'none'; });
+          ta.addEventListener('drop', async (ev) => {
+            ev.preventDefault();
+            ta.style.outline = 'none';
+            const dt = ev.dataTransfer;
+            if(!dt || !dt.files || !dt.files.length) return;
+            const file = dt.files[0];
+            if(!/^image\//.test(file.type)){
+              showToast('⚠ Перетащи изображение');
+              return;
+            }
+            await insertTheoryImage(file);
+          });
+
+          /* Также поддержим paste — кто-то может скопировать картинку из буфера обмена. */
+          ta.addEventListener('paste', async (ev) => {
+            const items = ev.clipboardData && ev.clipboardData.items;
+            if(!items) return;
+            for(const it of items){
+              if(it.kind === 'file' && it.type.startsWith('image/')){
+                ev.preventDefault();
+                const file = it.getAsFile();
+                if(file) await insertTheoryImage(file);
+                return;
+              }
+            }
+          });
 
           /* Связываем textarea сверху, panel toolbar над ним (без скруглений снизу),
              ниже строка-разделитель «Превью», ниже preview-блок. */
@@ -16927,7 +17007,8 @@ function modalEditTheory(n){
           card.append(
             el('h4', null, '📖 Текст теории (то, что увидит ученик)'),
             el('p', { style:{ fontSize:'12px', color:'var(--ink-3)', margin:'4px 0 4px 0' }},
-              'Слева — редактор с панелью форматирования. Справа — живой предпросмотр. Можно использовать Markdown или цветной HTML.'),
+              'Слева — редактор с панелью форматирования. Справа — живой предпросмотр. Можно использовать Markdown или цветной HTML. Фото можно вставить кнопкой 📷, перетащить в редактор или вставить из буфера обмена.'),
+            fileInputTheoryImg,  /* скрытый <input type=file> — должен быть в DOM */
             grid,
             el('div', { style:{ display:'flex', alignItems:'center', marginTop:'10px' }}, saveBtn, status));
           return card;
