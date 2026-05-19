@@ -19266,29 +19266,48 @@ function renderAddBlockForm(day, editingBlock, target){
   const titleInput = el('input', { type:'text', placeholder:'Заголовок поста (необязательно)',
     value: (editingBlock && editingBlock.title) || '',
     style:Object.assign({}, ss, { flex:1 })});
-  const bodyTextarea = el('textarea', { placeholder:'Текст поста — что хочешь сказать ученикам. Cmd/Ctrl+B жирный · Cmd/Ctrl+I курсив · Cmd/Ctrl+Z отмена.',
-    style:Object.assign({}, ss, { width:'100%', minHeight:'320px', fontFamily:'inherit', fontSize:'14px', lineHeight:'1.55', resize:'vertical' })});
-  if(editingBlock && editingBlock.body) bodyTextarea.value = editingBlock.body;
+  /* WYSIWYG-редактор: contenteditable div вместо textarea.
+     Текст сразу становится жирным/цветным при клике кнопки — без markdown маркеров.
+     Сохраняется HTML, который ученик увидит прямо через innerHTML. */
+  const bodyEditor = el('div', {
+    contenteditable: 'true', spellcheck: 'false',
+    'data-placeholder': 'Текст поста — что хочешь сказать ученикам. Cmd/Ctrl+B жирный · Cmd/Ctrl+I курсив · Cmd/Ctrl+U подчёркнутый · Cmd/Ctrl+Z отмена.',
+    style:Object.assign({}, ss, {
+      width:'100%', minHeight:'320px', fontFamily:'inherit', fontSize:'14px',
+      lineHeight:'1.6', overflow:'auto',
+      borderTopLeftRadius:'0', borderTopRightRadius:'0', borderTop:'none',
+      padding:'12px 14px', boxSizing:'border-box', whiteSpace:'pre-wrap'
+    })
+  });
+  /* Инициализируем содержимое.
+     Если уже есть body — вставляем как HTML.
+     Бэк-совместимость: если в строке только текст (markdown без HTML-тегов),
+     marked.parse преобразует **жирный** в <strong>, — рендерим красиво. */
+  if(editingBlock && editingBlock.body){
+    const raw = editingBlock.body;
+    if(/<\/?(b|i|u|mark|span|h1|h2|h3|ul|ol|li|br|p|div|strong|em)[\s>]/i.test(raw)){
+      /* Это уже HTML — вставляем как есть */
+      bodyEditor.innerHTML = raw;
+    } else if(window.marked){
+      /* Это markdown — конвертируем в HTML один раз, дальше работаем как с HTML */
+      try { bodyEditor.innerHTML = window.marked.parse(raw); }
+      catch(_){ bodyEditor.textContent = raw; }
+    } else {
+      bodyEditor.textContent = raw;
+    }
+  }
+  /* Плейсхолдер через CSS (если пусто) */
+  if(!document.getElementById('post-editor-placeholder-style')){
+    document.head.append(el('style', { id:'post-editor-placeholder-style' },
+      '[contenteditable="true"]:empty:before{content:attr(data-placeholder);color:var(--ink-3);pointer-events:none;}'
+    ));
+  }
 
-  /* === Панель форматирования над textarea для поста === */
-  const _postWrap = (left, right, placeholder) => {
-    const s = bodyTextarea.selectionStart, e = bodyTextarea.selectionEnd;
-    const sel = bodyTextarea.value.slice(s, e) || (placeholder || '');
-    const before = bodyTextarea.value.slice(0, s);
-    const after  = bodyTextarea.value.slice(e);
-    bodyTextarea.value = before + left + sel + right + after;
-    const newStart = before.length + left.length;
-    bodyTextarea.focus();
-    bodyTextarea.setSelectionRange(newStart, newStart + sel.length);
-  };
-  const _postInsertAtLineStart = (prefix) => {
-    const s = bodyTextarea.selectionStart;
-    const lineStart = bodyTextarea.value.lastIndexOf('\n', s - 1) + 1;
-    const before = bodyTextarea.value.slice(0, lineStart);
-    const after  = bodyTextarea.value.slice(lineStart);
-    bodyTextarea.value = before + prefix + after;
-    bodyTextarea.focus();
-    bodyTextarea.setSelectionRange(s + prefix.length, s + prefix.length);
+  /* === Панель форматирования через execCommand — WYSIWYG === */
+  const _postExec = (cmd, val) => {
+    bodyEditor.focus();
+    try { document.execCommand(cmd, false, val); }
+    catch(_){}
   };
   const _mkPostBtn = (label, title, fn, style) => {
     return el('button', { type:'button', title,
@@ -19297,6 +19316,7 @@ function renderAddBlockForm(day, editingBlock, target){
         background:'#fff', border:'1px solid var(--border-2)', borderRadius:'6px',
         fontFamily:'inherit', fontWeight:'700'
       }, style || {}),
+      onmousedown: (ev) => { ev.preventDefault(); /* не сбрасываем выделение */ },
       onclick: (ev) => { ev.preventDefault(); fn(); }
     }, label);
   };
@@ -19305,38 +19325,71 @@ function renderAddBlockForm(day, editingBlock, target){
             padding:'6px', background:'#fff', border:'1px solid var(--border-2)',
             borderRadius:'8px 8px 0 0', borderBottom:'none', marginTop:'4px' }
   },
-    _mkPostBtn(el('b', null, 'Ж'), 'Жирный (Cmd/Ctrl+B)', () => _postWrap('**','**','текст')),
-    _mkPostBtn(el('i', null, 'К'), 'Курсив (Cmd/Ctrl+I)',  () => _postWrap('*','*','текст')),
-    _mkPostBtn(el('u', null, 'П'), 'Подчёркнутый',         () => _postWrap('<u>','</u>','текст')),
+    _mkPostBtn(el('b', null, 'Ж'), 'Жирный (Cmd/Ctrl+B)', () => _postExec('bold')),
+    _mkPostBtn(el('i', null, 'К'), 'Курсив (Cmd/Ctrl+I)',  () => _postExec('italic')),
+    _mkPostBtn(el('u', null, 'П'), 'Подчёркнутый (Cmd/Ctrl+U)', () => _postExec('underline')),
     _mkPostBtn(el('span', { style:{ background:'#FEF08A', padding:'0 4px', borderRadius:'3px' }}, 'A'),
-              'Жёлтый маркер', () => _postWrap('<mark>','</mark>','текст')),
+              'Жёлтый маркер', () => _postExec('hiliteColor', '#FEF08A')),
     _mkPostBtn(el('span', { style:{ color:'#DC2626' }}, 'A'),
-              'Красный',       () => _postWrap('<span style="color:#DC2626">','</span>','текст')),
+              'Красный', () => _postExec('foreColor', '#DC2626')),
     _mkPostBtn(el('span', { style:{ color:'#2563EB' }}, 'A'),
-              'Синий',         () => _postWrap('<span style="color:#2563EB">','</span>','текст')),
+              'Синий', () => _postExec('foreColor', '#2563EB')),
     _mkPostBtn(el('span', { style:{ color:'#059669' }}, 'A'),
-              'Зелёный',       () => _postWrap('<span style="color:#059669">','</span>','текст')),
+              'Зелёный', () => _postExec('foreColor', '#059669')),
+    _mkPostBtn(el('span', { style:{ color:'var(--ink)' }}, 'A'),
+              'Сбросить цвет / форматирование', () => _postExec('removeFormat'), { fontWeight:'400' }),
     el('span', { style:{ width:'1px', height:'20px', background:'var(--border-2)', margin:'0 4px' }}),
-    _mkPostBtn('H1', 'Заголовок 1', () => _postInsertAtLineStart('# ')),
-    _mkPostBtn('H2', 'Заголовок 2', () => _postInsertAtLineStart('## ')),
-    _mkPostBtn('• список',  'Маркированный список', () => _postInsertAtLineStart('- '),  { fontWeight:'400' }),
-    _mkPostBtn('1. список', 'Нумерованный список',  () => _postInsertAtLineStart('1. '), { fontWeight:'400' }),
-    _mkPostBtn('—', 'Горизонтальная линия', () => _postWrap('\n\n---\n\n','')),
-    _mkPostBtn('🔗', 'Ссылка', () => _postWrap('[','](https://)','текст ссылки'))
+    _mkPostBtn('H1', 'Заголовок 1', () => _postExec('formatBlock', '<H1>')),
+    _mkPostBtn('H2', 'Заголовок 2', () => _postExec('formatBlock', '<H2>')),
+    _mkPostBtn('¶', 'Обычный абзац', () => _postExec('formatBlock', '<P>'), { fontWeight:'400' }),
+    _mkPostBtn('•', 'Маркированный список', () => _postExec('insertUnorderedList'), { fontWeight:'400' }),
+    _mkPostBtn('1.', 'Нумерованный список', () => _postExec('insertOrderedList'), { fontWeight:'400' }),
+    _mkPostBtn('🔗', 'Ссылка', () => {
+      const url = prompt('Адрес ссылки:', 'https://');
+      if(url){ _postExec('createLink', url); }
+    })
   );
-  /* Хоткеи Cmd/Ctrl + B / I / Enter — стандартные */
-  bodyTextarea.addEventListener('keydown', (e) => {
+  /* Cmd+B/I/U работают нативно через contenteditable, но добавим execCommand,
+     чтобы поведение было одинаковым в разных браузерах. */
+  bodyEditor.addEventListener('keydown', (e) => {
     if((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')){
-      e.preventDefault(); _postWrap('**','**','текст');
-    }
-    if((e.ctrlKey || e.metaKey) && (e.key === 'i' || e.key === 'I')){
-      e.preventDefault(); _postWrap('*','*','текст');
+      e.preventDefault(); _postExec('bold');
+    } else if((e.ctrlKey || e.metaKey) && (e.key === 'i' || e.key === 'I')){
+      e.preventDefault(); _postExec('italic');
+    } else if((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U')){
+      e.preventDefault(); _postExec('underline');
     }
   });
-  /* Чтобы стилистически toolbar и textarea были одним блоком */
-  bodyTextarea.style.borderTopLeftRadius = '0';
-  bodyTextarea.style.borderTopRightRadius = '0';
-  bodyTextarea.style.borderTop = 'none';
+  /* Очищаем форматирование при вставке текста из других приложений —
+     иначе влетит чужой <style> и куча мусорных классов. */
+  bodyEditor.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const txt = (e.clipboardData || window.clipboardData).getData('text/plain');
+    document.execCommand('insertText', false, txt);
+  });
+
+  /* Адаптируем существующие сохранения: вместо bodyTextarea.value используем
+     bodyEditor.innerHTML. Создаём прокси-объект, чтобы не править весь старый код. */
+  const bodyTextarea = {
+    get value(){
+      const html = (bodyEditor.innerHTML || '').trim();
+      /* Пустой редактор может содержать <br> или пустые <div> — считаем пустым */
+      const plain = (bodyEditor.textContent || '').trim();
+      if(!plain) return '';
+      return html;
+    },
+    set value(v){
+      if(v && /<\/?(b|i|u|mark|span|h1|h2|h3|ul|ol|li|br|p|div|strong|em)[\s>]/i.test(v)){
+        bodyEditor.innerHTML = v;
+      } else if(window.marked && v){
+        try { bodyEditor.innerHTML = window.marked.parse(v); }
+        catch(_){ bodyEditor.textContent = v; }
+      } else {
+        bodyEditor.textContent = v || '';
+      }
+    },
+    focus(){ bodyEditor.focus(); }
+  };
   /* Картинки — накопительный upload, несколько файлов в одном посте */
   const imgGrid = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'6px', marginTop:'6px' }});
   const uploadedImageUrls = editingBlock
@@ -19430,7 +19483,7 @@ function renderAddBlockForm(day, editingBlock, target){
     el('div', { style:{ display:'flex', gap:'8px', marginBottom:'8px' }}, emojiInput, titleInput),
     sectionLabel('📝 Текст'),
     postToolbar,
-    bodyTextarea,
+    bodyEditor,
     sectionLabel('🖼 Картинки (можно несколько)'),
     el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }}, pickImgBtn, fileInput),
     imgGrid,
