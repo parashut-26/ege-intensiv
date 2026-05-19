@@ -16814,17 +16814,17 @@ function modalEditTheory(n){
           const card = el('div', { class:'card', style:{ marginBottom:'14px', background:'var(--surface-soft)' }});
 
           const ta = el('textarea', {
-            placeholder: 'Опишите тему: что проверяется в задании ' + n + ', типичные ловушки, формулы, правила. Используй кнопки сверху для форматирования.',
-            style:{ width:'100%', padding:'14px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'400px', resize:'vertical', fontFamily:'inherit', fontSize:'14px', lineHeight:'1.55', boxSizing:'border-box' }
+            placeholder: 'Опишите тему: что проверяется в задании ' + n + ', типичные ловушки, формулы, правила. Используй кнопки сверху для форматирования. Cmd/Ctrl+B — жирный, Cmd/Ctrl+I — курсив, Cmd/Ctrl+Z — отмена.',
+            style:{ width:'100%', padding:'14px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'600px', resize:'vertical', fontFamily:'inherit', fontSize:'15px', lineHeight:'1.6', boxSizing:'border-box' }
           }, THEORY[n] || '');
 
-          /* Предпросмотр — рядом или под textarea, обновляется по input.
-             Картинки сжимаются под ширину блока (max-width:100%, height:auto).
-             Высота не ограничена сверху — чтобы длинные картинки помещались. */
+          /* Предпросмотр СКРЫТ по умолчанию (раскрывается кнопкой «👁 Превью» в toolbar).
+             На мобильном двухколоночный формат ломал тонкие столбцы. */
           const preview = el('div', {
             style:{ padding:'14px', borderRadius:'10px', border:'1px dashed var(--border-2)',
-                    background:'#fff', minHeight:'400px', overflow:'auto',
-                    fontSize:'14px', lineHeight:'1.55', boxSizing:'border-box' }
+                    background:'#fff', overflow:'auto',
+                    fontSize:'14px', lineHeight:'1.55', boxSizing:'border-box',
+                    display:'none', marginTop:'12px' }
           });
           /* Глобальное правило для картинок внутри превью */
           if(!document.getElementById('theory-preview-img-style')){
@@ -16916,18 +16916,33 @@ function modalEditTheory(n){
             mkBtn('1. список', 'Нумерованный список',   () => insertAtLineStart('1. '), { fontWeight:'400' }),
             mkBtn('—',         'Горизонтальная линия',  () => wrap('\n\n---\n\n','')),
             mkBtn('🔗',        'Ссылка',                () => wrap('[','](https://)','текст ссылки')),
-            mkBtn('📷 Фото',   'Прикрепить изображение из файла',
-                  () => fileInputTheoryImg.click(), { fontWeight:'400' })
+            mkBtn('📷 Фото',   'Прикрепить одно или несколько изображений',
+                  () => fileInputTheoryImg.click(), { fontWeight:'400' }),
+            mkBtn('👁 Превью', 'Показать/скрыть предпросмотр (как увидит ученик)',
+                  () => {
+                    if(preview.style.display === 'none'){
+                      preview.style.display = 'block';
+                      renderPreview();
+                      preview.scrollIntoView({ behavior:'smooth', block:'nearest' });
+                    } else {
+                      preview.style.display = 'none';
+                    }
+                  }, { fontWeight:'400' })
           );
 
-          /* Скрытый <input type=file> для прикрепления фото к теории. */
-          const fileInputTheoryImg = el('input', { type:'file', accept:'image/*',
+          /* Скрытый <input type=file> для прикрепления фото к теории.
+             multiple — можно выбрать сразу несколько файлов, грузятся по очереди. */
+          const fileInputTheoryImg = el('input', { type:'file', accept:'image/*', multiple:'',
             style:{ display:'none' },
             onchange: async (ev) => {
-              const file = ev.target.files && ev.target.files[0];
-              if(!file) return;
-              fileInputTheoryImg.value = ''; /* чтобы повторно тот же файл триггерил onchange */
-              await insertTheoryImage(file);
+              const files = ev.target.files;
+              if(!files || !files.length) return;
+              const arr = Array.from(files);
+              fileInputTheoryImg.value = '';
+              for(const f of arr){
+                await insertTheoryImage(f);
+              }
+              if(arr.length > 1) showToast('✓ Загружено фото: ' + arr.length);
             }
           });
 
@@ -17083,24 +17098,17 @@ function modalEditTheory(n){
             }
           }, '💾 Сохранить в БД');
 
-          /* Двухколоночный layout — редактор слева, превью справа.
-             На узких экранах автоматически становится одной колонкой. */
-          const editorWrap = el('div', null, toolbar, ta);
-          const grid = el('div', {
-            style:{ display:'grid', gridTemplateColumns:'minmax(0,1fr) minmax(0,1fr)', gap:'12px', marginTop:'8px' }
-          },
-            editorWrap,
-            el('div', null,
-              el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', fontWeight:'700', marginBottom:'4px', textTransform:'uppercase' }},
-                '👁 Как увидит ученик'),
-              preview));
-
+          /* Одна колонка: toolbar → textarea → (опционально) preview снизу.
+             Превью раскрывается кнопкой «👁 Превью» в toolbar — на мобильном
+             двухколоночный формат ломал тонкие столбцы. */
           card.append(
             el('h4', null, '📖 Текст теории (то, что увидит ученик)'),
-            el('p', { style:{ fontSize:'12px', color:'var(--ink-3)', margin:'4px 0 4px 0' }},
-              'Слева — редактор с панелью форматирования. Справа — живой предпросмотр. Можно использовать Markdown или цветной HTML. Фото можно вставить кнопкой 📷, перетащить в редактор или вставить из буфера обмена.'),
+            el('p', { style:{ fontSize:'12px', color:'var(--ink-3)', margin:'4px 0 8px 0' }},
+              'Cmd/Ctrl+B жирный · Cmd/Ctrl+I курсив · Cmd/Ctrl+Z отмена. Фото — кнопкой 📷 (можно выбрать несколько), перетащить в редактор или вставить из буфера. Превью — кнопкой 👁 (по умолчанию скрыто).'),
             fileInputTheoryImg,  /* скрытый <input type=file> — должен быть в DOM */
-            grid,
+            toolbar,
+            ta,
+            preview,
             el('div', { style:{ display:'flex', alignItems:'center', marginTop:'10px' }}, saveBtn, status));
           return card;
         })(),
