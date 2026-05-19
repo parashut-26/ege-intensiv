@@ -16910,7 +16910,7 @@ function modalEditTheory(n){
   const qs = QUIZ_BANK[n] || [];
 
   return el('div', { class:'modal-bg',
-    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.contentEditTaskN = null; render(); }}
+    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.contentEditTaskN = null; if(STATE.editingTheoryGallery){ STATE.editingTheoryGallery = {}; } render(); }}
   },
     el('div', { class:'modal' },
       el('div', { class:'modal-head' },
@@ -16918,16 +16918,25 @@ function modalEditTheory(n){
           el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
             '✏️ Редактирование · Задание ' + n + ' · День ' + t.day),
           el('h2', null, t.topic)),
-        el('button', { class:'x', onclick: () => { STATE.contentEditTaskN = null; render(); }}, '×')),
+        el('button', { class:'x', onclick: () => { STATE.contentEditTaskN = null; if(STATE.editingTheoryGallery){ STATE.editingTheoryGallery = {}; } render(); }}, '×')),
       el('div', { class:'modal-body' },
         /* Текст теории + панель форматирования + предпросмотр. */
         (function(){
           const card = el('div', { class:'card', style:{ marginBottom:'14px', background:'var(--surface-soft)' }});
 
           /* Разделяем сохранённое поле theory_md на массив URL картинок (карусель сверху)
-             и чистый текстовый markdown (textarea). При сохранении соберём обратно. */
+             и чистый текстовый markdown (textarea). При сохранении соберём обратно.
+             ВАЖНО: galleryImages держим в STATE — иначе фоновый render() (например,
+             после загрузки achievements/attendance) пересоздаёт closure модала
+             и только что добавленные фото теряются. */
+          if(!STATE.editingTheoryGallery) STATE.editingTheoryGallery = {};
           const initialMeta = parseTheoryMeta(THEORY[n] || '');
-          const galleryImages = initialMeta.images.slice();
+          /* Если для этого задания уже редактируется галерея — берём из STATE.
+             Иначе — стартуем со значений из БД и складываем в STATE. */
+          if(!Array.isArray(STATE.editingTheoryGallery[n])){
+            STATE.editingTheoryGallery[n] = initialMeta.images.slice();
+          }
+          const galleryImages = STATE.editingTheoryGallery[n];
 
           const ta = el('textarea', {
             placeholder: 'Опишите тему: что проверяется в задании ' + n + ', типичные ловушки, формулы, правила. Используй кнопки сверху для форматирования. Cmd/Ctrl+B — жирный, Cmd/Ctrl+I — курсив, Cmd/Ctrl+Z — отмена.',
@@ -17331,6 +17340,9 @@ function modalEditTheory(n){
                 status.textContent = '✓ Сохранено в БД';
                 status.style.color = 'var(--green)';
                 showToast('Теория задания ' + n + ' сохранена · фото в карусели: ' + galleryImages.length);
+                /* После успешного сохранения чистим временное состояние —
+                   следующий раз модал прочитает галерею из БД. */
+                if(STATE.editingTheoryGallery) delete STATE.editingTheoryGallery[n];
               } catch(e){
                 console.warn(e);
                 status.textContent = '⚠ ' + e.message;
