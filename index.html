@@ -18372,7 +18372,7 @@ function startPostsPolling(){
     const aeIsField = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
     const aeValue = aeIsField ? ae.value : null;
     const aePlaceholder = aeIsField ? ae.placeholder : null;
-    render();
+    rerenderPostsView();
     requestAnimationFrame(() => {
       const ov = document.getElementById('zebrus-warmup-overlay');
       if(ov && savedOverlay) ov.scrollTop = savedOverlay;
@@ -18451,6 +18451,17 @@ async function reactWarmupPost(blockId, emoji){
   }
 }
 
+/* Универсальный re-render — если открыт warmup-overlay, перерисовываем его,
+   иначе основной view. Используется в addComment/deleteComment/polling,
+   чтобы ученик в полноэкранном дне тоже видел свежие комментарии. */
+function rerenderPostsView(){
+  if(STATE.openWarmupDayId != null){
+    const day = (STATE.warmupDays || []).find(d => d.id === STATE.openWarmupDayId);
+    if(day){ renderWarmupOverlay(day); return; }
+  }
+  render();
+}
+
 /* ===== КОММЕНТАРИИ под постом ===== */
 async function loadCommentsForBlock(blockId){
   try {
@@ -18479,7 +18490,7 @@ async function addComment(blockId, text){
       { block_id: blockId, author_id: MY_PROFILE.id, body: text.trim() },
       { prefer: 'return=minimal' });
     await loadCommentsForBlock(blockId);
-    render();
+    rerenderPostsView();
     requestAnimationFrame(() => {
       const ov = document.getElementById('zebrus-warmup-overlay');
       if(ov && savedOverlay) ov.scrollTop = savedOverlay;
@@ -18499,7 +18510,7 @@ async function deleteComment(comment){
     await restRequest('DELETE', '/warmup_comments?id=eq.' + comment.id,
       null, { prefer: 'return=minimal' });
     await loadCommentsForBlock(comment.block_id);
-    render();
+    rerenderPostsView();
     requestAnimationFrame(() => {
       const ov = document.getElementById('zebrus-warmup-overlay');
       if(ov && savedOverlay) ov.scrollTop = savedOverlay;
