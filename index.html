@@ -1112,6 +1112,110 @@ async function restRequest(method, path, body, opts){
 /* Кэш теории по 26 заданиям: { 1: 'markdown text', 2: '...', ... } */
 const THEORY = {};
 
+/* Парсинг theory_md: первая строка с HTML-комментарием хранит метаданные
+   (например, массив URL картинок-карусели), всё остальное — обычный markdown. */
+function parseTheoryMeta(md){
+  const out = { images: [], text: String(md || '') };
+  if(!out.text) return out;
+  const m = out.text.match(/^\s*<!--theory-meta:(\{[\s\S]*?\})-->\s*\n?/);
+  if(m){
+    try {
+      const meta = JSON.parse(m[1]);
+      if(Array.isArray(meta.images)) out.images = meta.images.filter(u => typeof u === 'string' && u);
+    } catch(_){}
+    out.text = out.text.slice(m[0].length);
+  }
+  return out;
+}
+function composeTheoryMd(images, text){
+  const arr = Array.isArray(images) ? images.filter(u => typeof u === 'string' && u) : [];
+  const txt = String(text || '');
+  if(!arr.length) return txt;
+  const meta = '<!--theory-meta:' + JSON.stringify({ images: arr }) + '-->\n\n';
+  return meta + txt;
+}
+
+/* Карусель фото для теории — рендеринг для ученика. Свайп влево/вправо,
+   точки-индикаторы внизу, бейдж «N/M» в углу, клик по фото — открывает большое. */
+function renderTheoryGallery(urls){
+  const list = (urls || []).filter(u => typeof u === 'string' && u);
+  if(!list.length) return el('div');
+
+  const wrap = el('div', { style:{ marginBottom:'14px' }});
+  const railWrap = el('div', { style:{ position:'relative' }});
+  const rail = el('div', { style:{
+    display:'flex', gap:'8px', overflowX:'auto',
+    scrollSnapType:'x mandatory', scrollBehavior:'smooth',
+    borderRadius:'12px', background:'#fff',
+    padding:'4px'
+  }});
+
+  /* Бейдж счётчика «1 / 3» — динамически обновляется по scroll */
+  const counter = el('div', { style:{
+    position:'absolute', top:'10px', right:'10px',
+    background:'rgba(0,0,0,0.6)', color:'#fff',
+    fontSize:'12px', fontWeight:'700',
+    padding:'4px 10px', borderRadius:'12px',
+    pointerEvents:'none', zIndex:2
+  }}, '1 / ' + list.length);
+
+  /* Точки-индикаторы внизу */
+  const dotsBox = el('div', { style:{
+    display:'flex', justifyContent:'center', gap:'6px',
+    marginTop:'8px'
+  }});
+  const dots = list.map((_, i) => el('span', { style:{
+    width:'8px', height:'8px', borderRadius:'50%',
+    background: i === 0 ? 'var(--p)' : 'var(--border-2)',
+    cursor:'pointer', transition:'background 0.2s'
+  }}));
+  dots.forEach((d, i) => {
+    d.onclick = () => {
+      const slide = rail.children[i];
+      if(slide) slide.scrollIntoView({ behavior:'smooth', block:'nearest', inline:'start' });
+    };
+    dotsBox.append(d);
+  });
+
+  list.forEach((url, i) => {
+    const slide = el('div', { style:{
+      flex:'0 0 100%', scrollSnapAlign:'start',
+      display:'flex', alignItems:'center', justifyContent:'center',
+      background:'#f5f5f5', borderRadius:'10px', overflow:'hidden',
+      minHeight:'200px', maxHeight:'500px'
+    }});
+    const img = el('img', { src: url, alt: 'Фото к теории',
+      style:{ maxWidth:'100%', maxHeight:'500px', display:'block', cursor:'zoom-in', objectFit:'contain' },
+      onclick: () => {
+        /* Открыть в lightbox — если в платформе есть STATE.lightbox */
+        if(STATE.lightbox !== undefined){
+          STATE.lightbox = { photos: list, idx: i };
+          render();
+        } else {
+          window.open(url, '_blank');
+        }
+      }
+    });
+    slide.append(img);
+    rail.append(slide);
+  });
+
+  /* Обновляем счётчик и активную точку по горизонтальному скроллу */
+  rail.addEventListener('scroll', () => {
+    const slideWidth = rail.clientWidth;
+    const idx = Math.round(rail.scrollLeft / Math.max(slideWidth, 1));
+    counter.textContent = Math.min(idx + 1, list.length) + ' / ' + list.length;
+    dots.forEach((d, i) => {
+      d.style.background = i === idx ? 'var(--p)' : 'var(--border-2)';
+    });
+  });
+
+  railWrap.append(rail, counter);
+  wrap.append(railWrap);
+  if(list.length > 1) wrap.append(dotsBox);
+  return wrap;
+}
+
 async function loadTheoryFromDb(){
   try {
     console.log('→ загружаем теорию из ege_tasks…');
@@ -8955,11 +9059,18 @@ function modalTheory(n){
             el('h4', null, '📖 ' + t.topic));
           const md = THEORY[n];
           if(md && md.trim()){
-            const body = el('div', { style:{ marginTop:'8px', lineHeight:'1.55', color:'var(--ink)' }});
-            try {
-              body.innerHTML = window.marked ? window.marked.parse(md) : ('<pre>' + md.replace(/</g, '&lt;') + '</pre>');
-            } catch(e){ body.textContent = md; }
-            card.append(body);
+            /* Разделяем галерею (carousel) и markdown-текст */
+            const parsed = parseTheoryMeta(md);
+            if(parsed.images.length){
+              card.append(renderTheoryGallery(parsed.images));
+            }
+            if(parsed.text.trim()){
+              const body = el('div', { style:{ marginTop:'8px', lineHeight:'1.55', color:'var(--ink)' }});
+              try {
+                body.innerHTML = window.marked ? window.marked.parse(parsed.text) : ('<pre>' + parsed.text.replace(/</g, '&lt;') + '</pre>');
+              } catch(e){ body.textContent = parsed.text; }
+              card.append(body);
+            }
           } else {
             card.append(el('p', { style:{ color:'var(--ink-2)', marginTop:'6px' }},
               'Здесь будет краткая теория от Ольги Александровны — выжимка, формулы и подводные камни.'));
@@ -16813,10 +16924,142 @@ function modalEditTheory(n){
         (function(){
           const card = el('div', { class:'card', style:{ marginBottom:'14px', background:'var(--surface-soft)' }});
 
+          /* Разделяем сохранённое поле theory_md на массив URL картинок (карусель сверху)
+             и чистый текстовый markdown (textarea). При сохранении соберём обратно. */
+          const initialMeta = parseTheoryMeta(THEORY[n] || '');
+          const galleryImages = initialMeta.images.slice();
+
           const ta = el('textarea', {
             placeholder: 'Опишите тему: что проверяется в задании ' + n + ', типичные ловушки, формулы, правила. Используй кнопки сверху для форматирования. Cmd/Ctrl+B — жирный, Cmd/Ctrl+I — курсив, Cmd/Ctrl+Z — отмена.',
             style:{ width:'100%', padding:'14px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'600px', resize:'vertical', fontFamily:'inherit', fontSize:'15px', lineHeight:'1.6', boxSizing:'border-box' }
-          }, THEORY[n] || '');
+          }, initialMeta.text);
+
+          /* Блок «📷 Фото к теории» — карусель миниатюр сверху редактора. */
+          const galleryBox = el('div', { style:{
+            padding:'12px', borderRadius:'10px', border:'1px dashed var(--y-2)',
+            background:'#FFFCF2', marginBottom:'12px'
+          }});
+          const galleryRow = el('div', { style:{
+            display:'flex', gap:'8px', overflowX:'auto', padding:'4px',
+            scrollSnapType:'x mandatory'
+          }});
+          const galleryCount = el('span', { style:{ fontSize:'12px', color:'var(--ink-3)', marginLeft:'8px' }}, '');
+          const renderGallery = () => {
+            galleryRow.innerHTML = '';
+            galleryCount.textContent = galleryImages.length
+              ? '· ' + galleryImages.length + ' ' + pluralRu(galleryImages.length, ['фото','фото','фото'])
+              : '· пусто';
+            galleryImages.forEach((url, i) => {
+              const thumb = el('div', { style:{
+                position:'relative', flex:'0 0 auto', width:'120px', height:'90px',
+                borderRadius:'8px', overflow:'hidden', border:'1px solid var(--border-2)',
+                scrollSnapAlign:'start', background:'#fff'
+              }});
+              const img = el('img', { src: url,
+                style:{ width:'100%', height:'100%', objectFit:'cover', display:'block' }});
+              const idxBadge = el('span', { style:{
+                position:'absolute', left:'4px', top:'4px',
+                background:'rgba(0,0,0,0.55)', color:'#fff',
+                fontSize:'11px', fontWeight:'700',
+                padding:'2px 6px', borderRadius:'10px'
+              }}, (i+1) + '/' + galleryImages.length);
+              const delBtn = el('button', {
+                title:'Удалить из карусели',
+                style:{ position:'absolute', right:'4px', top:'4px',
+                  background:'rgba(220,38,38,0.92)', color:'#fff',
+                  border:'none', width:'22px', height:'22px',
+                  borderRadius:'50%', fontWeight:'700', cursor:'pointer',
+                  display:'flex', alignItems:'center', justifyContent:'center',
+                  fontSize:'14px', lineHeight:'1', padding:'0' },
+                onclick: () => {
+                  galleryImages.splice(i, 1);
+                  renderGallery();
+                }
+              }, '×');
+              /* Кнопки перестановки ← / → */
+              const moveLeft = el('button', { title:'Сдвинуть влево',
+                style:{ position:'absolute', left:'4px', bottom:'4px',
+                  background:'rgba(255,255,255,0.9)', border:'1px solid var(--border-2)',
+                  width:'22px', height:'22px', borderRadius:'4px',
+                  cursor: i === 0 ? 'not-allowed' : 'pointer',
+                  opacity: i === 0 ? 0.4 : 1,
+                  fontSize:'13px', lineHeight:'1', padding:'0' },
+                onclick: () => {
+                  if(i === 0) return;
+                  [galleryImages[i-1], galleryImages[i]] = [galleryImages[i], galleryImages[i-1]];
+                  renderGallery();
+                }
+              }, '←');
+              const moveRight = el('button', { title:'Сдвинуть вправо',
+                style:{ position:'absolute', right:'4px', bottom:'4px',
+                  background:'rgba(255,255,255,0.9)', border:'1px solid var(--border-2)',
+                  width:'22px', height:'22px', borderRadius:'4px',
+                  cursor: i === galleryImages.length - 1 ? 'not-allowed' : 'pointer',
+                  opacity: i === galleryImages.length - 1 ? 0.4 : 1,
+                  fontSize:'13px', lineHeight:'1', padding:'0' },
+                onclick: () => {
+                  if(i === galleryImages.length - 1) return;
+                  [galleryImages[i], galleryImages[i+1]] = [galleryImages[i+1], galleryImages[i]];
+                  renderGallery();
+                }
+              }, '→');
+              thumb.append(img, idxBadge, delBtn, moveLeft, moveRight);
+              galleryRow.append(thumb);
+            });
+            if(!galleryImages.length){
+              galleryRow.append(el('div', {
+                style:{ flex:'1', padding:'12px', color:'var(--ink-3)', fontStyle:'italic', fontSize:'13px', textAlign:'center' }
+              }, 'Карусель пуста. Нажми «+ Добавить» — фото появятся сверху теории.'));
+            }
+          };
+
+          const galleryAddBtn = el('button', {
+            class:'btn btn-y btn-sm',
+            onclick: () => fileInputTheoryGallery.click()
+          }, '+ Добавить фото');
+
+          galleryBox.append(
+            el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px', flexWrap:'wrap', gap:'8px' }},
+              el('div', null,
+                el('b', null, '📷 Фото к теории'),
+                galleryCount,
+                el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }},
+                  'Появятся каруселью сверху теории у ученика. Перетаскивай ← → для порядка.')),
+              galleryAddBtn),
+            galleryRow);
+          renderGallery();
+
+          /* Скрытый input для загрузки в галерею (multiple) */
+          const fileInputTheoryGallery = el('input', { type:'file', accept:'image/*', multiple:'',
+            style:{ display:'none' },
+            onchange: async (ev) => {
+              const files = Array.from(ev.target.files || []);
+              fileInputTheoryGallery.value = '';
+              if(!files.length) return;
+              galleryAddBtn.disabled = true;
+              const origText = galleryAddBtn.textContent;
+              galleryAddBtn.textContent = '⏳ Загружаю…';
+              try {
+                for(const f of files){
+                  try {
+                    showToast('⏳ Загружаю «' + (f.name || 'фото') + '»…');
+                    const url = await uploadChatImage(f);
+                    if(url && /^https?:\/\//.test(url)){
+                      galleryImages.push(url);
+                      renderGallery();
+                    }
+                  } catch(err){
+                    console.warn('[theory gallery] one upload failed:', err);
+                    showToast('⚠ ' + (err.message || 'не удалось загрузить одно фото'));
+                  }
+                }
+                showToast('✓ Готово · фото в карусели: ' + galleryImages.length);
+              } finally {
+                galleryAddBtn.disabled = false;
+                galleryAddBtn.textContent = origText;
+              }
+            }
+          });
 
           /* Предпросмотр СКРЫТ по умолчанию (раскрывается кнопкой «👁 Превью» в toolbar).
              На мобильном двухколоночный формат ломал тонкие столбцы. */
@@ -16916,8 +17159,6 @@ function modalEditTheory(n){
             mkBtn('1. список', 'Нумерованный список',   () => insertAtLineStart('1. '), { fontWeight:'400' }),
             mkBtn('—',         'Горизонтальная линия',  () => wrap('\n\n---\n\n','')),
             mkBtn('🔗',        'Ссылка',                () => wrap('[','](https://)','текст ссылки')),
-            mkBtn('📷 Фото',   'Прикрепить одно или несколько изображений',
-                  () => fileInputTheoryImg.click(), { fontWeight:'400' }),
             mkBtn('👁 Превью', 'Показать/скрыть предпросмотр (как увидит ученик)',
                   () => {
                     if(preview.style.display === 'none'){
@@ -17079,15 +17320,17 @@ function modalEditTheory(n){
           const status = el('span', { style:{ fontSize:'12px', color:'var(--ink-3)', marginLeft:'10px' }}, '');
           const saveBtn = el('button', { class:'btn btn-y btn-sm', style:{ marginTop:'8px' },
             onclick: async () => {
+              /* Собираем итоговый markdown: метаданные (галерея) + чистый текст. */
               const text = ta.value.trim();
+              const finalMd = composeTheoryMd(galleryImages, text);
               saveBtn.disabled = true;
               status.textContent = '⏳ Сохраняем…';
               status.style.color = 'var(--ink-3)';
               try {
-                await saveTheoryToDb(n, text);
+                await saveTheoryToDb(n, finalMd);
                 status.textContent = '✓ Сохранено в БД';
                 status.style.color = 'var(--green)';
-                showToast('Теория задания ' + n + ' сохранена в базу');
+                showToast('Теория задания ' + n + ' сохранена · фото в карусели: ' + galleryImages.length);
               } catch(e){
                 console.warn(e);
                 status.textContent = '⚠ ' + e.message;
@@ -17098,14 +17341,15 @@ function modalEditTheory(n){
             }
           }, '💾 Сохранить в БД');
 
-          /* Одна колонка: toolbar → textarea → (опционально) preview снизу.
-             Превью раскрывается кнопкой «👁 Превью» в toolbar — на мобильном
-             двухколоночный формат ломал тонкие столбцы. */
+          /* Layout: галерея фото сверху → toolbar → textarea → (опц.) preview.
+             На мобильном двухколоночный формат ломал тонкие столбцы — теперь одна колонка. */
           card.append(
-            el('h4', null, '📖 Текст теории (то, что увидит ученик)'),
+            el('h4', null, '📖 Теория задания (то, что увидит ученик)'),
             el('p', { style:{ fontSize:'12px', color:'var(--ink-3)', margin:'4px 0 8px 0' }},
-              'Cmd/Ctrl+B жирный · Cmd/Ctrl+I курсив · Cmd/Ctrl+Z отмена. Фото — кнопкой 📷 (можно выбрать несколько), перетащить в редактор или вставить из буфера. Превью — кнопкой 👁 (по умолчанию скрыто).'),
-            fileInputTheoryImg,  /* скрытый <input type=file> — должен быть в DOM */
+              'Сверху карусель фото · ниже текст теории. Cmd/Ctrl+B жирный · Cmd/Ctrl+I курсив · Cmd/Ctrl+Z отмена. Превью — кнопкой 👁.'),
+            fileInputTheoryGallery,  /* скрытый input для галереи */
+            fileInputTheoryImg,      /* скрытый input для inline-вставки фото (через drag&drop, paste) */
+            galleryBox,
             toolbar,
             ta,
             preview,
