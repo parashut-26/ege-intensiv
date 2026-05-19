@@ -1117,13 +1117,19 @@ const THEORY = {};
 function parseTheoryMeta(md){
   const out = { images: [], text: String(md || '') };
   if(!out.text) return out;
-  const m = out.text.match(/^\s*<!--theory-meta:(\{[\s\S]*?\})-->\s*\n?/);
+  /* Гибкая регулярка: meta-тег может быть НЕ в самом начале (вдруг впереди ﻿,
+     пробелы, или ученик/учитель что-то впереди вписал). */
+  const m = out.text.match(/<!--theory-meta:(\{[\s\S]*?\})-->\s*\n?/);
   if(m){
     try {
       const meta = JSON.parse(m[1]);
       if(Array.isArray(meta.images)) out.images = meta.images.filter(u => typeof u === 'string' && u);
-    } catch(_){}
-    out.text = out.text.slice(m[0].length);
+      console.log('[theory] meta parsed, images:', out.images.length);
+    } catch(err){
+      console.warn('[theory] meta JSON parse failed:', err && err.message, 'raw:', m[1] && m[1].slice(0, 200));
+    }
+    /* Удаляем именно тот фрагмент, который сматчили (даже если он не в начале) */
+    out.text = out.text.slice(0, m.index) + out.text.slice(m.index + m[0].length);
   }
   return out;
 }
@@ -16958,6 +16964,10 @@ function modalEditTheory(n){
             galleryCount.textContent = galleryImages.length
               ? '· ' + galleryImages.length + ' ' + pluralRu(galleryImages.length, ['фото','фото','фото'])
               : '· пусто';
+            /* Если превью открыто — обновляем его, чтобы карусель в нём синхронилась */
+            if(preview.style.display !== 'none'){
+              setTimeout(() => { try { renderPreview(); } catch(_){} }, 0);
+            }
             galleryImages.forEach((url, i) => {
               const thumb = el('div', { style:{
                 position:'relative', flex:'0 0 auto', width:'120px', height:'90px',
@@ -17087,11 +17097,15 @@ function modalEditTheory(n){
           preview.setAttribute('data-theory-preview', '1');
           const renderPreview = () => {
             try {
+              /* Превью должно показывать ТО ЖЕ, что увидит ученик: сверху карусель
+                 из galleryImages, ниже markdown-текст. */
+              preview.innerHTML = '';
+              if(galleryImages.length){
+                preview.append(renderTheoryGallery(galleryImages));
+              }
               let html;
               if(window.marked){
                 html = window.marked.parse(ta.value || '');
-                /* Дополнительная страховка: если marked почему-то не превратил ![](url) в <img>,
-                   доводим вручную регуляркой. */
                 if(html.indexOf('<img') === -1 && /!\[[^\]]*\]\([^)]+\)/.test(ta.value || '')){
                   console.warn('[theory image] marked did not render image — applying fallback');
                   html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g,
@@ -17100,7 +17114,8 @@ function modalEditTheory(n){
               } else {
                 html = '<pre style="white-space:pre-wrap">' + (ta.value || '').replace(/</g,'&lt;') + '</pre>';
               }
-              preview.innerHTML = html;
+              const textBox = el('div', { html });
+              preview.append(textBox);
             } catch(err){
               console.warn('[theory preview] render error:', err);
               preview.textContent = ta.value || '';
