@@ -18404,12 +18404,23 @@ async function loadCommentsForBlock(blockId){
 }
 async function addComment(blockId, text){
   if(!MY_PROFILE || !MY_PROFILE.id || !text.trim()) return;
+  /* Сохраняем позицию скролла — после render() восстановим, чтобы
+     страница не прыгала вверх. Если открыт warmup-overlay, у него
+     своя позиция (внутри overlay), иначе — скролл окна. */
+  const overlay = document.getElementById('zebrus-warmup-overlay');
+  const savedOverlay = overlay ? overlay.scrollTop : 0;
+  const savedWindow  = window.scrollY;
   try {
     await restRequest('POST', '/warmup_comments',
       { block_id: blockId, author_id: MY_PROFILE.id, body: text.trim() },
       { prefer: 'return=minimal' });
     await loadCommentsForBlock(blockId);
     render();
+    requestAnimationFrame(() => {
+      const ov = document.getElementById('zebrus-warmup-overlay');
+      if(ov && savedOverlay) ov.scrollTop = savedOverlay;
+      else if(savedWindow) window.scrollTo(0, savedWindow);
+    });
   } catch(e){
     console.error('addComment', e);
     showToast('⚠ ' + e.message);
@@ -18417,12 +18428,86 @@ async function addComment(blockId, text){
 }
 async function deleteComment(comment){
   if(!confirm('Удалить комментарий?')) return;
+  const overlay = document.getElementById('zebrus-warmup-overlay');
+  const savedOverlay = overlay ? overlay.scrollTop : 0;
+  const savedWindow  = window.scrollY;
   try {
     await restRequest('DELETE', '/warmup_comments?id=eq.' + comment.id,
       null, { prefer: 'return=minimal' });
     await loadCommentsForBlock(comment.block_id);
     render();
+    requestAnimationFrame(() => {
+      const ov = document.getElementById('zebrus-warmup-overlay');
+      if(ov && savedOverlay) ov.scrollTop = savedOverlay;
+      else if(savedWindow) window.scrollTo(0, savedWindow);
+    });
   } catch(e){ showToast('⚠ ' + e.message); }
+}
+
+/* Общий блок реакций + комментариев под постом — используется и в
+   полноэкранном просмотре ученика, и в превью учителя. */
+function renderPostReactionsAndComments(b){
+  const wrap = el('div', { style:{ marginTop:'14px', paddingTop:'12px', borderTop:'1px solid var(--border-2)' }});
+  /* === РЕАКЦИИ === */
+  const reactsObj = getPostReactions(b);
+  const myReact = getMyReaction(b);
+  const reactCounts = {};
+  Object.values(reactsObj).forEach(em => { reactCounts[em] = (reactCounts[em] || 0) + 1; });
+  const reactsRow = el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }});
+  WARMUP_REACTIONS.forEach(em => {
+    const count = reactCounts[em] || 0;
+    const mine = myReact === em;
+    reactsRow.append(el('button', { class:'btn btn-secondary',
+      style:{ padding:'6px 12px', fontSize:'15px', borderRadius:'999px',
+              border:'2px solid ' + (mine ? 'var(--p-deep)' : 'transparent'),
+              background: mine ? 'var(--p-soft)' : 'var(--bg)' },
+      onclick: () => reactWarmupPost(b.id, em)
+    }, em + (count ? ' ' + count : '')));
+  });
+  wrap.append(reactsRow);
+  /* === КОММЕНТАРИИ === */
+  if(STATE.commentsByBlock == null || STATE.commentsByBlock[b.id] == null){
+    loadCommentsForBlock(b.id);
+  }
+  const comments = (STATE.commentsByBlock && STATE.commentsByBlock[b.id]) || [];
+  const cWrap = el('div', { style:{ marginTop:'12px' }});
+  cWrap.append(el('div', { style:{ fontSize:'13px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'8px' }},
+    '💬 Комментарии (' + comments.length + ')'));
+  comments.forEach(c => {
+    const author = c.author || {};
+    const isMine = MY_PROFILE && c.author_id === MY_PROFILE.id;
+    const canDelete = isMine || (MY_PROFILE && (MY_PROFILE.role === 'teacher' || MY_PROFILE.role === 'curator'));
+    const isTeacherComment = author.role === 'teacher' || author.role === 'curator';
+    cWrap.append(el('div', { style:{ marginBottom:'8px', padding:'8px 12px',
+                                     background: isTeacherComment ? '#F5F3FF' : 'var(--bg)',
+                                     borderRadius:'8px',
+                                     border: isTeacherComment ? '1px solid #A78BFA' : '1px solid var(--border)' }},
+      el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'8px', marginBottom:'4px' }},
+        el('div', { style:{ fontWeight:'700', fontSize:'12px',
+                            color: isTeacherComment ? 'var(--p-deep)' : 'var(--ink)' }},
+          (author.full_name || 'Аноним') + (isTeacherComment ? ' · учитель' : '')),
+        canDelete ? el('button', { style:{ background:'none', border:'none', cursor:'pointer', fontSize:'12px', color:'var(--ink-3)' },
+          onclick: () => deleteComment(c)
+        }, '✕') : null),
+      el('div', { style:{ fontSize:'14px', whiteSpace:'pre-wrap' }}, c.body)));
+  });
+  /* Поле ввода */
+  const cInput = el('input', { type:'text', placeholder:'Написать комментарий…',
+    style:{ flex:1, padding:'8px 12px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'14px' },
+    onkeydown: (e) => { if(e.key === 'Enter'){ sBtn.click(); } }
+  });
+  const sBtn = el('button', { class:'btn btn-p btn-sm',
+    onclick: async () => {
+      const text = cInput.value.trim();
+      if(!text) return;
+      cInput.value = '';
+      await addComment(b.id, text);
+    }
+  }, '↑');
+  cWrap.append(el('div', { style:{ display:'flex', gap:'6px', marginTop:'6px' }},
+    cInput, sBtn));
+  wrap.append(cWrap);
+  return wrap;
 }
 
 async function toggleWarmupBlockPublished(block, next){
@@ -18605,6 +18690,8 @@ function renderWarmupBlockTeacher(b, day){
       el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'4px' }},
         'всего голосов: ' + total)));
   }
+  /* Реакции + комментарии — учитель видит и может отвечать/удалять */
+  card.append(renderPostReactionsAndComments(b));
   return card;
 }
 
@@ -18929,67 +19016,8 @@ function renderWarmupBlockStudent(b){
     inner.append(pollBox);
   }
 
-  /* === РЕАКЦИИ === */
-  const reactsObj = getPostReactions(b);
-  const myReact = getMyReaction(b);
-  const reactCounts = {};
-  Object.values(reactsObj).forEach(em => { reactCounts[em] = (reactCounts[em] || 0) + 1; });
-  const reactsRow = el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap', marginTop:'14px',
-                                         paddingTop:'12px', borderTop:'1px solid var(--border-2)' }});
-  WARMUP_REACTIONS.forEach(em => {
-    const count = reactCounts[em] || 0;
-    const mine = myReact === em;
-    reactsRow.append(el('button', { class:'btn btn-secondary',
-      style:{ padding:'6px 12px', fontSize:'15px', borderRadius:'999px',
-              border:'2px solid ' + (mine ? 'var(--p-deep)' : 'transparent'),
-              background: mine ? 'var(--p-soft)' : 'var(--bg)' },
-      onclick: () => reactWarmupPost(b.id, em)
-    }, em + (count ? ' ' + count : '')));
-  });
-  inner.append(reactsRow);
-
-  /* === КОММЕНТАРИИ === */
-  if(STATE.commentsByBlock == null || STATE.commentsByBlock[b.id] == null){
-    loadCommentsForBlock(b.id);
-  }
-  const comments = (STATE.commentsByBlock && STATE.commentsByBlock[b.id]) || [];
-  const commentsWrap = el('div', { style:{ marginTop:'12px' }});
-  commentsWrap.append(el('div', { style:{ fontSize:'13px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'8px' }},
-    '💬 Комментарии (' + comments.length + ')'));
-  comments.forEach(c => {
-    const author = c.author || {};
-    const isMine = MY_PROFILE && c.author_id === MY_PROFILE.id;
-    const canDelete = isMine || (MY_PROFILE && (MY_PROFILE.role === 'teacher' || MY_PROFILE.role === 'curator'));
-    const isTeacherComment = author.role === 'teacher' || author.role === 'curator';
-    commentsWrap.append(el('div', { style:{ marginBottom:'8px', padding:'8px 12px',
-                                            background: isTeacherComment ? '#F5F3FF' : 'var(--bg)',
-                                            borderRadius:'8px',
-                                            border: isTeacherComment ? '1px solid #A78BFA' : '1px solid var(--border)' }},
-      el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'8px', marginBottom:'4px' }},
-        el('div', { style:{ fontWeight:'700', fontSize:'12px',
-                            color: isTeacherComment ? 'var(--p-deep)' : 'var(--ink)' }},
-          (author.full_name || 'Аноним') + (isTeacherComment ? ' · учитель' : '')),
-        canDelete ? el('button', { style:{ background:'none', border:'none', cursor:'pointer', fontSize:'12px', color:'var(--ink-3)' },
-          onclick: () => deleteComment(c)
-        }, '✕') : null),
-      el('div', { style:{ fontSize:'14px', whiteSpace:'pre-wrap' }}, c.body)));
-  });
-  /* Поле ввода */
-  const commentInput = el('input', { type:'text', placeholder:'Написать комментарий…',
-    style:{ flex:1, padding:'8px 12px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'14px' },
-    onkeydown: (e) => { if(e.key === 'Enter'){ sendBtn.click(); } }
-  });
-  const sendBtn = el('button', { class:'btn btn-p btn-sm',
-    onclick: async () => {
-      const text = commentInput.value.trim();
-      if(!text) return;
-      commentInput.value = '';
-      await addComment(b.id, text);
-    }
-  }, '↑ Отправить');
-  commentsWrap.append(el('div', { style:{ display:'flex', gap:'6px', marginTop:'6px' }},
-    commentInput, sendBtn));
-  inner.append(commentsWrap);
+  /* === РЕАКЦИИ + КОММЕНТАРИИ — общий блок === */
+  inner.append(renderPostReactionsAndComments(b));
 
   card.append(inner);
   return card;
