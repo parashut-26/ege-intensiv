@@ -8166,6 +8166,8 @@ function mapDayCard(d){
    УЧЕНИК · ДНИ ИНТЕНСИВА
    ======================================================================= */
 function viewStudentDays(){
+  /* Запускаем polling — обновляем посты/реакции/комментарии каждые 12 сек */
+  startPostsPolling();
   const wrap = el('div', { class:'fade-in' });
   wrap.append(
     el('h1', null, 'Дни интенсива'),
@@ -18331,6 +18333,68 @@ async function voteWarmupPoll(blockId, optionIndex){
     }
   }
 }
+/* ===== POLLING постов каждые 12 секунд (псевдо-realtime) =====
+   У прокси reg.ru не работает WebSocket, поэтому используем
+   polling. Раз в 12 секунд перегружаем все уже загруженные посты
+   и комментарии. Если что-то изменилось (по хэшу) — вызываем
+   render() с сохранением позиции скролла и значения активного
+   текстового поля (чтобы пользователь не терял ввод). */
+let _postsPollHash = '';
+function startPostsPolling(){
+  if(STATE._postsPollIntervalId) return;
+  STATE._postsPollIntervalId = setInterval(async () => {
+    /* Что обновлять — что уже в state */
+    const warmupKeys = Object.keys(STATE.warmupBlocksByDay || {});
+    const intensiveKeys = Object.keys(STATE.intensivePostsByOrd || {});
+    if(!warmupKeys.length && !intensiveKeys.length) return;
+    const tasks = [];
+    warmupKeys.forEach(d => tasks.push(loadWarmupBlocks(parseInt(d, 10))));
+    intensiveKeys.forEach(o => tasks.push(loadIntensivePosts(parseInt(o, 10))));
+    /* Комментарии для всех загруженных постов */
+    const allBlocks = [];
+    Object.values(STATE.warmupBlocksByDay || {}).forEach(arr => allBlocks.push(...(arr || [])));
+    Object.values(STATE.intensivePostsByOrd || {}).forEach(arr => allBlocks.push(...(arr || [])));
+    allBlocks.forEach(b => tasks.push(loadCommentsForBlock(b.id)));
+    await Promise.allSettled(tasks);
+    /* Проверяем — что-то реально изменилось? */
+    const newHash = JSON.stringify({
+      w: STATE.warmupBlocksByDay,
+      i: STATE.intensivePostsByOrd,
+      c: STATE.commentsByBlock
+    });
+    if(newHash === _postsPollHash) return;
+    _postsPollHash = newHash;
+    /* Запоминаем позицию скролла и значение активного input */
+    const overlay = document.getElementById('zebrus-warmup-overlay');
+    const savedOverlay = overlay ? overlay.scrollTop : 0;
+    const savedWindow  = window.scrollY;
+    const ae = document.activeElement;
+    const aeIsField = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA');
+    const aeValue = aeIsField ? ae.value : null;
+    const aePlaceholder = aeIsField ? ae.placeholder : null;
+    render();
+    requestAnimationFrame(() => {
+      const ov = document.getElementById('zebrus-warmup-overlay');
+      if(ov && savedOverlay) ov.scrollTop = savedOverlay;
+      else if(savedWindow)   window.scrollTo(0, savedWindow);
+      /* Если был активный коммент-инпут — восстановим текст и фокус */
+      if(aeIsField && aeValue && aePlaceholder){
+        const candidates = document.querySelectorAll('input[placeholder="' + aePlaceholder + '"], textarea[placeholder="' + aePlaceholder + '"]');
+        if(candidates.length === 1){
+          candidates[0].value = aeValue;
+          candidates[0].focus();
+        }
+      }
+    });
+  }, 12000);
+}
+function stopPostsPolling(){
+  if(STATE._postsPollIntervalId){
+    clearInterval(STATE._postsPollIntervalId);
+    STATE._postsPollIntervalId = null;
+  }
+}
+
 /* ===== РЕАКЦИИ под постом =====
    Хранятся в jsonb config.reactions = { uuid: '❤' }. Меняются через
    RPC react_warmup_post — обходит RLS как голоса опроса. */
@@ -18533,6 +18597,8 @@ async function deleteWarmupBlock(block){
 
 /* === Учитель: вкладка «🔥 Разогрев» === */
 function viewTeacherWarmup(){
+  /* Запускаем polling — обновляем посты/реакции/комментарии каждые 12 сек */
+  startPostsPolling();
   const wrap = el('div', { class:'fade-in' });
   wrap.append(
     el('h1', null, '🔥 Разогрев перед интенсивом'),
@@ -21384,6 +21450,8 @@ function modalLinkStudent(){
    УЧИТЕЛЬ · ДНИ
    ======================================================================= */
 function viewTeacherDays(){
+  /* Запускаем polling — обновляем посты/реакции/комментарии каждые 12 сек */
+  startPostsPolling();
   const wrap = el('div', { class:'fade-in' });
   wrap.append(
     el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'10px', flexWrap:'wrap', gap:'10px' }},
