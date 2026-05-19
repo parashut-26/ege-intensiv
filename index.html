@@ -17437,7 +17437,7 @@ function modalEditTheory(n){
             fileInputTheoryImg,      /* скрытый input для inline-вставки фото (через drag&drop, paste) */
             galleryBox,
             toolbar,
-            ta,
+            theoryEditor,            /* настоящий DOM div, не ta-proxy */
             preview,
             el('div', { style:{ display:'flex', alignItems:'center', marginTop:'10px' }}, saveBtn, status));
           return card;
