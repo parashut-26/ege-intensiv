@@ -9414,6 +9414,61 @@ function modalTest(taskN){
   const highlightCaps = (htmlSafe) => htmlSafe.replace(
     /([А-ЯЁ]{2,})/g, '<b style="background:#FEF9C3;padding:1px 4px;border-radius:3px">$1</b>'
   );
+  /* Из CAPS-слов взять «корень» = first len-2 chars (min 4), в нижнем регистре.
+     Используем чтобы подсветить целевые слова в исходном тексте по форме.
+     ЭПИГРАФ → «эпигра», МАССА → «масс», НАСЛЕДНЫЙ → «наследн». */
+  const rootOfCaps = (capsWord) => {
+    const w = String(capsWord || '').toLowerCase().replace(/ё/g, 'е');
+    if(w.length <= 4) return w;
+    return w.slice(0, w.length - 2);
+  };
+  /* Извлечь CAPS-слова после маркеров вариантов «1) ЭПИГРАФ. …» из формулировки */
+  const extractTargetCapsWords = (text) => {
+    const out = [];
+    const re = /\d+\)\s+([А-ЯЁ]{3,})/g;
+    let m;
+    while((m = re.exec(String(text || ''))) !== null){ out.push(m[1]); }
+    return out;
+  };
+  /* Подсветка корней в обычном тексте (sourceText) — каждый корень окрашиваем
+     ярко-жёлтым, чтобы глаз сразу находил указанные слова в потоке. */
+  const highlightRootsInText = (htmlSafe, capsWords) => {
+    if(!capsWords || !capsWords.length) return htmlSafe;
+    const seen = new Set();
+    let html = htmlSafe;
+    capsWords.forEach(w => {
+      const root = rootOfCaps(w);
+      if(!root || root.length < 3 || seen.has(root)) return;
+      seen.add(root);
+      try {
+        const rgx = new RegExp('([А-Яа-яЁё]*' + root + '[А-Яа-яЁё]*)', 'gi');
+        /* Жирный + подчёркивание + жёлтый фон — так Ольга подчёркивает в тетради */
+        html = html.replace(rgx, '<mark style="background:#FEF08A;padding:1px 3px;border-radius:3px;font-weight:700;text-decoration:underline;text-decoration-color:#D97706;text-decoration-thickness:2px;text-underline-offset:2px">$1</mark>');
+      } catch(_){}
+    });
+    return html;
+  };
+  /* Постпроцесс формулировки задания 2 / 3 / 5 / 6: если в q.q идут варианты
+     «1) СЛОВО. …  2) СЛОВО. …» одним абзацем — разносим по строкам. */
+  const formatNumberedOptions = (text) => {
+    if(!text) return '';
+    const safe = String(text)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+    /* Найти позиции «1) ЭПИГРАФ», «2) МАССА» и обернуть каждый блок в <div>.
+       Берём пробел/начало строки + цифра + ) + пробел + CAPS-слово. */
+    const parts = safe.split(/\s+(?=\d+\)\s+[А-ЯЁ])/);
+    if(parts.length <= 1) return safe;
+    /* Первый кусок — это сама формулировка («В тексте выделено пять слов…»),
+       остальные — варианты с CAPS-словами. Подсвечиваем CAPS внутри. */
+    const head = parts[0];
+    const opts = parts.slice(1).map(part => {
+      const withCaps = part.replace(/^(\d+\))\s+([А-ЯЁ]{2,})/,
+        '<b style="color:#0F172A;font-size:1.05em">$1 <span style="background:#FEF08A;padding:1px 6px;border-radius:4px">$2</span></b>');
+      return '<div style="margin-top:10px;padding-left:6px;border-left:2px solid #FACC15">' + withCaps + '</div>';
+    });
+    return '<div>' + head + '</div>' + opts.join('');
+  };
 
   const body = el('div', { class:'modal-body' });
   bank.forEach((q, i) => {
@@ -9421,16 +9476,38 @@ function modalTest(taskN){
        В instant-режиме каждый вопрос «проверен» как только на него ответили. */
     const all = isCheckedFor(q, i);
     const block = el('div', { 'data-q-i': String(i), style:{ marginBottom:'18px', padding:'16px', border:'1px solid var(--border)', borderRadius:'14px', background:'var(--surface-soft)' }});
-    block.append(el('div', { style:{ fontWeight:'700', marginBottom:'10px' }}, (i+1) + '. ' + q.q));
+
+    /* Задания 2 и 3 (лексический/стилистический анализ): варианты «1) СЛОВО. …»
+       идут сплошным текстом — разносим по строкам, CAPS-слово выделяем жёлтым.
+       Также извлекаем целевые CAPS-слова, чтобы потом подсветить их корни в sourceText. */
+    const isNumberedListQ = (taskN === 2 || taskN === 3) && /\d+\)\s+[А-ЯЁ]{3,}/.test(q.q || '');
+    const targetCapsWords = isNumberedListQ ? extractTargetCapsWords(q.q) : [];
+    if(isNumberedListQ){
+      const numberedHtml = formatNumberedOptions(q.q);
+      block.append(el('div', {
+        style:{ fontWeight:'700', marginBottom:'10px', lineHeight:'1.55' },
+        html: '<span>' + (i+1) + '. </span>' + numberedHtml
+      }));
+    } else {
+      block.append(el('div', { style:{ fontWeight:'700', marginBottom:'10px' }}, (i+1) + '. ' + q.q));
+    }
 
     /* Задание 22: формат как в задании 8 — предложения А-Д уже в q.errors,
        большой исходный текст не нужен и только мешает. Прячем его. */
     if(q.sourceText && taskN !== 22){
       const srcBox = el('details', { style:{ padding:'12px 14px', background:'#FFFCF2', borderRadius:'10px', borderLeft:'3px solid var(--y)', marginBottom:'12px', fontSize:'13px', lineHeight:'1.6', color:'var(--ink)' }});
+      /* Если есть целевые слова из формулировки — подсветим их корни в тексте,
+         иначе fallback на старый highlightCaps (для задания 5 — паронимы). */
+      let srcHtml = renderInlineMd(q.sourceText);
+      if(targetCapsWords.length){
+        srcHtml = highlightRootsInText(srcHtml, targetCapsWords);
+      } else {
+        srcHtml = highlightCaps(srcHtml);
+      }
       srcBox.append(
         el('summary', { style:{ cursor:'pointer', fontWeight:'700', color:'var(--ink-2)', fontSize:'12px', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'8px', listStyle:'none' }},
           '📖 Прочитайте текст и выполните задание ▾'),
-        el('div', { html: highlightCaps(renderInlineMd(q.sourceText)), style:{ marginTop:'10px', whiteSpace:'pre-wrap' }}));
+        el('div', { html: srcHtml, style:{ marginTop:'10px', whiteSpace:'pre-wrap' }}));
       srcBox.setAttribute('open', '');
       block.append(srcBox);
     }
