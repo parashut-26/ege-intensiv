@@ -1180,20 +1180,30 @@ function extractTargetCapsWordsGlobal(text){
   return out;
 }
 
-/* В тексте sourceText подсветить корни всех CAPS-слов: жирный + подчёркивание + фон.
-   Регулярка ищет слово с указанным корнем в любой словоформе/регистре. */
+/* В тексте sourceText подсветить корни CAPS-слов: жирный + подчёркивание + фон.
+   ПРИОРИТЕТ: если в тексте уже есть <strong>…</strong> (от **word** в md), то
+   подсвечиваем ТОЛЬКО эти явно выделенные слова — учитель сам решил, что нужно
+   подсветить, эвристика не нужна. Если жирных нет — fallback на корневой поиск
+   (для импортированных вопросов без разметки). */
+const MARK_STYLE = 'background:#FEF08A;padding:1px 3px;border-radius:3px;font-weight:700;text-decoration:underline;text-decoration-color:#D97706;text-decoration-thickness:2px;text-underline-offset:2px';
+
 function highlightRootsInTextGlobal(htmlSafe, capsWords){
-  if(!capsWords || !capsWords.length) return htmlSafe;
-  const seen = new Set();
   let html = String(htmlSafe || '');
+  /* 1) Если уже есть <strong> — это явная разметка от учителя через **слово** */
+  if(/<strong>/i.test(html)){
+    return html.replace(/<strong>([\s\S]*?)<\/strong>/gi,
+      '<mark style="' + MARK_STYLE + '">$1</mark>');
+  }
+  /* 2) Fallback — подсветка по корням CAPS-слов из формулировки. */
+  if(!capsWords || !capsWords.length) return html;
+  const seen = new Set();
   capsWords.forEach(w => {
     const root = rootOfCapsGlobal(w);
     if(!root || root.length < 3 || seen.has(root)) return;
     seen.add(root);
     try {
       const rgx = new RegExp('([А-Яа-яЁё]*' + root + '[А-Яа-яЁё]*)', 'gi');
-      html = html.replace(rgx,
-        '<mark style="background:#FEF08A;padding:1px 3px;border-radius:3px;font-weight:700;text-decoration:underline;text-decoration-color:#D97706;text-decoration-thickness:2px;text-underline-offset:2px">$1</mark>');
+      html = html.replace(rgx, '<mark style="' + MARK_STYLE + '">$1</mark>');
     } catch(_){}
   });
   return html;
@@ -4361,6 +4371,53 @@ function modalQuickEditQuestion(){
   });
   qInput.value = q.q || '';
 
+  /* Исходный текст (для заданий 1-3, 22-26 — где есть q.sourceText).
+     Самое главное в задании 2/3: учитель может обернуть ключевые слова в
+     **звёздочки** — они будут подсвечены ученику жёлтым с подчёркиванием. */
+  const hasSource = typeof q.sourceText === 'string' && q.sourceText.trim().length > 0;
+  const srcLabel = el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px', marginTop:'14px' }},
+    '📖 Исходный текст:');
+  const srcHint = el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'4px', marginBottom:'6px', lineHeight:'1.45' }},
+    'Оберни ключевые слова в **двойные звёздочки** — они подсветятся жёлтым у ученика. Например: «...окружает **масса** деталей...», «...путешествующий **инкогнито**...».');
+  const srcInput = el('textarea', {
+    rows:8,
+    placeholder:'Сюда — текст-первоисточник (10-12 предложений). Ключевые слова — в **звёздочках**.',
+    style:{ width:'100%', padding:'10px 12px', borderRadius:'10px', border:'1px solid var(--border-2)', fontSize:'13px', fontFamily:'inherit', resize:'vertical', minHeight:'180px', boxSizing:'border-box', lineHeight:'1.5', background:'#FFFCF2' }
+  });
+  srcInput.value = q.sourceText || '';
+  /* Live-превью под textarea — Ольга сразу видит, как ученик увидит подсветку. */
+  const srcPreview = el('div', { style:{
+    marginTop:'8px', padding:'10px 12px', background:'#FFFBEB', border:'1px dashed var(--y-2)',
+    borderRadius:'8px', fontSize:'12px', lineHeight:'1.55', whiteSpace:'pre-wrap',
+    color:'var(--ink)', minHeight:'40px'
+  }});
+  const targetCapsFromQ = () => extractTargetCapsWordsGlobal((qInput && qInput.value) || q.q || '');
+  const renderSrcPreview = () => {
+    const raw = srcInput.value || '';
+    if(!raw.trim()){ srcPreview.innerHTML = '<span style="color:var(--ink-3);font-style:italic">(пусто — введите исходный текст выше)</span>'; return; }
+    let html = renderInlineMdGlobal(raw);
+    html = highlightRootsInTextGlobal(html, targetCapsFromQ());
+    srcPreview.innerHTML = '<div style="font-size:10px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px;font-weight:700">↓ Так увидит ученик</div>' + html;
+  };
+  srcInput.addEventListener('input', renderSrcPreview);
+  qInput.addEventListener('input', renderSrcPreview);  /* варианты могут менять корни — пересчитываем */
+  renderSrcPreview();
+  /* Кнопка «обернуть выделенное в **жирное**» — быстрая разметка прямо из textarea */
+  const srcBoldBtn = el('button', { type:'button', class:'btn btn-secondary btn-sm',
+    style:{ marginTop:'4px', marginRight:'6px' },
+    onclick: () => {
+      const s = srcInput.selectionStart, e = srcInput.selectionEnd;
+      if(s === e){ showToast('Выдели слово в тексте, потом нажми Ж'); return; }
+      const sel = srcInput.value.slice(s, e);
+      const before = srcInput.value.slice(0, s);
+      const after = srcInput.value.slice(e);
+      srcInput.value = before + '**' + sel + '**' + after;
+      srcInput.focus();
+      srcInput.setSelectionRange(s + 2, e + 2);
+      renderSrcPreview();
+    }
+  }, '🟡 Ж — обернуть выделенное в **жирное**');
+
   /* Контекст / предложение — отдельная плашка для заданий 17-20 и подобных,
      где вопрос-инструкция и само предложение хранятся в разных полях.
      Показываем только если у вопроса есть context (т.е. это «text» с предложением). */
@@ -4464,6 +4521,11 @@ function modalQuickEditQuestion(){
       const newCtx = (ctxInput.value || '').trim();
       q.context = newCtx || undefined;
     }
+    /* Исходный текст */
+    if(hasSource){
+      const newSrc = (srcInput.value || '').trim();
+      q.sourceText = newSrc || undefined;
+    }
     /* Пояснение */
     const newExpl = (explInput.value || '').trim();
     q.expl = newExpl || undefined;
@@ -4496,6 +4558,11 @@ function modalQuickEditQuestion(){
       el('div', { class:'modal-body' },
         el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }}, 'Текст вопроса (формулировка-задание):'),
         qInput,
+        hasSource ? srcLabel : null,
+        hasSource ? srcHint : null,
+        hasSource ? srcInput : null,
+        hasSource ? srcBoldBtn : null,
+        hasSource ? srcPreview : null,
         hasContext ? ctxLabel : null,
         hasContext ? ctxInput : null,
         ansLabel, ansInput,
