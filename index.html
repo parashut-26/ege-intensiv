@@ -16959,14 +16959,18 @@ function modalEditTheory(n){
             scrollSnapType:'x mandatory'
           }});
           const galleryCount = el('span', { style:{ fontSize:'12px', color:'var(--ink-3)', marginLeft:'8px' }}, '');
+          /* Поздняя привязка превью — preview/renderPreview объявлены ниже,
+             поэтому держим ссылку через объект, чтобы renderGallery не упал
+             с ReferenceError при первом вызове (TDZ для const). */
+          const _previewBinding = { fn: null };
           const renderGallery = () => {
             galleryRow.innerHTML = '';
             galleryCount.textContent = galleryImages.length
               ? '· ' + galleryImages.length + ' ' + pluralRu(galleryImages.length, ['фото','фото','фото'])
               : '· пусто';
-            /* Если превью открыто — обновляем его, чтобы карусель в нём синхронилась */
-            if(preview.style.display !== 'none'){
-              setTimeout(() => { try { renderPreview(); } catch(_){} }, 0);
+            /* Если превью уже подключено и открыто — обновляем его */
+            if(_previewBinding.fn){
+              try { _previewBinding.fn(); } catch(_){}
             }
             galleryImages.forEach((url, i) => {
               const thumb = el('div', { style:{
@@ -17123,6 +17127,14 @@ function modalEditTheory(n){
           };
           renderPreview();
           ta.addEventListener('input', renderPreview);
+          /* Привязываем preview к ранее объявленной renderGallery — теперь при
+             изменении галереи (добавили/удалили/переставили фото) автоматически
+             обновится и превью, если оно открыто. */
+          _previewBinding.fn = () => {
+            if(preview.style.display !== 'none'){
+              setTimeout(() => { try { renderPreview(); } catch(_){} }, 0);
+            }
+          };
 
           /* Хелпер: вставить/обернуть выделение */
           const wrap = (left, right, placeholder) => {
