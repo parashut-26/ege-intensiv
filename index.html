@@ -13570,12 +13570,33 @@ function modalAttemptDetail(){
 
       /* Текст вопроса (если нашли в банке) */
       if(q){
+        /* sourceText — большой исходный фрагмент текста (задание 1-3, 22-26).
+           Показываем раскрывающимся блоком, открытым по умолчанию — нужен для
+           разбора ошибок с учеником. Без него по №3 непонятно, о чём вопрос. */
+        if(q.sourceText && taskN !== 22){
+          const srcBox = el('details', { style:{
+            padding:'10px 12px', background:'#FFFCF2', borderRadius:'8px',
+            borderLeft:'3px solid var(--y)', marginBottom:'8px', fontSize:'13px',
+            lineHeight:'1.55', color:'var(--ink)'
+          }});
+          srcBox.setAttribute('open', '');
+          srcBox.append(
+            el('summary', { style:{ cursor:'pointer', fontWeight:'700', color:'var(--ink-2)', fontSize:'11px', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'6px', listStyle:'none' }},
+              '📖 Исходный текст ▾'),
+            el('div', { style:{ marginTop:'6px', whiteSpace:'pre-wrap' },
+              html: typeof renderInlineMd === 'function' ? renderInlineMd(q.sourceText) : String(q.sourceText)
+            }));
+          card.append(srcBox);
+        }
         if(q.context){
-          card.append(el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'6px', fontStyle:'italic', whiteSpace:'pre-wrap' }},
-            q.context));
+          card.append(el('div', { style:{
+            padding:'10px 12px', background:'#fff', borderRadius:'8px',
+            borderLeft:'3px solid var(--p)', marginBottom:'8px',
+            fontSize:'13px', fontStyle:'italic', color:'var(--ink-2)', whiteSpace:'pre-wrap'
+          }}, q.context));
         }
         if(q.q){
-          card.append(el('div', { style:{ fontSize:'13px', marginBottom:'8px', whiteSpace:'pre-wrap' }}, q.q));
+          card.append(el('div', { style:{ fontSize:'13px', marginBottom:'8px', whiteSpace:'pre-wrap', fontWeight:'600' }}, q.q));
         }
       }
 
@@ -16897,30 +16918,53 @@ function modalEditTheory(n){
 
           /* Хелпер: загружает изображение в storage 'chat-media' (уже настроен и публичный),
              вставляет markdown-картинку в текстарею на месте курсора. */
+          let _theoryUploading = false;
           const insertTheoryImage = async (file) => {
-            const placeholder = '![Загружаю…]()';
-            /* Сразу подставляем плейсхолдер, чтобы пользователь видел прогресс */
+            if(_theoryUploading){ showToast('⏳ Дождись завершения текущей загрузки'); return; }
+            _theoryUploading = true;
+            saveBtn.disabled = true;
+            saveBtn.textContent = '⏳ Грузим фото…';
+            /* Уникальный плейсхолдер с timestamp — чтобы при параллельных загрузках
+               не путать какой плейсхолдер на какой URL заменить. */
+            const ph = '![Загружаю_' + Date.now() + ']()';
             const s = ta.selectionStart, e = ta.selectionEnd;
             const before = ta.value.slice(0, s);
             const after  = ta.value.slice(e);
-            ta.value = before + placeholder + after;
+            ta.value = before + ph + after;
             renderPreview();
             try {
               showToast('⏳ Загружаю фото…');
               const url = await uploadChatImage(file);
-              const md = '![](' + url + ')';
-              ta.value = ta.value.replace(placeholder, md);
+              console.log('[theory image] uploaded:', url);
+              if(!url || typeof url !== 'string' || !/^https?:\/\//.test(url)){
+                throw new Error('Пустой URL от upload — попробуй ещё раз');
+              }
+              /* Лучше формат `![alt](url)` где alt = название файла без расширения —
+                 marked-парсер старых версий иногда теряет `![]()` с пустым alt. */
+              const altText = (file.name || 'фото').replace(/\.[^.]+$/, '').slice(0, 40);
+              const md = '![' + altText + '](' + url + ')';
+              if(ta.value.indexOf(ph) === -1){
+                /* Плейсхолдер потерялся (пользователь стирал текст) — вставим в конец */
+                console.warn('[theory image] placeholder lost, append at end');
+                ta.value = (ta.value + '\n\n' + md).trim();
+              } else {
+                ta.value = ta.value.replace(ph, md);
+              }
               renderPreview();
               showToast('✓ Фото добавлено');
-              /* Курсор после вставки — за подписью alt-текста, чтобы можно было ввести описание */
-              const pos = before.length + 2; /* «![» */
+              /* Курсор после вставки — за подписью alt-текста */
+              const pos = before.length + 2;
               ta.focus();
-              ta.setSelectionRange(pos, pos);
+              try { ta.setSelectionRange(pos, pos); } catch(_){}
             } catch(err){
-              console.error(err);
-              ta.value = ta.value.replace(placeholder, '');
+              console.error('[theory image] upload failed:', err);
+              ta.value = ta.value.replace(ph, '');
               renderPreview();
               showToast('⚠ ' + (err.message || 'не удалось загрузить фото'));
+            } finally {
+              _theoryUploading = false;
+              saveBtn.disabled = false;
+              saveBtn.textContent = '💾 Сохранить в БД';
             }
           };
 
