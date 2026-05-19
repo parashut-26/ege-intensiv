@@ -8255,7 +8255,8 @@ function dayBlock(d){
   if(!STATE.intensivePostsByOrd || !STATE.intensivePostsByOrd[d.id]){
     loadIntensivePosts(d.id).then(render);
   }
-  const dayPosts = (STATE.intensivePostsByOrd && STATE.intensivePostsByOrd[d.id]) || [];
+  const dayPosts = ((STATE.intensivePostsByOrd && STATE.intensivePostsByOrd[d.id]) || [])
+    .filter(b => b.is_published !== false);
   if(dayPosts.length){
     const postsWrap = el('div', { class:'card',
       style:{ background:'#FEF3C7', borderColor:'#D97706', marginBottom:'14px', padding:'14px 16px' }},
@@ -18159,7 +18160,7 @@ async function loadWarmupBlocks(dayId){
   try {
     const list = await restRequest('GET',
       '/warmup_blocks?day_id=eq.' + dayId +
-      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord&order=ord.asc');
+      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord,is_published&order=ord.asc');
     if(!STATE.warmupBlocksByDay) STATE.warmupBlocksByDay = {};
     STATE.warmupBlocksByDay[dayId] = list || [];
   } catch(e){
@@ -18174,7 +18175,7 @@ async function loadIntensivePosts(dayOrd){
   try {
     const list = await restRequest('GET',
       '/warmup_blocks?intensive_day_ord=eq.' + dayOrd +
-      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord&order=ord.asc');
+      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord,is_published&order=ord.asc');
     if(!STATE.intensivePostsByOrd) STATE.intensivePostsByOrd = {};
     STATE.intensivePostsByOrd[dayOrd] = list || [];
   } catch(e){
@@ -18284,11 +18285,16 @@ function getMyVoteIndex(block){
 
 async function voteWarmupPoll(blockId, optionIndex){
   if(!MY_PROFILE || !MY_PROFILE.id) return;
-  /* Находим блок в локальном STATE */
-  let block = null, dayId = null;
+  /* Находим блок и где он лежит — в warmup-дне или дне интенсива */
+  let block = null, warmupDayId = null, intensiveOrd = null;
   Object.keys(STATE.warmupBlocksByDay || {}).forEach(d => {
     (STATE.warmupBlocksByDay[d] || []).forEach(b => {
-      if(b.id === blockId){ block = b; dayId = parseInt(d, 10); }
+      if(b.id === blockId){ block = b; warmupDayId = parseInt(d, 10); }
+    });
+  });
+  Object.keys(STATE.intensivePostsByOrd || {}).forEach(o => {
+    (STATE.intensivePostsByOrd[o] || []).forEach(b => {
+      if(b.id === blockId){ block = b; intensiveOrd = parseInt(o, 10); }
     });
   });
   if(!block) return;
@@ -18297,12 +18303,14 @@ async function voteWarmupPoll(blockId, optionIndex){
   if(!newConfig.poll) newConfig.poll = {};
   if(!newConfig.poll.votes) newConfig.poll.votes = {};
   newConfig.poll.votes[MY_PROFILE.id] = optionIndex;
-  /* Оптимистично обновляем локально — UI отзовётся мгновенно */
+  /* Оптимистично обновляем локально */
   block.config = newConfig;
-  /* Перерисовываем overlay */
-  if(STATE.openWarmupDayId === dayId){
-    const day = (STATE.warmupDays || []).find(d => d.id === dayId);
+  /* Если открыт warmup-overlay — перерисуем его, иначе render() */
+  if(warmupDayId != null && STATE.openWarmupDayId === warmupDayId){
+    const day = (STATE.warmupDays || []).find(d => d.id === warmupDayId);
     if(day) renderWarmupOverlay(day);
+  } else {
+    render();
   }
   /* Пишем в БД через RPC: ученикам напрямую PATCH запрещён RLS,
      поэтому используем SECURITY DEFINER-функцию vote_warmup_poll,
@@ -18323,6 +18331,16 @@ async function voteWarmupPoll(blockId, optionIndex){
     }
   }
 }
+async function toggleWarmupBlockPublished(block, next){
+  try {
+    await restRequest('PATCH', '/warmup_blocks?id=eq.' + block.id,
+      { is_published: next }, { prefer: 'return=minimal' });
+    block.is_published = next;
+    showToast(next ? '👁 Пост виден ученикам' : '🙈 Пост скрыт');
+    render();
+  } catch(e){ showToast('⚠ ' + e.message); }
+}
+
 async function deleteWarmupBlock(block){
   if(!confirm('Удалить блок «' + (block.title || block.type) + '»?')) return;
   try {
@@ -18439,12 +18457,19 @@ function renderWarmupBlockTeacher(b, day){
   /* Композитная превьюшка: показываем все непустые части. */
   const cfg = (b.config && typeof b.config === 'object') ? b.config : {};
   const card = el('div', { style:{ padding:'12px 14px', border:'1px solid var(--border)', borderRadius:'10px', marginTop:'8px', background:'var(--bg)' }});
+  const isPub = b.is_published !== false;
   card.append(
-    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }},
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px', flexWrap:'wrap', gap:'6px' }},
       el('div', { style:{ display:'flex', gap:'6px', alignItems:'center', fontSize:'12px', color:'var(--ink-3)', fontWeight:'700', textTransform:'uppercase', letterSpacing:'.04em' }},
         el('span', { style:{ fontSize:'1.4rem' }}, b.emoji || '📌'),
-        'Пост #' + b.ord),
+        'Пост #' + b.ord,
+        isPub
+          ? el('span', { style:{ background:'#DCFCE7', color:'#166534', padding:'2px 6px', borderRadius:'6px', fontSize:'10px' }}, '👁 ВИДЕН')
+          : el('span', { style:{ background:'#FEE2E2', color:'#991B1B', padding:'2px 6px', borderRadius:'6px', fontSize:'10px' }}, '🙈 СКРЫТ')),
       el('div', { style:{ display:'flex', gap:'6px' }},
+        el('button', { class:'btn btn-secondary btn-sm', style:{ padding:'2px 8px', fontSize:'12px' },
+          onclick: () => toggleWarmupBlockPublished(b, !isPub)
+        }, isPub ? '🙈 Скрыть' : '👁 Показать'),
         el('button', { class:'btn btn-secondary btn-sm', style:{ padding:'2px 8px', fontSize:'12px' },
           onclick: () => { STATE.editingBlockId = b.id; render(); }
         }, '✎ Изменить'),
@@ -18688,8 +18713,8 @@ function renderWarmupOverlay(day){
         el('div', { style:{ fontWeight:'800', fontSize:'18px' }}, (day.emoji || '☀️') + ' ' + day.title)),
       el('button', { class:'btn btn-secondary', onclick: () => closeWarmupOverlay() }, '✕ Закрыть')),
     el('div', { style:{ flex:1, padding:'20px', maxWidth:'800px', width:'100%', margin:'0 auto' }},
-      ...(blocks.length
-        ? blocks.map(b => renderWarmupBlockStudent(b))
+      ...(blocks.filter(b => b.is_published !== false).length
+        ? blocks.filter(b => b.is_published !== false).map(b => renderWarmupBlockStudent(b))
         : [el('div', { style:{ padding:'40px', textAlign:'center', color:'var(--ink-3)' }},
             'В этом дне пока нет материалов. Загляни попозже.')])));
   document.body.appendChild(overlay);
