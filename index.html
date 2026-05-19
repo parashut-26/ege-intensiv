@@ -16976,10 +16976,24 @@ function modalEditTheory(n){
                 console.warn('[theory image] placeholder lost — appended at end');
               }
               renderPreview();
-              /* Прокручиваем оба окна вниз — пользователь видит свежую картинку */
+              /* Прокручиваем textarea и превью к низу. Для preview ждём пока
+                 картинка отрендерится и пересчитается scrollHeight. */
               ta.scrollTop = ta.scrollHeight;
-              preview.scrollTop = preview.scrollHeight;
-              showToast('✓ Фото добавлено · можно сохранить');
+              const scrollPreviewDown = () => {
+                preview.scrollTop = preview.scrollHeight;
+                /* Найдём только что вставленный <img> и подсветим его на 1.5 сек */
+                const lastImg = preview.querySelector('img:last-of-type');
+                if(lastImg){
+                  lastImg.scrollIntoView({ behavior:'smooth', block:'center' });
+                  lastImg.style.outline = '3px solid #FACC15';
+                  lastImg.style.transition = 'outline 0.3s';
+                  setTimeout(() => { lastImg.style.outline = 'none'; }, 1500);
+                }
+              };
+              scrollPreviewDown();
+              setTimeout(scrollPreviewDown, 200);
+              setTimeout(scrollPreviewDown, 600);
+              showToast('✓ Фото добавлено в конец · прокрути вниз чтобы увидеть');
               /* Курсор после картинки — между «![» и «](» — чтобы можно было ввести описание */
               try {
                 const caret = idx >= 0 ? idx + 4 + altText.length : ta.value.length;

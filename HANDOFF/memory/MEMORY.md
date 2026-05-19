@@ -13,3 +13,7 @@
 - [TODO пересчёт баллов в тренажёрах](todo_quiz_recalc.md) — после редактирования вопроса в QUIZ_BANK не пересчитываются старые попытки; делаем после интенсива
 - [TODO задание 14 — формат ЕГЭ](todo_task14_full_ege_format.md) — 5 предложений + ответ цифрами (как на реальном ЕГЭ); делаем после интенсива
 - [DONE+TODO Telegram-бот оплат](todo_email_payment_channel.md) — tg-payment-webhook работает; после 4 июня добавить Email→Albato→Edge Function как страховку
+- [Realtime включён](tech_realtime_enabled.md) — supabase_realtime + attempts + payment_suggestions; «🟢 live» на Сводке и Аналитике у учителя
+- [Дашборд ученика в Достижениях](feature_student_dashboard.md) — зеркало карточки учителя: комментарий, KPI, слабые темы, попытки, пробники, оплаты, чемодан
+- [TODO архитектура курсов](todo_courses_cohorts_architecture.md) — летний + годовой курс: курсы/темы/дни/поэтапность/AI-отчёт; Фаза 1 к 18 июня, Фаза 2 за лето
+- [TODO блочный формат теории](todo_blocky_theory.md) — переделать теорию заданий на конструктор блоков как «Разогрев», с панелью форматирования в text-блоках; после 4 июня
