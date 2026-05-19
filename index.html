@@ -16819,10 +16819,11 @@ function modalEditTheory(n){
           }, THEORY[n] || '');
 
           /* Предпросмотр — рядом или под textarea, обновляется по input.
-             Картинки сжимаются под ширину блока (max-width:100%, height:auto). */
+             Картинки сжимаются под ширину блока (max-width:100%, height:auto).
+             Высота не ограничена сверху — чтобы длинные картинки помещались. */
           const preview = el('div', {
             style:{ padding:'14px', borderRadius:'10px', border:'1px dashed var(--border-2)',
-                    background:'#fff', minHeight:'400px', maxHeight:'600px', overflow:'auto',
+                    background:'#fff', minHeight:'400px', overflow:'auto',
                     fontSize:'14px', lineHeight:'1.55', boxSizing:'border-box' }
           });
           /* Глобальное правило для картинок внутри превью */
@@ -16956,9 +16957,13 @@ function modalEditTheory(n){
                 throw new Error('Пустой URL от upload — попробуй ещё раз');
               }
               const altText = (file.name || 'фото').replace(/\.[^.]+$/, '').slice(0, 40);
-              /* Картинку лучше вставлять отдельным абзацем, обрамлённым \n\n —
-                 marked гарантированно рендерит её как блок. */
-              const md = '\n\n![' + altText + '](' + url + ')\n\n';
+              /* Вставляем КАК HTML-тег <img>, а не markdown ![](url) — marked
+                 пропускает HTML без изменений, поэтому это работает железно
+                 и в превью, и в кабинете ученика. Стили inline — чтобы
+                 картинка ограничивалась шириной контейнера. */
+              const escAlt = altText.replace(/"/g, '&quot;');
+              const md = '\n\n<img src="' + url + '" alt="' + escAlt +
+                         '" style="max-width:100%;height:auto;border-radius:8px;margin:8px 0;display:block;">\n\n';
               const idx = ta.value.indexOf(ph);
               if(idx >= 0){
                 ta.value = ta.value.slice(0, idx) + md + ta.value.slice(idx + ph.length);
