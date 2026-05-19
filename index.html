@@ -16944,10 +16944,89 @@ function modalEditTheory(n){
           }
           const galleryImages = STATE.editingTheoryGallery[n];
 
-          const ta = el('textarea', {
-            placeholder: 'Опишите тему: что проверяется в задании ' + n + ', типичные ловушки, формулы, правила. Используй кнопки сверху для форматирования. Cmd/Ctrl+B — жирный, Cmd/Ctrl+I — курсив, Cmd/Ctrl+Z — отмена.',
-            style:{ width:'100%', padding:'14px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'600px', resize:'vertical', fontFamily:'inherit', fontSize:'15px', lineHeight:'1.6', boxSizing:'border-box' }
-          }, initialMeta.text);
+          /* WYSIWYG contenteditable — текст сразу становится жирным/цветным при
+             клике кнопки. Сохраняется HTML, у ученика рендерится через innerHTML. */
+          const theoryEditor = el('div', {
+            contenteditable: 'true', spellcheck: 'false',
+            'data-placeholder': 'Опишите тему задания ' + n + ': что проверяется, типичные ловушки, формулы, правила. Cmd/Ctrl+B — жирный, Cmd/Ctrl+I — курсив, Cmd/Ctrl+U — подчёркнутый, Cmd/Ctrl+Z — отмена.',
+            style:{ width:'100%', padding:'14px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'600px', overflow:'auto', fontFamily:'inherit', fontSize:'15px', lineHeight:'1.6', boxSizing:'border-box' }
+          });
+          /* Инициализируем: если уже HTML — вставляем как есть, если markdown —
+             прогоняем через marked один раз. */
+          if(initialMeta.text){
+            const raw = initialMeta.text;
+            if(/<\/?(b|i|u|mark|span|h1|h2|h3|h4|ul|ol|li|br|hr|p|div|strong|em|a|img|font)[\s>\/]/i.test(raw)){
+              theoryEditor.innerHTML = raw;
+            } else if(window.marked){
+              try { theoryEditor.innerHTML = window.marked.parse(raw); }
+              catch(_){ theoryEditor.textContent = raw; }
+            } else {
+              theoryEditor.textContent = raw;
+            }
+          }
+          /* Глобальный плейсхолдер уже добавлен где-то выше (post-editor-placeholder-style),
+             но на всякий случай дублируем — каждый редактор работает независимо. */
+          if(!document.getElementById('theory-editor-placeholder-style')){
+            document.head.append(el('style', { id:'theory-editor-placeholder-style' },
+              '[contenteditable="true"][data-placeholder]:empty:before{content:attr(data-placeholder);color:var(--ink-3);pointer-events:none;}'
+            ));
+          }
+
+          /* Прокси с .value — старый код ниже (renderPreview, save, drag-drop)
+             использует ta.value. Сохраним совместимость. */
+          const ta = {
+            get value(){
+              const plain = (theoryEditor.textContent || '').trim();
+              if(!plain) return '';
+              return (theoryEditor.innerHTML || '').trim();
+            },
+            set value(v){
+              if(v && /<\/?(b|i|u|mark|span|h1|h2|h3|h4|ul|ol|li|br|hr|p|div|strong|em|a|img|font)[\s>\/]/i.test(v)){
+                theoryEditor.innerHTML = v;
+              } else if(window.marked && v){
+                try { theoryEditor.innerHTML = window.marked.parse(v); }
+                catch(_){ theoryEditor.textContent = v; }
+              } else {
+                theoryEditor.textContent = v || '';
+              }
+            },
+            focus(){ theoryEditor.focus(); },
+            addEventListener(ev, fn){ theoryEditor.addEventListener(ev, fn); },
+            style: theoryEditor.style,
+            /* для совместимости с кодом drag&drop selectionStart/etc — заглушки */
+            selectionStart: 0, selectionEnd: 0,
+            setSelectionRange: () => {}
+          };
+          /* execCommand-обёртка */
+          const _theoryExec = (cmd, val) => {
+            theoryEditor.focus();
+            try { document.execCommand(cmd, false, val); }
+            catch(_){}
+          };
+          /* Cmd+B/I/U */
+          theoryEditor.addEventListener('keydown', (e) => {
+            if((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')){
+              e.preventDefault(); _theoryExec('bold');
+            } else if((e.ctrlKey || e.metaKey) && (e.key === 'i' || e.key === 'I')){
+              e.preventDefault(); _theoryExec('italic');
+            } else if((e.ctrlKey || e.metaKey) && (e.key === 'u' || e.key === 'U')){
+              e.preventDefault(); _theoryExec('underline');
+            }
+          });
+          /* Защита от мусорной вставки из Word/Notion — берём plain text */
+          theoryEditor.addEventListener('paste', (e) => {
+            /* Если в буфере есть картинка — пропустим обработку (есть отдельный
+               drag&drop/paste image handler ниже). */
+            const items = e.clipboardData && e.clipboardData.items;
+            if(items){
+              for(const it of items){
+                if(it.kind === 'file' && it.type.startsWith('image/')) return;
+              }
+            }
+            e.preventDefault();
+            const txt = (e.clipboardData || window.clipboardData).getData('text/plain');
+            document.execCommand('insertText', false, txt);
+          });
 
           /* Блок «📷 Фото к теории» — карусель миниатюр сверху редактора. */
           const galleryBox = el('div', { style:{
@@ -17136,30 +17215,8 @@ function modalEditTheory(n){
             }
           };
 
-          /* Хелпер: вставить/обернуть выделение */
-          const wrap = (left, right, placeholder) => {
-            const s = ta.selectionStart, e = ta.selectionEnd;
-            const sel = ta.value.slice(s, e) || (placeholder || '');
-            const before = ta.value.slice(0, s);
-            const after  = ta.value.slice(e);
-            ta.value = before + left + sel + right + after;
-            const newStart = before.length + left.length;
-            ta.focus();
-            ta.setSelectionRange(newStart, newStart + sel.length);
-            renderPreview();
-          };
-          const insertAtLineStart = (prefix) => {
-            const s = ta.selectionStart;
-            const lineStart = ta.value.lastIndexOf('\n', s - 1) + 1;
-            const before = ta.value.slice(0, lineStart);
-            const after  = ta.value.slice(lineStart);
-            ta.value = before + prefix + after;
-            ta.focus();
-            ta.setSelectionRange(s + prefix.length, s + prefix.length);
-            renderPreview();
-          };
-
-          /* Кнопки панели */
+          /* Кнопки панели — WYSIWYG. Используем _theoryExec (execCommand) — текст
+             сразу становится жирным/цветным прямо в редакторе, без markdown-разметки. */
           const mkBtn = (label, title, fn, style) => {
             const b = el('button', { type:'button', title,
               style: Object.assign({
@@ -17177,24 +17234,31 @@ function modalEditTheory(n){
                     padding:'8px', background:'#fff', border:'1px solid var(--border-2)',
                     borderRadius:'10px 10px 0 0', borderBottom:'none' }
           },
-            mkBtn(el('b', null, 'Ж'),    'Жирный (Ctrl+B)',     () => wrap('**','**','текст')),
-            mkBtn(el('i', null, 'К'),    'Курсив',              () => wrap('*','*','текст')),
-            mkBtn(el('u', null, 'П'),    'Подчёркнутый',        () => wrap('<u>','</u>','текст')),
+            mkBtn(el('b', null, 'Ж'),    'Жирный (Cmd/Ctrl+B)',     () => _theoryExec('bold')),
+            mkBtn(el('i', null, 'К'),    'Курсив (Cmd/Ctrl+I)',     () => _theoryExec('italic')),
+            mkBtn(el('u', null, 'П'),    'Подчёркнутый (Cmd/Ctrl+U)', () => _theoryExec('underline')),
             mkBtn(el('span', { style:{ background:'#FEF08A', padding:'0 4px', borderRadius:'3px' }}, 'A'),
-                                         'Жёлтый маркер',       () => wrap('<mark>','</mark>','текст')),
+                                         'Жёлтый маркер',       () => _theoryExec('hiliteColor', '#FEF08A')),
             mkBtn(el('span', { style:{ color:'#DC2626' }}, 'A'),
-                                         'Красный цвет',        () => wrap('<span style="color:#DC2626">','</span>','текст')),
+                                         'Красный цвет',        () => _theoryExec('foreColor', '#DC2626')),
             mkBtn(el('span', { style:{ color:'#2563EB' }}, 'A'),
-                                         'Синий цвет',          () => wrap('<span style="color:#2563EB">','</span>','текст')),
+                                         'Синий цвет',          () => _theoryExec('foreColor', '#2563EB')),
             mkBtn(el('span', { style:{ color:'#059669' }}, 'A'),
-                                         'Зелёный цвет',        () => wrap('<span style="color:#059669">','</span>','текст')),
+                                         'Зелёный цвет',        () => _theoryExec('foreColor', '#059669')),
+            mkBtn(el('span', { style:{ color:'var(--ink-2)' }}, '⨯'),
+                                         'Убрать форматирование', () => _theoryExec('removeFormat')),
             el('span', { style:{ width:'1px', height:'20px', background:'var(--border-2)', margin:'0 4px' }}),
-            mkBtn('H1',        'Заголовок 1',  () => insertAtLineStart('# ')),
-            mkBtn('H2',        'Заголовок 2',  () => insertAtLineStart('## ')),
-            mkBtn('• список',  'Маркированный список',  () => insertAtLineStart('- '), { fontWeight:'400' }),
-            mkBtn('1. список', 'Нумерованный список',   () => insertAtLineStart('1. '), { fontWeight:'400' }),
-            mkBtn('—',         'Горизонтальная линия',  () => wrap('\n\n---\n\n','')),
-            mkBtn('🔗',        'Ссылка',                () => wrap('[','](https://)','текст ссылки')),
+            mkBtn('H1',        'Заголовок 1',  () => _theoryExec('formatBlock', '<h1>')),
+            mkBtn('H2',        'Заголовок 2',  () => _theoryExec('formatBlock', '<h2>')),
+            mkBtn('¶',         'Обычный абзац', () => _theoryExec('formatBlock', '<p>')),
+            mkBtn('• список',  'Маркированный список',  () => _theoryExec('insertUnorderedList'), { fontWeight:'400' }),
+            mkBtn('1. список', 'Нумерованный список',   () => _theoryExec('insertOrderedList'), { fontWeight:'400' }),
+            mkBtn('—',         'Горизонтальная линия',  () => _theoryExec('insertHorizontalRule')),
+            mkBtn('🔗',        'Ссылка',                () => {
+              const url = prompt('URL ссылки (https://...)', 'https://');
+              if(!url || !url.trim()) return;
+              _theoryExec('createLink', url.trim());
+            }),
             mkBtn('👁 Превью', 'Показать/скрыть предпросмотр (как увидит ученик)',
                   () => {
                     if(preview.style.display === 'none'){
@@ -17223,26 +17287,27 @@ function modalEditTheory(n){
             }
           });
 
-          /* Хелпер: загружает изображение в storage 'chat-media' (уже настроен и публичный),
-             вставляет markdown-картинку в текстарею. Работаем по индексу подстановки,
-             а не по replace — replace может не сработать если значения чуть отличаются. */
+          /* Хелпер: загружает изображение в storage 'chat-media' (уже настроен и публичный)
+             и вставляет <img> прямо в WYSIWYG-редактор. Используем DOM-плейсхолдер
+             с уникальным data-loading-id, чтобы найти и заменить его после upload. */
           let _theoryUploading = false;
           const insertTheoryImage = async (file) => {
             if(_theoryUploading){ showToast('⏳ Дождись завершения текущей загрузки'); return; }
             _theoryUploading = true;
             saveBtn.disabled = true;
             saveBtn.textContent = '⏳ Грузим фото…';
-            /* Уникальный плейсхолдер. Вставляем В КОНЕЦ textarea (а не в позицию
-               курсора), чтобы Ольга гарантированно видела загружаемое фото,
-               не приходилось скроллить наверх и не ломались уже написанные абзацы. */
-            const ph = '\n\n![Загружаю_' + Date.now() + ']()\n\n';
-            const prevValue = (ta.value || '').replace(/\s+$/, '');
-            ta.value = prevValue + ph;
-            /* Прокручиваем textarea вниз — пользователь увидит вставленное */
-            ta.scrollTop = ta.scrollHeight;
+            const loadingId = 'loading_' + Date.now() + '_' + Math.random().toString(36).slice(2,8);
+            /* Создаём плейсхолдер прямо в DOM редактора — пунктирная рамка с надписью.
+               Добавляем в конец body редактора, чтобы Ольге было видно загрузку. */
+            const placeholder = document.createElement('div');
+            placeholder.setAttribute('data-loading-id', loadingId);
+            placeholder.setAttribute('contenteditable', 'false');
+            placeholder.style.cssText = 'padding:20px;margin:12px 0;border:2px dashed #FACC15;border-radius:8px;background:#FFFBEA;color:var(--ink-2);text-align:center;font-style:italic;';
+            placeholder.textContent = '⏳ Загружаю «' + (file.name || 'фото') + '»…';
+            theoryEditor.appendChild(placeholder);
+            theoryEditor.scrollTop = theoryEditor.scrollHeight;
+            placeholder.scrollIntoView({ behavior:'smooth', block:'center' });
             renderPreview();
-            /* Превью тоже скроллим вниз */
-            preview.scrollTop = preview.scrollHeight;
             try {
               showToast('⏳ Загружаю фото…');
               const url = await uploadChatImage(file);
@@ -17251,54 +17316,32 @@ function modalEditTheory(n){
                 throw new Error('Пустой URL от upload — попробуй ещё раз');
               }
               const altText = (file.name || 'фото').replace(/\.[^.]+$/, '').slice(0, 40);
-              /* Вставляем КАК HTML-тег <img>, а не markdown ![](url) — marked
-                 пропускает HTML без изменений, поэтому это работает железно
-                 и в превью, и в кабинете ученика. Стили inline — чтобы
+              /* Создаём img и заменяем плейсхолдер. Стили inline — чтобы у ученика
                  картинка ограничивалась шириной контейнера. */
-              const escAlt = altText.replace(/"/g, '&quot;');
-              const md = '\n\n<img src="' + url + '" alt="' + escAlt +
-                         '" style="max-width:100%;height:auto;border-radius:8px;margin:8px 0;display:block;">\n\n';
-              const idx = ta.value.indexOf(ph);
-              if(idx >= 0){
-                ta.value = ta.value.slice(0, idx) + md + ta.value.slice(idx + ph.length);
-                console.log('[theory image] placeholder replaced at idx=' + idx);
+              const img = document.createElement('img');
+              img.src = url;
+              img.alt = altText;
+              img.style.cssText = 'max-width:100%;height:auto;border-radius:8px;margin:8px 0;display:block;';
+              const ph = theoryEditor.querySelector('[data-loading-id="' + loadingId + '"]');
+              if(ph && ph.parentNode){
+                ph.parentNode.replaceChild(img, ph);
               } else {
                 /* Плейсхолдер съело редактирование — добавляем в конец */
-                ta.value = (ta.value.replace(/\n+$/, '') + md).trim() + '\n';
+                theoryEditor.appendChild(img);
                 console.warn('[theory image] placeholder lost — appended at end');
               }
               renderPreview();
-              /* Прокручиваем textarea и превью к низу. Для preview ждём пока
-                 картинка отрендерится и пересчитается scrollHeight. */
-              ta.scrollTop = ta.scrollHeight;
-              const scrollPreviewDown = () => {
-                preview.scrollTop = preview.scrollHeight;
-                /* Найдём только что вставленный <img> и подсветим его на 1.5 сек */
-                const lastImg = preview.querySelector('img:last-of-type');
-                if(lastImg){
-                  lastImg.scrollIntoView({ behavior:'smooth', block:'center' });
-                  lastImg.style.outline = '3px solid #FACC15';
-                  lastImg.style.transition = 'outline 0.3s';
-                  setTimeout(() => { lastImg.style.outline = 'none'; }, 1500);
-                }
-              };
-              scrollPreviewDown();
-              setTimeout(scrollPreviewDown, 200);
-              setTimeout(scrollPreviewDown, 600);
-              showToast('✓ Фото добавлено в конец · прокрути вниз чтобы увидеть');
-              /* Курсор после картинки — между «![» и «](» — чтобы можно было ввести описание */
-              try {
-                const caret = idx >= 0 ? idx + 4 + altText.length : ta.value.length;
-                ta.focus();
-                ta.setSelectionRange(caret, caret);
-              } catch(_){}
+              /* Подсветка вставленного фото */
+              img.style.outline = '3px solid #FACC15';
+              img.style.transition = 'outline 0.3s';
+              img.scrollIntoView({ behavior:'smooth', block:'center' });
+              setTimeout(() => { img.style.outline = 'none'; }, 1500);
+              showToast('✓ Фото добавлено · можно продолжать набирать текст');
             } catch(err){
               console.error('[theory image] upload failed:', err);
-              const idx = ta.value.indexOf(ph);
-              if(idx >= 0){
-                ta.value = ta.value.slice(0, idx) + ta.value.slice(idx + ph.length);
-                renderPreview();
-              }
+              const ph = theoryEditor.querySelector('[data-loading-id="' + loadingId + '"]');
+              if(ph && ph.parentNode) ph.parentNode.removeChild(ph);
+              renderPreview();
               showToast('⚠ ' + (err.message || 'не удалось загрузить фото'));
             } finally {
               _theoryUploading = false;
@@ -17343,15 +17386,9 @@ function modalEditTheory(n){
           ta.style.borderTopRightRadius = '0';
           ta.style.borderTop = 'none';
 
-          /* Ctrl+B для жирного, Ctrl+I — курсив */
-          ta.addEventListener('keydown', (e) => {
-            if((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')){
-              e.preventDefault(); wrap('**','**','текст');
-            }
-            if((e.ctrlKey || e.metaKey) && (e.key === 'i' || e.key === 'I')){
-              e.preventDefault(); wrap('*','*','текст');
-            }
-          });
+          /* Cmd/Ctrl+B и Cmd/Ctrl+I уже навешены на theoryEditor выше (через _theoryExec).
+             Здесь дополнительный handler не нужен — execCommand'у браузер сам отдаёт
+             хоткеи, но мы тоже перехватываем preventDefault, чтобы наверняка. */
 
           const status = el('span', { style:{ fontSize:'12px', color:'var(--ink-3)', marginLeft:'10px' }}, '');
           const saveBtn = el('button', { class:'btn btn-y btn-sm', style:{ marginTop:'8px' },
@@ -19217,7 +19254,15 @@ function renderWarmupBlockTeacher(b, day){
     card.append(grid);
   }
   if(b.title) card.append(el('div', { style:{ fontWeight:'700', marginBottom:'4px' }}, b.title));
-  if(b.body)  card.append(el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', whiteSpace:'pre-wrap', marginBottom:'6px' }}, b.body));
+  if(b.body){
+    /* Если body — HTML (контенредактируемый редактор сохраняет теги), рендерим
+       через innerHTML, иначе — plain-text с whiteSpace pre-wrap. */
+    const isHtml = /<\/?(b|i|u|mark|span|h1|h2|h3|h4|ul|ol|li|br|hr|p|div|strong|em|a|img|font)[\s>\/]/i.test(b.body);
+    const bodyDiv = el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', marginBottom:'6px' }});
+    if(isHtml){ bodyDiv.innerHTML = b.body; }
+    else { bodyDiv.style.whiteSpace = 'pre-wrap'; bodyDiv.textContent = b.body; }
+    card.append(bodyDiv);
+  }
   if(b.url)   card.append(el('div', { style:{ fontSize:'12px', color:'var(--p-deep)', wordBreak:'break-all' }}, '🔗 ' + b.url));
   if(b.game_id){
     const g = (STATE.gamesList || []).find(x => x.id === b.game_id);
@@ -19624,7 +19669,21 @@ function renderWarmupBlockStudent(b){
 
   /* Текст */
   if(b.body){
-    inner.append(el('div', { style:{ fontSize:'15px', lineHeight:'1.55', whiteSpace:'pre-wrap', color:'var(--ink)', marginBottom:'12px' }}, b.body));
+    /* WYSIWYG-редактор сохраняет HTML (<b>, <mark>, <span style="color">, и т.д.) —
+       рендерим через innerHTML. Старые посты с markdown — пропускаем через marked.
+       Plain-text без тегов — обычный textNode с переносами. */
+    const bodyDiv = el('div', { style:{ fontSize:'15px', lineHeight:'1.55', color:'var(--ink)', marginBottom:'12px' }});
+    const isHtml = /<\/?(b|i|u|mark|span|h1|h2|h3|h4|ul|ol|li|br|hr|p|div|strong|em|a|img|font)[\s>\/]/i.test(b.body);
+    if(isHtml){
+      bodyDiv.innerHTML = b.body;
+    } else if(window.marked && /[*_#`>!\[-]/.test(b.body)){
+      try { bodyDiv.innerHTML = window.marked.parse(b.body); }
+      catch(_){ bodyDiv.style.whiteSpace = 'pre-wrap'; bodyDiv.textContent = b.body; }
+    } else {
+      bodyDiv.style.whiteSpace = 'pre-wrap';
+      bodyDiv.textContent = b.body;
+    }
+    inner.append(bodyDiv);
   }
 
   /* Кнопка-игра */
