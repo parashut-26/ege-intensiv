@@ -1361,12 +1361,17 @@ async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, 
       item.word = q.word || null;
       item.expl = q.expl || null;
     }
-    /* Для inlineChoice сохраняем шаблон + blanks (опции), чтобы разбор
-       читался без обращения к актуальному QUIZ_BANK (банк со временем правится). */
+    /* Для inlineChoice сохраняем шаблон + blanks (варианты), чтобы разбор
+       читался без обращения к актуальному QUIZ_BANK (банк со временем правится).
+       В банке поле называется `variants`, в старом коде разбора было `options` —
+       сохраняем оба для обратной совместимости. */
     if(q.inlineChoice && Array.isArray(q.blanks)){
       item.inlineChoice = true;
       item.template = q.template || null;
-      item.blanks = q.blanks.map(b => ({ options: b.options || [], correct: b.correct }));
+      item.blanks = q.blanks.map(b => {
+        const vars = b.variants || b.options || [];
+        return { variants: vars, options: vars, correct: b.correct };
+      });
     }
     /* Для commaPick (задание 16) сохраняем расставленные учеником запятые,
        чтобы учитель потом мог их посмотреть в drill-down. */
@@ -13975,9 +13980,16 @@ function modalAttemptDetail(){
          либо из item (новые попытки), либо из q (для старых попыток, у которых
          в БД ничего не сохранилось кроме user/ok). */
       const inlineTemplate = item.template || (q && q.template);
-      const inlineBlanks   = (Array.isArray(item.blanks) && item.blanks.length)
-                              ? item.blanks
-                              : (q && Array.isArray(q.blanks) ? q.blanks : null);
+      /* Предпочитаем АКТУАЛЬНЫЙ q.blanks из банка — у него точно есть варианты.
+         item.blanks использовали как fallback только если вопрос удалён или сильно
+         изменён. И в обоих случаях поддерживаем variants и options как имя поля. */
+      const inlineBlanks = (q && Array.isArray(q.blanks) && q.blanks.length)
+                              ? q.blanks
+                              : (Array.isArray(item.blanks) && item.blanks.length ? item.blanks : null);
+      /* Унификатор: вернуть массив вариантов из blank — `variants` (банк) или `options` (старый item) */
+      const blankVars = (b) => Array.isArray(b && b.variants) ? b.variants
+                              : Array.isArray(b && b.options) ? b.options
+                              : [];
       if((item.inlineChoice || (q && q.inlineChoice)) && inlineTemplate && inlineBlanks){
         const userArr = Array.isArray(item.user) ? item.user.map(Number) : [];
         const expArr  = Array.isArray(item.expected)
@@ -13999,13 +14011,14 @@ function modalAttemptDetail(){
             const blankIdx = Number(part);
             const blank = inlineBlanks[blankIdx];
             if(!blank){ sentBox.append(document.createTextNode('___')); return; }
+            const vars = blankVars(blank);
             const userPick = userArr[blankIdx];
             const correctIdx = (typeof blank.correct === 'number') ? blank.correct : expArr[blankIdx];
-            const userText = (typeof userPick === 'number' && blank.options && blank.options[userPick] != null)
-                              ? String(blank.options[userPick])
+            const userText = (typeof userPick === 'number' && vars[userPick] != null)
+                              ? String(vars[userPick])
                               : '?';
-            const correctText = (typeof correctIdx === 'number' && blank.options && blank.options[correctIdx] != null)
-                                  ? String(blank.options[correctIdx])
+            const correctText = (typeof correctIdx === 'number' && vars[correctIdx] != null)
+                                  ? String(vars[correctIdx])
                                   : '?';
             const isOk = (userPick === correctIdx);
             // Плашка с выбором ученика
@@ -14032,14 +14045,16 @@ function modalAttemptDetail(){
         });
         card.append(sentBox);
 
-        /* Сводка: что выбрал / что верно — в человекочитаемой форме (тексты опций) */
+        /* Сводка: что выбрал / что верно — в человекочитаемой форме (тексты вариантов) */
         const userHuman = inlineBlanks.map((b, k) => {
           const u = userArr[k];
-          return (typeof u === 'number' && b.options && b.options[u] != null) ? b.options[u] : '?';
+          const vars = blankVars(b);
+          return (typeof u === 'number' && vars[u] != null) ? vars[u] : '?';
         }).join(' · ');
         const corrHuman = inlineBlanks.map((b, k) => {
           const c = (typeof b.correct === 'number') ? b.correct : expArr[k];
-          return (typeof c === 'number' && b.options && b.options[c] != null) ? b.options[c] : '?';
+          const vars = blankVars(b);
+          return (typeof c === 'number' && vars[c] != null) ? vars[c] : '?';
         }).join(' · ');
         card.append(
           el('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginTop:'6px' }},
