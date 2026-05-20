@@ -13857,11 +13857,36 @@ function modalAttemptDetail(){
   const dt = new Date(attempt.created_at);
   const dateStr = dt.toLocaleDateString('ru-RU', { day:'numeric', month:'long' }) + ' в ' + dt.toTimeString().slice(0, 5);
 
-  /* Хелпер: ищем оригинал вопроса в QUIZ_BANK по src */
-  const findQuestion = (src) => {
+  /* Хелпер: ищем оригинал вопроса в QUIZ_BANK по src + дополнительным признакам.
+     ВАЖНО: q.src — это часто collection-имя («Орфограмма НЕ», «ОБЗ ФИПИ · 2026»),
+     то есть НЕ уникально. Если по src нашлось несколько — сужаем по template
+     (inlineChoice), word (letterGap), тексту вопроса (q.q) или индексу. */
+  const findQuestion = (item) => {
+    /* Обратная совместимость: если передали строку — это старый src-only вариант. */
+    const src = typeof item === 'string' ? item : (item && item.src);
     if(!src) return null;
     const bank = QUIZ_BANK[taskN] || [];
-    return bank.find(q => q.src === src) || null;
+    const matches = bank.filter(q => q.src === src);
+    if(!matches.length) return null;
+    if(matches.length === 1) return matches[0];
+    /* Сужаем по template (inlineChoice — задание 13/14) */
+    if(item && typeof item === 'object'){
+      if(item.template){
+        const byT = matches.find(q => q.template === item.template);
+        if(byT) return byT;
+      }
+      if(item.word){
+        const byW = matches.find(q => q.word === item.word);
+        if(byW) return byW;
+      }
+      if(item.q){
+        const byQ = matches.find(q => q.q === item.q);
+        if(byQ) return byQ;
+      }
+    }
+    /* Сузить не удалось — возвращаем первый и логируем */
+    console.warn('[findQuestion] неоднозначный src «' + src + '» (' + matches.length + ' совпадений) — взяли первый');
+    return matches[0];
   };
 
   /* Форматирование пользовательского/правильного ответа */
@@ -13896,7 +13921,7 @@ function modalAttemptDetail(){
       'Детальные данные не сохранились (возможно старая попытка).'));
   } else {
     items.forEach((item, idx) => {
-      const q = findQuestion(item.src);
+      const q = findQuestion(item);
       const ok = !!item.ok;
       const card = el('div', { class:'card', style:{
         marginBottom:'10px',
