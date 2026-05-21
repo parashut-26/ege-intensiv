@@ -21820,6 +21820,7 @@ async function startSolvingVariant(variantId, opts){
   STATE.solverVariantId = variantId;
   STATE.solverData = null;
   STATE.solverAnswers = {};
+  STATE.solverChecked = {};   // { num: { points, max, correct, ts } } — мгновенная проверка
   STATE.solverResult = null;
   STATE.solverResultAttemptId = null;
   STATE.solverFinishedAt = null;
@@ -21836,6 +21837,7 @@ async function startSolvingVariant(variantId, opts){
       if(raw){
         const d = JSON.parse(raw);
         if(d.answers) STATE.solverAnswers = d.answers;
+        if(d.checked) STATE.solverChecked = d.checked;
         if(d.startedAt && !opts.parentAttemptId) STATE.solverStartedAt = d.startedAt;
       }
     } catch(_){}
@@ -21854,6 +21856,7 @@ function saveSolverDraft(){
   try {
     localStorage.setItem(draftKey, JSON.stringify({
       answers: STATE.solverAnswers,
+      checked: STATE.solverChecked || {},
       startedAt: STATE.solverStartedAt
     }));
   } catch(_){}
@@ -22091,16 +22094,28 @@ function viewSolverVariant(){
     const qText = el('div', { style:{ fontSize:'14px', lineHeight:'1.55', whiteSpace:'pre-wrap' }});
     qText.innerHTML = sanitizeQuestionHtml(q.question_text || '');
     card.append(qText);
+    /* Проверено ли уже это задание в текущей попытке? */
+    const checkedInfo = (STATE.solverChecked || {})[q.num] || null;
     /* Поле ответа */
     const input = el('input', { type:'text', value: STATE.solverAnswers[q.num] || '',
       placeholder:'Ваш ответ',
-      style:{ width:'100%', marginTop:'10px', padding:'10px 12px', border:'2px solid var(--border-2)', borderRadius:'10px', fontSize:'15px', fontWeight:'600', boxSizing:'border-box', fontFamily:'inherit' }
+      style:{ width:'100%', marginTop:'10px', padding:'10px 12px',
+              border:'2px solid ' + (checkedInfo
+                ? (checkedInfo.points >= checkedInfo.max ? 'var(--green)'
+                   : checkedInfo.points > 0 ? '#F59E0B' : 'var(--red)')
+                : 'var(--border-2)'),
+              borderRadius:'10px', fontSize:'15px', fontWeight:'600',
+              boxSizing:'border-box', fontFamily:'inherit',
+              background: checkedInfo ? '#FAFAFA' : '#fff' }
     });
+    if(checkedInfo) input.readOnly = true;   // ответ заперт после проверки
     input.oninput = () => {
       STATE.solverAnswers[q.num] = input.value;
       /* throttle сохранения — не чаще раз в секунду */
       if(STATE._solverSaveTimer) clearTimeout(STATE._solverSaveTimer);
       STATE._solverSaveTimer = setTimeout(saveSolverDraft, 800);
+      /* Сбросить состояние кнопки на «активна» если ответ ввели заново */
+      if(checkBtn) checkBtn.disabled = !input.value.trim();
     };
     card.append(input);
     /* Если у задания есть подсказка про текст — показать кнопку фокуса справа */
@@ -22109,6 +22124,60 @@ function viewSolverVariant(){
       card.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'4px' }},
         '📖 ' + src.title + ' — справа'));
     }
+    /* === МГНОВЕННАЯ ПРОВЕРКА ===
+       Кнопка «✓ Проверить» под полем ответа. Считается через тот же
+       calcQuestionPoints, что и финальная проверка пробника — поэтому
+       баллы совпадут с итоговыми. После клика результат показывается
+       блоком: верно/неверно, балл, правильный ответ (если ошибка). */
+    let checkBtn = null;
+    const resultBox = el('div');
+    const renderResult = (info) => {
+      resultBox.innerHTML = '';
+      if(!info) return;
+      const isCorrect = info.points >= info.max && info.max > 0;
+      const isPartial = info.points > 0 && !isCorrect;
+      const bg = isCorrect ? '#D1FAE5' : isPartial ? '#FEF3C7' : '#FEE2E2';
+      const fg = isCorrect ? '#065F46' : isPartial ? '#92400E' : '#991B1B';
+      const icon = isCorrect ? '✓ Верно' : isPartial ? '◐ Частично' : '✗ Ошибка';
+      const block = el('div', {
+        style:{ marginTop:'8px', padding:'10px 12px', background:bg, color:fg,
+                borderRadius:'8px', fontSize:'13px', lineHeight:'1.5' }
+      },
+        el('div', { style:{ fontWeight:'700', marginBottom:'4px' }},
+          icon + ' · ' + info.points + ' / ' + info.max + ' б'));
+      if(!isCorrect && info.correct){
+        block.append(el('div', { style:{ marginTop:'4px' }},
+          '✅ Правильный ответ: ',
+          el('span', { style:{ fontWeight:'700' }}, info.correct)));
+      }
+      resultBox.append(block);
+    };
+    if(checkedInfo) renderResult(checkedInfo);
+    checkBtn = el('button', {
+      class:'btn btn-secondary btn-sm',
+      style:{ marginTop:'8px', padding:'6px 14px', fontSize:'13px' },
+      disabled: checkedInfo || !(STATE.solverAnswers[q.num] || '').trim(),
+      onclick: () => {
+        const user = STATE.solverAnswers[q.num] || '';
+        const maxP = Number(q.max_points || 1);
+        const points = calcQuestionPoints(user, q.correct_answer || '', maxP, q.num);
+        const info = { points, max: maxP, correct: q.correct_answer || '' };
+        if(!STATE.solverChecked) STATE.solverChecked = {};
+        STATE.solverChecked[q.num] = info;
+        saveSolverDraft();
+        /* Не делаем render() — обновляем точечно, чтобы не ронять фокус
+           и не перерисовывать всю решалку (там может быть 26 карточек). */
+        renderResult(info);
+        input.readOnly = true;
+        input.style.borderColor = points >= maxP ? 'var(--green)'
+          : points > 0 ? '#F59E0B' : 'var(--red)';
+        input.style.background = '#FAFAFA';
+        checkBtn.disabled = true;
+        checkBtn.textContent = '✓ Проверено';
+      }
+    }, checkedInfo ? '✓ Проверено' : '✓ Проверить');
+    card.append(checkBtn);
+    card.append(resultBox);
     left.append(card);
   });
 
