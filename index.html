@@ -19510,32 +19510,35 @@ function parseVideoEmbed(raw){
   try { url = new URL(str); } catch(_) { return null; }
   const host = url.hostname.toLowerCase().replace(/^www\./, '');
 
+  /* Хелпер: классический «responsive 16:9 iframe» через padding-bottom 56.25%.
+     У iframe нет intrinsic-высоты, поэтому height:auto = 0 → плеер невидим.
+     Обёртка с padding-bottom задаёт высоту через ширину, iframe внутри
+     position:absolute растягивается на 100%×100% контейнера. */
+  function _wrapIframe(srcUrl, allow){
+    const wrapStyle = 'position:relative;width:100%;max-width:100%;padding-bottom:56.25%;height:0;margin:8px 0;background:#000;border-radius:8px;overflow:hidden;';
+    const iframeStyle = 'position:absolute;top:0;left:0;width:100%;height:100%;border:0;';
+    return '<div style="' + wrapStyle + '">' +
+           '<iframe src="' + srcUrl.replace(/"/g,'&quot;') +
+           '" frameborder="0" allow="' + allow + '" allowfullscreen' +
+           ' style="' + iframeStyle + '"></iframe>' +
+           '</div>';
+  }
+
   /* === Kinescope === */
   if(host === 'kinescope.io'){
-    /* https://kinescope.io/<id> или https://kinescope.io/embed/<id> */
     const m = url.pathname.match(/^\/(?:embed\/)?([A-Za-z0-9]+)/);
     if(!m) return null;
-    const id = m[1];
-    return '<iframe src="https://kinescope.io/embed/' + id +
-           '" width="100%" height="360" frameborder="0" allow="autoplay; fullscreen; picture-in-picture; encrypted-media;" allowfullscreen' +
-           ' style="aspect-ratio:16/9;width:100%;height:auto;max-width:100%;border:0;border-radius:8px;"></iframe>';
+    return _wrapIframe('https://kinescope.io/embed/' + m[1],
+      'autoplay; fullscreen; picture-in-picture; encrypted-media;');
   }
 
   /* === VK Видео === */
   if(host === 'vk.com' || host === 'vkvideo.ru' || host === 'm.vk.com'){
-    /* Возможные форматы:
-         /video12345_67890
-         /clip12345_67890
-         /video_ext.php?oid=...&id=...&hash=... (уже embed)
-         /video?z=video12345_67890
-    */
+    /* /video_ext.php — уже embed-ссылка */
     if(url.pathname === '/video_ext.php'){
-      /* уже embed-ссылка — берём как есть */
-      return '<iframe src="' + url.toString() +
-             '" width="100%" height="360" frameborder="0" allow="autoplay; encrypted-media; fullscreen; picture-in-picture; screen-wake-lock;" allowfullscreen' +
-             ' style="aspect-ratio:16/9;width:100%;height:auto;max-width:100%;border:0;border-radius:8px;"></iframe>';
+      return _wrapIframe(url.toString(),
+        'autoplay; encrypted-media; fullscreen; picture-in-picture; screen-wake-lock;');
     }
-    /* Извлекаем oid и id */
     let m = url.pathname.match(/^\/(?:video|clip)(-?\d+)_(\d+)/);
     if(!m){
       const z = url.searchParams.get('z') || '';
@@ -19543,20 +19546,17 @@ function parseVideoEmbed(raw){
     }
     if(!m) return null;
     const oid = m[1], vid = m[2];
-    /* hash требуется для приватных видео, для публичных можно без него,
-       но VK иногда отдаёт 403. Если в ссылке был hash — пробросим. */
     const hash = url.searchParams.get('hash') || '';
     const src = 'https://vk.com/video_ext.php?oid=' + oid + '&id=' + vid +
                 '&hd=2' + (hash ? '&hash=' + encodeURIComponent(hash) : '');
-    return '<iframe src="' + src +
-           '" width="100%" height="360" frameborder="0" allow="autoplay; encrypted-media; fullscreen; picture-in-picture;" allowfullscreen' +
-           ' style="aspect-ratio:16/9;width:100%;height:auto;max-width:100%;border:0;border-radius:8px;"></iframe>';
+    return _wrapIframe(src,
+      'autoplay; encrypted-media; fullscreen; picture-in-picture;');
   }
 
   /* === RuTube === */
   if(host === 'rutube.ru'){
-    /* /video/<id>/ , /video/private/<id>/?p=<token> , /play/embed/<id> */
-    let id = null, p = url.searchParams.get('p') || '';
+    let id = null;
+    const p = url.searchParams.get('p') || '';
     let m = url.pathname.match(/^\/play\/embed\/([A-Za-z0-9]+)/);
     if(m) id = m[1];
     if(!id){
@@ -19565,9 +19565,7 @@ function parseVideoEmbed(raw){
     }
     if(!id) return null;
     const src = 'https://rutube.ru/play/embed/' + id + (p ? '?p=' + encodeURIComponent(p) : '');
-    return '<iframe src="' + src +
-           '" width="100%" height="360" frameborder="0" allow="clipboard-write; autoplay" webkitAllowFullScreen mozallowfullscreen allowFullScreen' +
-           ' style="aspect-ratio:16/9;width:100%;height:auto;max-width:100%;border:0;border-radius:8px;"></iframe>';
+    return _wrapIframe(src, 'clipboard-write; autoplay; fullscreen');
   }
 
   return null;
@@ -20160,38 +20158,26 @@ function renderAddBlockForm(day, editingBlock, target){
       onclick: (ev) => { ev.preventDefault(); fn(); }
     }, label);
   };
-  /* Безопасная вставка HTML в contenteditable: ОБХОДИМ execCommand('insertHTML'),
-     потому что Chrome/Safari вырезают из вставляемого HTML <iframe>, <video>
-     и другие потенциально опасные теги. Делаем напрямую через Range API. */
+  /* Вставка HTML в contenteditable: ОБХОДИМ execCommand('insertHTML'),
+     потому что Chrome/Safari вырезают <iframe>, <video> и другие
+     «опасные» теги. Самый надёжный способ — просто appendChild в конец. */
   function insertVideoHtmlAtCursor(html){
-    bodyEditor.focus();
-    const sel = window.getSelection();
-    let range;
-    if(sel && sel.rangeCount && bodyEditor.contains(sel.anchorNode)){
-      range = sel.getRangeAt(0);
-      range.deleteContents();
-    } else {
-      /* Фокус ушёл из редактора (мы прокликали prompt) — вставим в конец. */
-      range = document.createRange();
-      range.selectNodeContents(bodyEditor);
-      range.collapse(false);
-    }
     const tmp = document.createElement('div');
     tmp.innerHTML = html;
-    const frag = document.createDocumentFragment();
-    let lastNode = null;
+    const added = [];
     while(tmp.firstChild){
-      lastNode = tmp.firstChild;
-      frag.appendChild(lastNode);
+      const node = tmp.firstChild;
+      bodyEditor.appendChild(node);
+      added.push(node);
     }
-    range.insertNode(frag);
-    if(lastNode && sel){
-      const after = document.createRange();
-      after.setStartAfter(lastNode);
-      after.collapse(true);
-      sel.removeAllRanges();
-      sel.addRange(after);
-    }
+    bodyEditor.focus();
+    /* Прокрутить, чтобы свежевставленное было видно */
+    try { added[added.length-1] && added[added.length-1].scrollIntoView({ block:'nearest' }); } catch(_){}
+    /* Диагностический лог — поможет если что-то снова не появится */
+    console.log('[video-insert] добавлено узлов:', added.length,
+      ' тегов:', added.map(n => (n.tagName || '#text')).join(','),
+      ' iframe в DOM:', !!bodyEditor.querySelector('iframe'),
+      ' video в DOM:',  !!bodyEditor.querySelector('video'));
   }
 
   /* Скрытый input для загрузки видео-файла прямо в Supabase Storage (бакет
