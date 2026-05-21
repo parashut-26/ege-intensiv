@@ -19518,14 +19518,14 @@ function parseVideoEmbed(raw){
      Обёртка с padding-bottom задаёт высоту через ширину, iframe внутри
      position:absolute растягивается на 100%×100% контейнера. */
   function _wrapIframe(srcUrl, allow){
-    /* aspect-ratio вместо padding-bottom: глобально box-sizing:border-box убивает старый трюк */
-    const wrapStyle = 'position:relative;width:100%;max-width:100%;aspect-ratio:16/9;margin:8px 0;background:#000;border-radius:8px;overflow:hidden;';
-    const iframeStyle = 'position:absolute;top:0;left:0;width:100%;height:100%;border:0;';
-    return '<div style="' + wrapStyle + '">' +
-           '<iframe src="' + srcUrl.replace(/"/g,'&quot;') +
+    /* aspect-ratio + display:block прямо на <iframe>. БЕЗ обёртки —
+       contenteditable иногда ломает aspect-ratio у div-обёртки.
+       min-height:200px — страховка на случай старого браузера. */
+    const iframeStyle = 'display:block;width:100%;max-width:100%;aspect-ratio:16/9;min-height:200px;' +
+                        'border:0;background:#000;border-radius:8px;margin:8px 0;';
+    return '<iframe src="' + srcUrl.replace(/"/g,'&quot;') +
            '" frameborder="0" allow="' + allow + '" allowfullscreen' +
-           ' style="' + iframeStyle + '"></iframe>' +
-           '</div>';
+           ' style="' + iframeStyle + '"></iframe>';
   }
 
   /* === Kinescope === */
@@ -20203,15 +20203,15 @@ function renderAddBlockForm(day, editingBlock, target){
         const url = await uploadLessonVideo(file);
         console.log('[video-insert] upload OK, URL:', url);
         const safe = url.replace(/"/g,'&quot;');
-        /* Обёртка с aspect-ratio:16/9 — иначе video без загруженных метаданных
-           схлопывается в 0 пикселей. ВАЖНО: глобально стоит box-sizing:border-box,
-           поэтому padding-bottom хак НЕ работает — нужно именно aspect-ratio. */
+        /* aspect-ratio + display:block прямо на <video>. БЕЗ обёртки —
+           contenteditable иногда ломает aspect-ratio у внутренних div'ов,
+           а на самом <video> работает железно. min-height:200px на всякий случай:
+           если aspect-ratio не сработает (очень старый браузер) — хотя бы видно. */
         const videoHtml =
-          '<div style="position:relative;width:100%;max-width:100%;aspect-ratio:16/9;margin:8px 0;background:#000;border-radius:8px;overflow:hidden;">' +
-            '<video src="' + safe + '" controls playsinline preload="metadata" ' +
-              'style="position:absolute;top:0;left:0;width:100%;height:100%;background:#000;">' +
-            '</video>' +
-          '</div><p><br></p>';
+          '<video src="' + safe + '" controls playsinline preload="metadata" ' +
+            'style="display:block;width:100%;max-width:100%;aspect-ratio:16/9;min-height:200px;' +
+            'background:#000;border-radius:8px;margin:8px 0;">' +
+          '</video><p><br></p>';
         const ph = bodyEditor.querySelector('[data-vid-uploading="1"]');
         console.log('[video-insert] плашка найдена:', !!ph);
         if(ph) ph.remove();
