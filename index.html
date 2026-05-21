@@ -10963,13 +10963,15 @@ function modalExamineQuestion(){
   } else {
     const q = STATE.examineQuestionData;
     /* === Исходный текст варианта ===
-       Задания 1-3 опираются на text_1_3, задания 22-26 — на text_22_26.
-       Показываем сверху раскрывающимся блоком (открытым по умолчанию),
-       чтобы ребёнок мог проанализировать ошибку с опорой на текст. */
+       Задания 1-3 опираются на text_1_3, задания 23-26 — на text_22_26
+       (имя поля legacy, но сейчас задание 22 в нём НЕ нуждается — оно
+       работает без большого исходного текста). Показываем сверху
+       раскрывающимся блоком (открытым по умолчанию), чтобы ребёнок мог
+       проанализировать ошибку с опорой на текст. */
     const sourceTexts = STATE.examineSourceTexts || {};
     let sourceKind = null;
     if(num >= 1 && num <= 3)  sourceKind = 'text_1_3';
-    else if(num >= 22 && num <= 26) sourceKind = 'text_22_26';
+    else if(num >= 23 && num <= 26) sourceKind = 'text_22_26';
     const sourceBody = sourceKind ? sourceTexts[sourceKind] : null;
     if(sourceBody){
       const srcBox = el('details', { style:{
@@ -10982,7 +10984,7 @@ function modalExamineQuestion(){
         el('summary', { style:{ cursor:'pointer', fontWeight:'700', color:'var(--ink-2)',
                                   fontSize:'11px', textTransform:'uppercase', letterSpacing:'.06em',
                                   marginBottom:'8px', listStyle:'none' }},
-          '📖 Исходный текст (' + (sourceKind === 'text_1_3' ? 'к заданиям 1-3' : 'к заданиям 22-26') + ') ▾'),
+          '📖 Исходный текст (' + (sourceKind === 'text_1_3' ? 'к заданиям 1-3' : 'к заданиям 23-26') + ') ▾'),
         el('div', { style:{ marginTop:'8px', whiteSpace:'pre-wrap' } }, sourceBody));
       body.append(srcBox);
     }
@@ -11272,6 +11274,22 @@ function studentVariantsCard(){
           el('div', null, ans && max > 0 ? (pts + '/' + max) : '—')));
       }
       cell.append(grid);
+
+      /* Позиция автора (задание 27) — короткая опорная запись ученика.
+         Лежит в test_variant_answers[27].user_answer, points=0/max=0.
+         Показываем, если есть, как отдельную плашку — учитель и сам
+         ученик видят, что было сформулировано. */
+      const ans27 = byA[a.id] && byA[a.id][27];
+      const pos27 = (ans27 && ans27.user_answer || '').trim();
+      if(pos27){
+        cell.append(el('div', { style:{ marginTop:'14px', padding:'10px 12px',
+          background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px' }},
+          el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
+                              textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'4px' }},
+            '🎯 Позиция автора (задание 27)'),
+          el('div', { style:{ fontSize:'13px', lineHeight:'1.5', whiteSpace:'pre-wrap',
+                              color:'var(--ink)' }}, pos27)));
+      }
 
       /* Сочинение К1-К10 */
       const review = row.essay && row.essay.review;
@@ -21907,6 +21925,19 @@ async function finishSolvingAndSave(){
     points: r.points,
     max_points: r.max,
   }));
+  /* Отдельно — позиция автора из задания 27 (если заполнена). Не влияет
+     на балл (points=0, max_points=0), но сохраняется как ответ, чтобы
+     ученик/учитель увидели её в разборе попытки. */
+  const authorPosition = (STATE.solverAnswers[27] || '').trim();
+  if(authorPosition){
+    answersPayload.push({
+      attempt_id: attemptId,
+      question_num: 27,
+      user_answer: authorPosition,
+      points: 0,
+      max_points: 0,
+    });
+  }
   if(answersPayload.length){
     try {
       await restRequest('POST', '/test_variant_answers', answersPayload, { prefer: 'return=minimal' });
@@ -22084,6 +22115,7 @@ function viewSolverVariant(){
   /* Карточка задания 27 — сочинение, необязательное к выполнению в решалке.
      Если у варианта есть текст для №27 — показываем большую жёлтую плашку:
      - Текст для сочинения
+     - Поле «Сформулируйте позицию автора» (короткая черновая опора для эссе)
      - Кнопка «Открыть редактор сочинения» (modalEssayDraft) */
   if(task27 && (task27.question_text || '').trim() && !filterNums){
     const ecard = el('div', { class:'card',
@@ -22108,6 +22140,36 @@ function viewSolverVariant(){
     const essayText = el('div', { style:{ fontSize:'13px', lineHeight:'1.55', whiteSpace:'pre-wrap', padding:'10px 12px', background:'#fff', borderRadius:'8px' }});
     essayText.innerHTML = sanitizeQuestionHtml(task27.question_text);
     ecard.append(essayText);
+
+    /* Поле «Позиция автора» — черновая опора для будущего сочинения.
+       Сохраняется в STATE.solverAnswers[27], автосохранение каждые 800мс.
+       На балл не влияет, но при разборе попытки учитель/ученик увидят
+       формулировку — полезно для рефлексии перед написанием полного
+       сочинения. */
+    const posBox = el('div', { style:{ marginTop:'12px', padding:'10px 12px',
+      background:'#fff', borderRadius:'8px', border:'1px dashed #FACC15' }});
+    posBox.append(
+      el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'4px' }},
+        '🎯 Сформулируйте позицию автора по данному тексту'),
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
+        'Короткая черновая запись — поможет, когда начнёшь писать сочинение. На балл не влияет, но учитель её увидит.'));
+    const posTa = el('textarea', {
+      rows: 3,
+      placeholder: 'Например: «Автор считает, что настоящая дружба не требует слов…»',
+      style:{ width:'100%', padding:'8px 10px', borderRadius:'8px',
+              border:'1px solid var(--border-2)', fontSize:'14px',
+              lineHeight:'1.5', boxSizing:'border-box', resize:'vertical',
+              fontFamily:'inherit' }
+    });
+    posTa.value = STATE.solverAnswers[27] || '';
+    posTa.oninput = () => {
+      STATE.solverAnswers[27] = posTa.value;
+      if(STATE._solverSaveTimer) clearTimeout(STATE._solverSaveTimer);
+      STATE._solverSaveTimer = setTimeout(saveSolverDraft, 800);
+    };
+    posBox.append(posTa);
+    ecard.append(posBox);
+
     left.append(ecard);
   }
 
@@ -22166,6 +22228,22 @@ function viewSolverResult(){
   /* Соответствие num → объект вопроса (нужен для пояснений) */
   const qByNum = {};
   (data.questions || []).forEach(q => { qByNum[q.num] = q; });
+
+  /* Позиция автора (задание 27, опорная заметка) — показываем отдельной
+     карточкой, если ученик её заполнил. На балл не влияет, но видна. */
+  const authorPos = (STATE.solverAnswers[27] || '').trim();
+  if(authorPos){
+    wrap.append(el('div', { class:'card',
+      style:{ marginTop:'12px', padding:'14px 18px', background:'#FFFDF7',
+              borderColor:'#FACC15' }},
+      el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)',
+                          textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'6px' }},
+        '🎯 Твоя позиция автора (задание 27)'),
+      el('div', { style:{ fontSize:'14px', lineHeight:'1.55', whiteSpace:'pre-wrap',
+                          color:'var(--ink)' }}, authorPos),
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'6px' }},
+        'Используй эту формулировку как опору, когда пойдёшь писать сочинение.')));
+  }
 
   /* Подробный список ошибок */
   const wrong = result.filter(r => !r.isCorrect);
