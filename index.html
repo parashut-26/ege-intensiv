@@ -19556,11 +19556,18 @@ function parseVideoEmbed(raw){
   function _wrapIframe(srcUrl, allow){
     /* aspect-ratio + display:block прямо на <iframe>. БЕЗ обёртки —
        contenteditable иногда ломает aspect-ratio у div-обёртки.
-       min-height:200px — страховка на случай старого браузера. */
+       min-height:200px — страховка на случай старого браузера.
+       webkitallowfullscreen + mozallowfullscreen — legacy-атрибуты для
+       старых WebKit/Gecko. Современный allowfullscreen + allow="fullscreen"
+       формально достаточны, но iOS Safari иногда упрямится и хочет
+       префиксные. Лучше дать все 4, никому не помешает. */
     const iframeStyle = 'display:block;width:100%;max-width:100%;aspect-ratio:16/9;min-height:200px;' +
                         'border:0;background:#000;border-radius:8px;margin:8px 0;';
+    /* Чистим trailing ';' из allow, если есть — некоторые парсеры на него ругаются */
+    const allowClean = String(allow || '').replace(/;\s*$/, '').trim();
     return '<iframe src="' + srcUrl.replace(/"/g,'&quot;') +
-           '" frameborder="0" allow="' + allow + '" allowfullscreen' +
+           '" frameborder="0" allow="' + allowClean +
+           '" allowfullscreen="true" webkitallowfullscreen="true" mozallowfullscreen="true"' +
            ' style="' + iframeStyle + '"></iframe>';
   }
 
