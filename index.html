@@ -22190,6 +22190,7 @@ async function startSolvingVariant(variantId, opts){
         if(d.answers) STATE.solverAnswers = d.answers;
         if(d.checked) STATE.solverChecked = d.checked;
         if(d.scratch) STATE.solverScratch = d.scratch;
+        if(d.dropdowns21) STATE.solverDropdowns21 = d.dropdowns21;
         if(d.liveAttemptId) STATE.liveAttemptId = d.liveAttemptId;
         if(d.startedAt && !opts.parentAttemptId) STATE.solverStartedAt = d.startedAt;
       }
@@ -22241,6 +22242,7 @@ function saveSolverDraft(){
       answers: STATE.solverAnswers,
       checked: STATE.solverChecked || {},
       scratch: STATE.solverScratch || {},
+      dropdowns21: STATE.solverDropdowns21 || {},
       liveAttemptId: STATE.liveAttemptId || null,
       startedAt: STATE.solverStartedAt
     }));
@@ -22316,6 +22318,153 @@ function clearSolverDraft(){
   const draftKey = 'zebrus_solver_' + STATE.solverVariantId +
     (STATE.solverParentAttemptId ? '_retry' + STATE.solverParentAttemptId : '');
   try { localStorage.removeItem(draftKey); } catch(_){}
+}
+
+/* === Задание 21: парсер предложений + UI выпадаек ===
+   Парсер находит в question_text нумерованные предложения «1) ... 2) ... ...»
+   и возвращает массив { num, text }. Если ничего не нашлось — fallback к
+   обычному <input>. */
+function parseTask21Sentences(questionText){
+  if(!questionText) return [];
+  const txt = String(questionText).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  /* Разделители: «1) текст 2) текст 3) ...» — берём 1-9 */
+  const parts = txt.split(/\s(?=[1-9]\)\s)/);
+  const sentences = [];
+  for(const p of parts){
+    const m = p.match(/^([1-9])\)\s*(.+)$/);
+    if(!m) continue;
+    sentences.push({ num: parseInt(m[1], 10), text: m[2].trim() });
+  }
+  return sentences.length >= 2 ? sentences : [];
+}
+
+/* Стандартные правила постановки знаков препинания для задания 21 ЕГЭ.
+   Это label-ы для dropdown'а. Ученик выбирает по одному на каждое предложение. */
+const RULES_21 = [
+  '— не выбрано',
+  'Тире между подлежащим и сказуемым',
+  'Тире в неполном предложении',
+  'Тире при обособленном приложении',
+  'Тире при прямой речи',
+  'Тире в БСП',
+  'Запятая при однородных членах',
+  'Запятая в сложносочинённом (ССП)',
+  'Запятая в сложноподчинённом (СПП)',
+  'Запятая в бессоюзном (БСП)',
+  'Запятая при обособленном определении',
+  'Запятая при обособленном обстоятельстве',
+  'Запятая при обособленном приложении',
+  'Запятая при вводных словах / обращении',
+  'Двоеточие в БСП',
+  'Двоеточие при обобщающем слове'
+];
+
+/* Рендер интерактивной UI для задания 21.
+   Возвращает { uiNode, getAnswer(), reflectAnswer(value), lock() }.
+   Если parseTask21Sentences не нашёл предложений — возвращает null
+   (вызывающий код использует обычный <input>). */
+function makeTask21Field(q){
+  const sentences = parseTask21Sentences(q.question_text);
+  if(!sentences.length) return null;
+  const num = q.num;
+
+  /* Восстанавливаем сохранённые выпадайки из STATE / draft */
+  if(!STATE.solverDropdowns21) STATE.solverDropdowns21 = {};
+  if(!STATE.solverDropdowns21[num]) STATE.solverDropdowns21[num] = {};
+  const picks = STATE.solverDropdowns21[num];  // { sentenceNum: ruleLabel }
+
+  const wrap = el('div', { style:{ marginTop:'10px',
+    padding:'10px 12px', background:'#F9FAFB',
+    border:'1px solid var(--border)', borderRadius:'10px' }},
+    el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
+                        marginBottom:'8px', textTransform:'uppercase', letterSpacing:'.06em' }},
+      '📌 Выбери правило для каждого предложения'));
+
+  /* Каждое предложение — строка с номером + dropdown справа */
+  sentences.forEach(sent => {
+    const sel = el('select', {
+      style:{ padding:'4px 8px', fontSize:'12px', borderRadius:'6px',
+              border:'1px solid var(--border-2)', minWidth:'200px',
+              fontFamily:'inherit', background:'#fff', cursor:'pointer',
+              maxWidth:'100%' },
+      onchange: (ev) => {
+        picks[sent.num] = ev.target.value;
+        saveSolverDraft();
+      }
+    });
+    RULES_21.forEach(rule => {
+      const opt = el('option', { value: rule }, rule);
+      sel.append(opt);
+    });
+    sel.value = picks[sent.num] || RULES_21[0];
+
+    const row = el('div', {
+      style:{ display:'flex', flexWrap:'wrap', gap:'8px', alignItems:'flex-start',
+              padding:'6px 0', borderTop:'1px dashed var(--border)' }
+    },
+      el('div', { style:{ minWidth:'24px', fontWeight:'700', color:'var(--p-deep)', fontSize:'13px' }},
+        sent.num + ')'),
+      el('div', { style:{ flex:'1 1 200px', minWidth:'150px', fontSize:'13px',
+                          lineHeight:'1.4', color:'var(--ink)' }}, sent.text),
+      el('div', { style:{ flexShrink:0 }}, sel));
+    wrap.append(row);
+  });
+
+  /* Внизу — селектор «целевого правила» + кнопка сформировать ответ.
+     Принцип: ученик выбирает, какое правило ему нужно сгруппировать
+     (например, «Тире в БСП» — найти все предложения с этим правилом).
+     Кнопка автозаполняет ответ номерами, где этот выбор стоит. */
+  const targetSel = el('select', {
+    style:{ padding:'4px 8px', fontSize:'13px', borderRadius:'6px',
+            border:'2px solid var(--p)', minWidth:'220px',
+            fontFamily:'inherit', background:'#fff', fontWeight:'700' }
+  });
+  RULES_21.forEach(rule => targetSel.append(el('option', { value: rule }, rule)));
+
+  /* Состояние «целевого правила» тоже сохраняем в picks под спец.ключом */
+  targetSel.value = picks._target || RULES_21[0];
+  targetSel.onchange = (ev) => {
+    picks._target = ev.target.value;
+    saveSolverDraft();
+  };
+
+  const genBtn = el('button', {
+    type:'button',
+    class:'btn btn-p btn-sm',
+    style:{ marginLeft:'8px', fontSize:'13px', fontWeight:'700' },
+    onclick: () => {
+      const target = targetSel.value;
+      if(!target || target === RULES_21[0]){
+        showToast('Сначала выбери целевое правило ↑');
+        return;
+      }
+      const matchedNums = sentences
+        .filter(s => picks[s.num] === target)
+        .map(s => s.num)
+        .sort((a,b) => a-b)
+        .join('');
+      /* dispatch — кладём в STATE.solverAnswers + обновляем UI ниже */
+      STATE.solverAnswers[num] = matchedNums;
+      saveSolverDraft();
+      /* перерисуем секцию ответа — проще всего через re-render всей страницы */
+      render();
+      showToast(matchedNums
+        ? '✓ Ответ сгенерирован: ' + matchedNums
+        : '⚠ Не выбрано ни одного предложения с этим правилом');
+    }
+  }, '📝 Сформировать ответ');
+
+  const footer = el('div', {
+    style:{ marginTop:'12px', paddingTop:'10px', borderTop:'2px solid var(--p-soft)',
+            display:'flex', flexWrap:'wrap', gap:'8px', alignItems:'center' }
+  },
+    el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', flexBasis:'100%', marginBottom:'4px' }},
+      '🎯 Какое правило ты ищешь в этом задании?'),
+    targetSel,
+    genBtn);
+  wrap.append(footer);
+
+  return wrap;
 }
 
 /* Завершение попытки: автопроверка + сохранение в БД */
@@ -22674,6 +22823,11 @@ function viewSolverVariant(){
        Ученик выделяет фрагменты, красит, подчёркивает, ставит скобки
        прямо внутри формулировки. Изменения сохраняются как scratch. */
     card.append(makeEditableQuestionText(q));
+    /* Для задания 21 — особый UI: dropdown'ы с правилами под каждым предложением */
+    if(q.num === 21){
+      const t21 = makeTask21Field(q);
+      if(t21) card.append(t21);
+    }
     /* Проверено ли уже это задание в текущей попытке? */
     const checkedInfo = (STATE.solverChecked || {})[q.num] || null;
     /* Поле ответа */
