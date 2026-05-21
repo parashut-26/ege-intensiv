@@ -22354,91 +22354,196 @@ function parseTask21Sentences(questionText){
   return sentences.length >= 2 ? sentences : [];
 }
 
-/* Стандартные правила постановки знаков препинания для задания 21 ЕГЭ.
-   Это label-ы для dropdown'а. Ученик выбирает по одному на каждое предложение. */
-const RULES_21 = [
-  '— не выбрано',
-  'Тире между подлежащим и сказуемым',
-  'Тире в неполном предложении',
-  'Тире при обособленном приложении',
-  'Тире при прямой речи',
-  'Тире в БСП',
-  'Запятая при однородных членах',
-  'Запятая в сложносочинённом (ССП)',
-  'Запятая в сложноподчинённом (СПП)',
-  'Запятая в бессоюзном (БСП)',
-  'Запятая при обособленном определении',
-  'Запятая при обособленном обстоятельстве',
-  'Запятая при обособленном приложении',
-  'Запятая при вводных словах / обращении',
-  'Двоеточие в БСП',
-  'Двоеточие при обобщающем слове'
+/* Правила постановки знаков препинания для задания 21 ЕГЭ.
+   Сгруппированы по знаку (запятая / тире / двоеточие), порядок и
+   формулировки — точно по списку Ольги (2026-05-22).
+   ВАЖНО: не объединяем «обращение» и «вводную конструкцию» — это разные
+   правила. */
+const RULES_21_NONE = '— не выбрано';
+const RULES_21_NO_MARK = 'Нет (знака препинания нет)';
+
+const RULES_21_COMMA = [
+  'Запятая в предложении с однородными членами',
+  'Запятая в сложносочинённом предложении',
+  'Запятая в сложноподчинённом предложении',
+  'Запятая в сложном бессоюзном предложении',
+  'Запятая в предложении с обособленным определением',
+  'Запятая в предложении с обособленным приложением',
+  'Запятая в предложении с обособленным обстоятельством',
+  'Запятая в предложении с обособленным дополнением',
+  'Запятая в предложении со сравнительным оборотом',
+  'Запятая в предложении с уточняющим обстоятельством',
+  'Запятая в предложении с обращением',
+  'Запятая в предложении с вводной конструкцией',
+  'Запятая в предложении с междометием',
+  'Запятая в предложении с прямой речью'
 ];
 
+const RULES_21_DASH = [
+  'Тире в бессоюзном сложном предложении',
+  'Тире в предложении с однородными членами и обобщающим словом',
+  'Тире в предложении с прямой речью',
+  'Тире между подлежащим и сказуемым',
+  'Тире в неполном предложении',
+  'Тире в предложении с обособленным приложением',
+  'Тире в предложении с вставной конструкцией'
+];
+
+const RULES_21_COLON = [
+  'Двоеточие в бессоюзном сложном предложении',
+  'Двоеточие в предложении с однородными членами и обобщающим словом',
+  'Двоеточие в предложении с прямой речью'
+];
+
+/* Все правила одним массивом (для fallback'а, если по формулировке не
+   удалось определить целевой знак). */
+const RULES_21_ALL = [...RULES_21_COMMA, ...RULES_21_DASH, ...RULES_21_COLON];
+
+/* По формулировке задания определяем, какие знаки в нём изучаются:
+   • если упомянуты только запятые — возвращаем comma + «Нет»
+   • только тире — dash + «Нет»
+   • только двоеточие — colon + «Нет»
+   • если несколько / непонятно — все правила + «Нет»
+   Первой опцией всегда «— не выбрано» (placeholder). */
+function getRules21ForTask(questionText){
+  const txt = String(questionText || '').toLowerCase();
+  const hasComma  = /запят/.test(txt);
+  const hasDash   = /тире/.test(txt);
+  const hasColon  = /двоеточи/.test(txt);
+  let pool = [];
+  if(hasComma && !hasDash && !hasColon) pool = RULES_21_COMMA;
+  else if(hasDash && !hasComma && !hasColon) pool = RULES_21_DASH;
+  else if(hasColon && !hasComma && !hasDash) pool = RULES_21_COLON;
+  else if(hasComma || hasDash || hasColon){
+    /* Несколько знаков — собираем выборочно */
+    if(hasComma) pool.push(...RULES_21_COMMA);
+    if(hasDash)  pool.push(...RULES_21_DASH);
+    if(hasColon) pool.push(...RULES_21_COLON);
+  }
+  if(!pool.length) pool = RULES_21_ALL;
+  return [RULES_21_NONE, RULES_21_NO_MARK, ...pool];
+}
+
+/* Legacy-обратная совместимость: некоторые места кода ещё используют RULES_21 */
+const RULES_21 = [RULES_21_NONE, RULES_21_NO_MARK, ...RULES_21_ALL];
+
 /* Рендер интерактивной UI для задания 21.
-   Возвращает { uiNode, getAnswer(), reflectAnswer(value), lock() }.
-   Если parseTask21Sentences не нашёл предложений — возвращает null
-   (вызывающий код использует обычный <input>). */
+   Каждое предложение может иметь НЕСКОЛЬКО выбранных правил (например,
+   и однородные члены, и сложное предложение, и вводное слово).
+   Возвращает узел или null (если предложения не распарсились). */
 function makeTask21Field(q){
   const sentences = parseTask21Sentences(q.question_text);
   if(!sentences.length) return null;
   const num = q.num;
 
-  /* Восстанавливаем сохранённые выпадайки из STATE / draft */
+  /* Список правил — фильтруем по знаку препинания, упомянутому в формулировке */
+  const rulesPool = getRules21ForTask(q.question_text);
+
+  /* Восстанавливаем сохранённые выпадайки из STATE / draft.
+     Формат: picks[sentenceNum] = ['Rule1', 'Rule2', ...] — массив.
+     Если в localStorage остался старый строковый формат, мигрируем. */
   if(!STATE.solverDropdowns21) STATE.solverDropdowns21 = {};
   if(!STATE.solverDropdowns21[num]) STATE.solverDropdowns21[num] = {};
-  const picks = STATE.solverDropdowns21[num];  // { sentenceNum: ruleLabel }
+  const picks = STATE.solverDropdowns21[num];
+  sentences.forEach(s => {
+    if(!Array.isArray(picks[s.num])){
+      if(typeof picks[s.num] === 'string' && picks[s.num] !== RULES_21_NONE){
+        picks[s.num] = [picks[s.num]];
+      } else {
+        picks[s.num] = [];
+      }
+    }
+  });
 
   const wrap = el('div', { style:{ marginTop:'10px',
     padding:'10px 12px', background:'#F9FAFB',
     border:'1px solid var(--border)', borderRadius:'10px' }},
     el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
-                        marginBottom:'8px', textTransform:'uppercase', letterSpacing:'.06em' }},
-      '📌 Выбери правило для каждого предложения'));
+                        marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }},
+      '📌 Выбери правило для каждого предложения'),
+    el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
+      'В одном предложении может быть несколько правил — добавляй через «+ Ещё правило».'));
 
-  /* Каждое предложение — строка с номером + dropdown справа */
+  /* Каждое предложение — строка с номером + блок dropdown'ов справа */
   sentences.forEach(sent => {
-    const sel = el('select', {
-      style:{ padding:'4px 8px', fontSize:'12px', borderRadius:'6px',
-              border:'1px solid var(--border-2)', minWidth:'200px',
-              fontFamily:'inherit', background:'#fff', cursor:'pointer',
-              maxWidth:'100%' },
-      onchange: (ev) => {
-        picks[sent.num] = ev.target.value;
-        saveSolverDraft();
-      }
+    const arr = picks[sent.num];
+    const sentDropdowns = el('div', {
+      style:{ display:'flex', flexDirection:'column', gap:'4px', flexShrink:0,
+              minWidth:'220px', maxWidth:'100%' }
     });
-    RULES_21.forEach(rule => {
-      const opt = el('option', { value: rule }, rule);
-      sel.append(opt);
-    });
-    sel.value = picks[sent.num] || RULES_21[0];
+    const renderRules = () => {
+      sentDropdowns.innerHTML = '';
+      arr.forEach((rule, idx) => {
+        const sel = el('select', {
+          style:{ padding:'4px 8px', fontSize:'12px', borderRadius:'6px',
+                  border:'1px solid var(--border-2)', flex:1,
+                  fontFamily:'inherit', background:'#fff', cursor:'pointer',
+                  maxWidth:'100%' },
+          onchange: (ev) => {
+            arr[idx] = ev.target.value;
+            saveSolverDraft();
+          }
+        });
+        rulesPool.forEach(r => sel.append(el('option', { value: r }, r)));
+        sel.value = rule;
+        const removeBtn = el('button', {
+          type:'button',
+          title:'Убрать это правило',
+          style:{ padding:'4px 8px', fontSize:'13px', cursor:'pointer',
+                  background:'#FEE2E2', border:'1px solid #FCA5A5',
+                  borderRadius:'4px', color:'#991B1B', fontWeight:'700',
+                  fontFamily:'inherit', flexShrink:0 },
+          onclick: () => {
+            arr.splice(idx, 1);
+            saveSolverDraft();
+            renderRules();
+          }
+        }, '×');
+        sentDropdowns.append(el('div', {
+          style:{ display:'flex', gap:'4px', alignItems:'center' }
+        }, sel, removeBtn));
+      });
+      /* Кнопка добавить ещё одно правило */
+      const addBtn = el('button', {
+        type:'button',
+        style:{ padding:'4px 10px', fontSize:'12px', cursor:'pointer',
+                background:'#EFF6FF', border:'1px dashed #93C5FD',
+                borderRadius:'4px', color:'#1E40AF', fontWeight:'700',
+                fontFamily:'inherit', alignSelf:'flex-start' },
+        onclick: () => {
+          /* По дефолту берём «Нет знака» — самый нейтральный вариант */
+          arr.push(RULES_21_NO_MARK);
+          saveSolverDraft();
+          renderRules();
+        }
+      }, '+ Ещё правило');
+      sentDropdowns.append(addBtn);
+    };
+    renderRules();
 
     const row = el('div', {
       style:{ display:'flex', flexWrap:'wrap', gap:'8px', alignItems:'flex-start',
-              padding:'6px 0', borderTop:'1px dashed var(--border)' }
+              padding:'8px 0', borderTop:'1px dashed var(--border)' }
     },
       el('div', { style:{ minWidth:'24px', fontWeight:'700', color:'var(--p-deep)', fontSize:'13px' }},
         sent.num + ')'),
       el('div', { style:{ flex:'1 1 200px', minWidth:'150px', fontSize:'13px',
                           lineHeight:'1.4', color:'var(--ink)' }}, sent.text),
-      el('div', { style:{ flexShrink:0 }}, sel));
+      sentDropdowns);
     wrap.append(row);
   });
 
   /* Внизу — селектор «целевого правила» + кнопка сформировать ответ.
-     Принцип: ученик выбирает, какое правило ему нужно сгруппировать
-     (например, «Тире в БСП» — найти все предложения с этим правилом).
-     Кнопка автозаполняет ответ номерами, где этот выбор стоит. */
+     Принцип: ученик выбирает, какое правило ему нужно сгруппировать.
+     Кнопка собирает номера предложений, в которых это правило ХОТЯ БЫ
+     ОДИН РАЗ встречается среди выбранных. */
   const targetSel = el('select', {
     style:{ padding:'4px 8px', fontSize:'13px', borderRadius:'6px',
             border:'2px solid var(--p)', minWidth:'220px',
             fontFamily:'inherit', background:'#fff', fontWeight:'700' }
   });
-  RULES_21.forEach(rule => targetSel.append(el('option', { value: rule }, rule)));
-
-  /* Состояние «целевого правила» тоже сохраняем в picks под спец.ключом */
-  targetSel.value = picks._target || RULES_21[0];
+  rulesPool.forEach(rule => targetSel.append(el('option', { value: rule }, rule)));
+  targetSel.value = picks._target || RULES_21_NONE;
   targetSel.onchange = (ev) => {
     picks._target = ev.target.value;
     saveSolverDraft();
@@ -22450,19 +22555,17 @@ function makeTask21Field(q){
     style:{ marginLeft:'8px', fontSize:'13px', fontWeight:'700' },
     onclick: () => {
       const target = targetSel.value;
-      if(!target || target === RULES_21[0]){
-        showToast('Сначала выбери целевое правило ↑');
+      if(!target || target === RULES_21_NONE || target === RULES_21_NO_MARK){
+        showToast('Сначала выбери целевое правило ↑ (не «Нет»)');
         return;
       }
       const matchedNums = sentences
-        .filter(s => picks[s.num] === target)
+        .filter(s => Array.isArray(picks[s.num]) && picks[s.num].includes(target))
         .map(s => s.num)
         .sort((a,b) => a-b)
         .join('');
-      /* dispatch — кладём в STATE.solverAnswers + обновляем UI ниже */
       STATE.solverAnswers[num] = matchedNums;
       saveSolverDraft();
-      /* перерисуем секцию ответа — проще всего через re-render всей страницы */
       render();
       showToast(matchedNums
         ? '✓ Ответ сгенерирован: ' + matchedNums
