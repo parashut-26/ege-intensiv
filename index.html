@@ -18984,6 +18984,12 @@ function postProcessTaskText(text){
   t = t.replace(/(\S)\s+(\d\))\s+/g, '$1\n$2 ');
   t = t.replace(/(\S)\s+([АБВГДЕ]\))\s+/g, '$1\n$2 ');
   t = t.replace(/(\S)\s+(ГРАММАТИЧЕСКИЕ\s+ОШИБКИ|ПРЕДЛОЖЕНИЯ)\s+/g, '$1\n$2\n');
+  /* 3. Между предложениями (точка + пробел + ЗАГЛАВНАЯ) — двойной перенос строки.
+     Это убивает «простыни» в формулировках типа задания 5: инструкция и 5 фраз
+     с паронимами больше не сливаются в один абзац, а идут раздельно. */
+  t = t.replace(/([.!?])\s+([А-ЯЁ])/g, '$1\n\n$2');
+  /* Сжимаем больше двух переносов до двух */
+  t = t.replace(/\n{3,}/g, '\n\n');
   return t.trim();
 }
 
@@ -18998,9 +19004,35 @@ function postProcessTaskTextDocx(text){
   t = t.replace(/(\S)\s+(\d\))\s+/g, '$1\n$2 ');
   t = t.replace(/(\S)\s+([АБВГДЕ]\))\s+/g, '$1\n$2 ');
   t = t.replace(/(\S)\s+(ГРАММАТИЧЕСКИЕ\s+ОШИБКИ|ПРЕДЛОЖЕНИЯ)\s+/g, '$1\n$2\n');
+  /* Между предложениями — двойной перенос (см. PDF-вариант выше) */
+  t = t.replace(/([.!?])\s+([А-ЯЁ])/g, '$1\n\n$2');
   /* Сжимаем пустые строки */
   t = t.replace(/\n{3,}/g, '\n\n');
   return t.trim();
+}
+
+/* Нормализуем разделители альтернативных правильных ответов.
+   Источники бывают разные:
+     • Word: «вследствие<или>ввиду» — markdown-разметка автора
+     • Word: «вследствие или ввиду» — обычный текст
+     • PDF:  «вследствие/ввиду» — уже норм
+   Платформа понимает только формат «слово1/слово2», поэтому конвертим всё. */
+function normalizeAnswerKey(ans){
+  if(!ans) return ans;
+  let s = String(ans);
+  /* 1. Markdown-разметка <или> → / */
+  s = s.replace(/<или>/gi, '/');
+  /* 2. Текстовое «слово или слово» → «слово/слово», но только когда с обеих
+     сторон одно слово (избегаем фраз типа «помощь или поддержка ученика»,
+     где «или» — часть нормального текста). Если в значении вообще нет
+     пробелов вокруг «или», или ответ короткий (до 30 символов) — считаем
+     это разделителем альтернатив. */
+  if(s.length <= 60 && /\sили\s/i.test(s)){
+    s = s.replace(/\s+или\s+/gi, '/');
+  }
+  /* 3. Нормализуем пробелы вокруг «/» */
+  s = s.replace(/\s*\/\s*/g, '/').replace(/\s+/g, ' ').trim();
+  return s;
 }
 
 /* Мягкая нормализация для исходного текста (рассказ для заданий 22-26):
@@ -19190,7 +19222,7 @@ async function parseKeysDocx(arrayBuffer){
           if(cells.length < 2) continue;
           const n = parseInt(cells[0], 10);
           if(isNaN(n) || n < 1 || n > 26) continue;
-          const ans = cells[1].replace(/\s+/g, ' ').trim();
+          const ans = normalizeAnswerKey(cells[1]);
           if(ans) keys[currentVariant].answers[n] = ans;
         }
         continue;
@@ -19201,7 +19233,7 @@ async function parseKeysDocx(arrayBuffer){
         if(ml){
           const n = parseInt(ml[1], 10);
           if(n >= 1 && n <= 26){
-            const ans = ml[2].replace(/\s+(Примерный|Авторская|\d\)\s+Проблема).*$/i, '').trim();
+            const ans = normalizeAnswerKey(ml[2].replace(/\s+(Примерный|Авторская|\d\)\s+Проблема).*$/i, ''));
             keys[currentVariant].answers[n] = ans;
             continue;
           }
@@ -19261,7 +19293,9 @@ async function parseKeysPdf(arrayBuffer){
       if(n < 1 || n > 26) continue;
       let ans = m[2].trim();
       /* Если в ответ всё же затесался лишний хвост от 27-задания — обрезаем */
-      ans = ans.replace(/\s+(Примерный|Авторская|\d\)\s+Проблема).*$/i, '').trim();
+      ans = ans.replace(/\s+(Примерный|Авторская|\d\)\s+Проблема).*$/i, '');
+      /* Нормализуем разделители альтернатив (<или>, «слово или слово» → /) */
+      ans = normalizeAnswerKey(ans);
       keys[var_num].answers[n] = ans;
     }
   }
