@@ -11396,7 +11396,36 @@ function studentVariantsCard(){
     return card;
   }
 
-  /* Доступные для решения варианты — те где есть вопросы (pdf_import) и нет моей попытки */
+  /* === Незавершённые попытки ===
+     Если у ученика есть live-попытка (finished_at=null), показываем большую
+     жёлтую плашку «Продолжить пробник» вверху. Её клик возвращает в решалку
+     с восстановлением черновика из localStorage. */
+  const liveAtts = (STATE.myVariantAttempts || []).filter(a => a.started_at && !a.finished_at);
+  liveAtts.forEach(a => {
+    const v = a.variant || {};
+    availableBlock.append(el('div', {
+      style:{ marginBottom:'14px', padding:'14px 16px',
+              background:'linear-gradient(135deg, #FFFBEB, #FCD34D)',
+              border:'2px solid #F59E0B', borderRadius:'12px',
+              display:'flex', justifyContent:'space-between', alignItems:'center',
+              gap:'12px', flexWrap:'wrap' }
+    },
+      el('div', { style:{ minWidth:0, flex:1 }},
+        el('div', { style:{ fontSize:'11px', color:'#92400E', textTransform:'uppercase',
+                            letterSpacing:'.06em', fontWeight:'700' }},
+          '🟡 Пробник в процессе'),
+        el('div', { style:{ fontSize:'15px', fontWeight:'800', marginTop:'4px' }},
+          v.title || 'Вариант'),
+        el('div', { style:{ fontSize:'12px', color:'#92400E', marginTop:'2px' }},
+          'Ты начал этот пробник, но не закончил. Нажми «Продолжить», чтобы дорешать с того же места.')),
+      el('button', { class:'btn btn-y',
+        style:{ background:'#F59E0B', borderColor:'#D97706', color:'#fff', fontWeight:'700', flexShrink:0 },
+        onclick: () => { startSolvingVariant(v.id); }
+      }, '▶ Продолжить')));
+  });
+
+  /* Доступные для решения варианты — те где есть вопросы (pdf_import) и нет моей попытки.
+     ВАЖНО: исключаем и завершённые, и live-попытки — последние уже показаны выше как «Продолжить». */
   const triedIds = new Set((STATE.myVariantAttempts || []).map(a => a.variant_id));
   const available = (STATE.availableVariants || []).filter(v => !triedIds.has(v.id));
   if(available.length){
@@ -11413,11 +11442,17 @@ function studentVariantsCard(){
           }, '▶ Начать'))))));
   }
 
-  const atts = STATE.myVariantAttempts || [];
+  /* Live-попытки уже отрендерены отдельной плашкой выше — здесь показываем
+     только завершённые. Иначе ученик может развернуть live-карточку и увидеть
+     правильные ответы, что ломает идею решения пробника от начала до конца. */
+  const allAtts = STATE.myVariantAttempts || [];
+  const atts = allAtts.filter(a => !(a.started_at && !a.finished_at));
   const byA = STATE.myVariantAnswers || {};
   if(!atts.length){
-    list.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'10px 0', textAlign:'center' }},
-      'Пока нет результатов. Когда учитель загрузит сводную по пробнику и привяжет тебя — увидишь здесь.'));
+    if(!liveAtts.length){
+      list.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'10px 0', textAlign:'center' }},
+        'Пока нет результатов. Когда учитель загрузит сводную по пробнику и привяжет тебя — увидишь здесь.'));
+    }
     return card;
   }
 
@@ -22098,6 +22133,36 @@ async function startSolvingVariant(variantId, opts){
         if(d.startedAt && !opts.parentAttemptId) STATE.solverStartedAt = d.startedAt;
       }
     } catch(_){}
+    /* Если черновика нет, но в БД есть незавершённая попытка для этого варианта —
+       подцепляемся к ней (например, ученик чистил кеш или сменил устройство).
+       Подгружаем уже проверенные ответы из БД, чтобы восстановить состояние. */
+    if(!STATE.liveAttemptId && Array.isArray(STATE.myVariantAttempts)){
+      const liveDb = STATE.myVariantAttempts.find(a =>
+        a.variant_id === variantId && a.started_at && !a.finished_at
+        && (!opts.parentAttemptId || a.parent_attempt_id === opts.parentAttemptId)
+      );
+      if(liveDb){
+        STATE.liveAttemptId = liveDb.id;
+        if(liveDb.started_at) STATE.solverStartedAt = new Date(liveDb.started_at).getTime();
+        /* Подтягиваем сохранённые в БД ответы */
+        try {
+          const answers = await restRequest('GET',
+            '/test_variant_answers?attempt_id=eq.' + liveDb.id +
+            '&select=question_num,user_answer,points,max_points');
+          (answers || []).forEach(a => {
+            if(a.user_answer != null){
+              STATE.solverAnswers[a.question_num] = a.user_answer;
+              STATE.solverChecked[a.question_num] = {
+                points: Number(a.points) || 0,
+                max: Number(a.max_points) || 0,
+                correct: ''  // правильный ответ заберём из q.correct_answer при рендере
+              };
+            }
+          });
+          saveSolverDraft();
+        } catch(e){ console.warn('[live resume] load answers fail:', e.message); }
+      }
+    }
   } catch(e){
     showToast('⚠ ' + e.message);
     STATE.solverVariantId = null;
