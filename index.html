@@ -22195,6 +22195,8 @@ async function startSolvingVariant(variantId, opts){
         if(d.scratch) STATE.solverScratch = d.scratch;
         if(d.dropdowns21) STATE.solverDropdowns21 = d.dropdowns21;
         if(d.matching22) STATE.solverMatching22 = d.matching22;
+        if(d.checks16) STATE.solverChecks16 = d.checks16;
+        if(d.gaps) STATE.solverGaps = d.gaps;
         if(d.liveAttemptId) STATE.liveAttemptId = d.liveAttemptId;
         if(d.startedAt && !opts.parentAttemptId) STATE.solverStartedAt = d.startedAt;
       }
@@ -22248,6 +22250,8 @@ function saveSolverDraft(){
       scratch: STATE.solverScratch || {},
       dropdowns21: STATE.solverDropdowns21 || {},
       matching22: STATE.solverMatching22 || {},
+      checks16: STATE.solverChecks16 || {},
+      gaps: STATE.solverGaps || {},
       liveAttemptId: STATE.liveAttemptId || null,
       startedAt: STATE.solverStartedAt
     }));
@@ -22700,6 +22704,161 @@ function makeTask22Field(q){
       saveSolverDraft();
       render();
       showToast('✓ Ответ сгенерирован: ' + result);
+    }
+  }, '📝 Сформировать ответ');
+  wrap.append(genBtn);
+
+  return wrap;
+}
+
+/* === Задание 16: «Укажите предложения с одной запятой» ===
+   5 нумерованных предложений, рядом с каждым — чекбокс. Ученик отмечает
+   предложения, в которых нужна одна запятая. Кнопка собирает ответ из
+   отмеченных номеров. */
+function makeTask16Field(q){
+  const sentences = parseTask21Sentences(q.question_text);
+  if(!sentences.length) return null;
+  const num = q.num;
+
+  if(!STATE.solverChecks16) STATE.solverChecks16 = {};
+  if(!STATE.solverChecks16[num]) STATE.solverChecks16[num] = {};
+  const picks = STATE.solverChecks16[num];
+
+  const wrap = el('div', { style:{ marginTop:'10px',
+    padding:'10px 12px', background:'#F9FAFB',
+    border:'1px solid var(--border)', borderRadius:'10px' }},
+    el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
+                        marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }},
+      '📌 Отметь предложения с одной запятой'),
+    el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
+      'Расставь запятые мысленно. Отметь галочкой только те, где запятая ровно ОДНА.'));
+
+  sentences.forEach(sent => {
+    const cb = el('input', {
+      type:'checkbox',
+      checked: !!picks[sent.num],
+      style:{ width:'18px', height:'18px', cursor:'pointer', flexShrink:0 },
+      onchange: (ev) => {
+        if(ev.target.checked) picks[sent.num] = true;
+        else delete picks[sent.num];
+        saveSolverDraft();
+      }
+    });
+    const row = el('label', {
+      style:{ display:'flex', flexWrap:'wrap', gap:'8px', alignItems:'flex-start',
+              padding:'8px 0', borderTop:'1px dashed var(--border)', cursor:'pointer' }
+    },
+      cb,
+      el('div', { style:{ minWidth:'24px', fontWeight:'700', color:'var(--p-deep)', fontSize:'13px' }},
+        sent.num + ')'),
+      el('div', { style:{ flex:'1 1 200px', minWidth:'150px', fontSize:'13px',
+                          lineHeight:'1.4', color:'var(--ink)' }}, sent.text));
+    wrap.append(row);
+  });
+
+  const genBtn = el('button', {
+    type:'button',
+    class:'btn btn-p btn-sm',
+    style:{ marginTop:'12px', fontSize:'13px', fontWeight:'700' },
+    onclick: () => {
+      const result = Object.keys(picks)
+        .map(Number)
+        .filter(n => picks[n])
+        .sort((a,b) => a-b)
+        .join('');
+      STATE.solverAnswers[num] = result;
+      saveSolverDraft();
+      render();
+      showToast(result
+        ? '✓ Ответ сгенерирован: ' + result
+        : '⚠ Не отмечено ни одного предложения');
+    }
+  }, '📝 Сформировать ответ');
+  wrap.append(genBtn);
+
+  return wrap;
+}
+
+/* === Задания 17-20: «Расставь запятые на месте цифр» ===
+   В формулировке есть метки (1), (2), (3) и т.д. — ставится цифра, где
+   потенциально может стоять запятая. Ученик жмёт на номера тех мест, где
+   запятая нужна. Кнопка собирает ответ как сортированную строку цифр. */
+function parseTask17_20Gaps(questionText){
+  if(!questionText) return [];
+  const txt = String(questionText).replace(/<[^>]+>/g, ' ');
+  const matches = [...txt.matchAll(/\((\d{1,2})\)/g)];
+  /* Удаляем дубликаты с сохранением порядка */
+  const seen = new Set();
+  const result = [];
+  for(const m of matches){
+    const n = parseInt(m[1], 10);
+    if(!seen.has(n)){ seen.add(n); result.push(n); }
+  }
+  return result;
+}
+
+function makeTasks17_20Field(q){
+  const gaps = parseTask17_20Gaps(q.question_text);
+  if(gaps.length < 2) return null;
+  const num = q.num;
+
+  if(!STATE.solverGaps) STATE.solverGaps = {};
+  if(!STATE.solverGaps[num]) STATE.solverGaps[num] = {};
+  const picks = STATE.solverGaps[num];
+
+  const wrap = el('div', { style:{ marginTop:'10px',
+    padding:'10px 12px', background:'#F9FAFB',
+    border:'1px solid var(--border)', borderRadius:'10px' }},
+    el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
+                        marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }},
+      '📌 Нажми на цифры, где должна стоять запятая'),
+    el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
+      'В тексте задания цифры (1), (2), ... отмечают потенциальные места запятых. ' +
+      'Жми на цифру, чтобы пометить — там нужна запятая.'));
+
+  const btnsRow = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'6px',
+    padding:'8px 0' }});
+  const renderBtns = () => {
+    btnsRow.innerHTML = '';
+    gaps.forEach(n => {
+      const isPicked = !!picks[n];
+      const btn = el('button', {
+        type:'button',
+        style:{ padding:'8px 14px', fontSize:'15px', fontWeight:'700',
+                cursor:'pointer', borderRadius:'8px',
+                border:'2px solid ' + (isPicked ? '#16A34A' : 'var(--border-2)'),
+                background: isPicked ? '#D1FAE5' : '#fff',
+                color: isPicked ? '#065F46' : 'var(--ink)',
+                fontFamily:'inherit', minWidth:'48px' },
+        onclick: () => {
+          if(picks[n]) delete picks[n];
+          else picks[n] = true;
+          saveSolverDraft();
+          renderBtns();
+        }
+      }, isPicked ? '✓ ' + n : String(n));
+      btnsRow.append(btn);
+    });
+  };
+  renderBtns();
+  wrap.append(btnsRow);
+
+  const genBtn = el('button', {
+    type:'button',
+    class:'btn btn-p btn-sm',
+    style:{ marginTop:'8px', fontSize:'13px', fontWeight:'700' },
+    onclick: () => {
+      const result = Object.keys(picks)
+        .map(Number)
+        .filter(n => picks[n])
+        .sort((a,b) => a-b)
+        .join('');
+      STATE.solverAnswers[num] = result;
+      saveSolverDraft();
+      render();
+      showToast(result
+        ? '✓ Ответ сгенерирован: ' + result
+        : '⚠ Не выбрано ни одной позиции');
     }
   }, '📝 Сформировать ответ');
   wrap.append(genBtn);
@@ -23241,6 +23400,16 @@ function viewSolverVariant(){
     if(q.num === 22){
       const t22 = makeTask22Field(q);
       if(t22) card.append(t22);
+    }
+    /* Задание 16 — чекбоксы «одна запятая» рядом с каждым из 5 предложений */
+    if(q.num === 16){
+      const t16 = makeTask16Field(q);
+      if(t16) card.append(t16);
+    }
+    /* Задания 17-20 — кнопки-цифры для расстановки запятых в одном предложении */
+    if(q.num >= 17 && q.num <= 20){
+      const tField = makeTasks17_20Field(q);
+      if(tField) card.append(tField);
     }
     /* Проверено ли уже это задание в текущей попытке? */
     const checkedInfo = (STATE.solverChecked || {})[q.num] || null;
