@@ -19761,6 +19761,18 @@ async function reactWarmupPost(blockId, emoji){
    иначе основной view. Используется в addComment/deleteComment/polling,
    чтобы ученик в полноэкранном дне тоже видел свежие комментарии. */
 function rerenderPostsView(){
+  /* ВАЖНО: если сейчас открыт редактор поста (учитель пишет или правит) —
+     НЕ перерисовываем. Иначе на каждый 12-секундный poll сбрасывается
+     bodyEditor (contenteditable), и пользователь теряет вставленное видео,
+     iframe, форматирование, выделение и т.д. Картинки переживают, потому
+     что лежат в STATE.images, а HTML-тело живёт только в DOM. После
+     save/cancel редактор закрывается, и render() произойдёт штатно. */
+  if(STATE.editingBlockId != null ||
+     STATE.addingPostToDayId != null ||
+     STATE.addingPostToIntensiveOrd != null){
+    console.log('[polling] пропускаем rerender — открыт редактор поста');
+    return;
+  }
   if(STATE.openWarmupDayId != null){
     const day = (STATE.warmupDays || []).find(d => d.id === STATE.openWarmupDayId);
     if(day){ renderWarmupOverlay(day); return; }
