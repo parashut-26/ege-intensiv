@@ -20159,25 +20159,18 @@ function renderAddBlockForm(day, editingBlock, target){
     }, label);
   };
   /* Вставка HTML в contenteditable: ОБХОДИМ execCommand('insertHTML'),
-     потому что Chrome/Safari вырезают <iframe>, <video> и другие
-     «опасные» теги. Самый надёжный способ — просто appendChild в конец. */
+     потому что Chrome/Safari вырезают <iframe>, <video> и другие «опасные»
+     теги. insertAdjacentHTML — стандартный DOM API, парсит и вставляет как есть. */
   function insertVideoHtmlAtCursor(html){
-    const tmp = document.createElement('div');
-    tmp.innerHTML = html;
-    const added = [];
-    while(tmp.firstChild){
-      const node = tmp.firstChild;
-      bodyEditor.appendChild(node);
-      added.push(node);
-    }
+    const before = bodyEditor.innerHTML.length;
+    bodyEditor.insertAdjacentHTML('beforeend', html);
     bodyEditor.focus();
-    /* Прокрутить, чтобы свежевставленное было видно */
-    try { added[added.length-1] && added[added.length-1].scrollIntoView({ block:'nearest' }); } catch(_){}
-    /* Диагностический лог — поможет если что-то снова не появится */
-    console.log('[video-insert] добавлено узлов:', added.length,
-      ' тегов:', added.map(n => (n.tagName || '#text')).join(','),
-      ' iframe в DOM:', !!bodyEditor.querySelector('iframe'),
-      ' video в DOM:',  !!bodyEditor.querySelector('video'));
+    try { bodyEditor.scrollTop = bodyEditor.scrollHeight; } catch(_){}
+    console.log('[video-insert] вставка:',
+      'было', before, '→ стало', bodyEditor.innerHTML.length,
+      '| iframe:', !!bodyEditor.querySelector('iframe'),
+      '| video:',  !!bodyEditor.querySelector('video'),
+      '| HTML-фрагмент:', html.slice(0, 120) + '...');
   }
 
   /* Скрытый input для загрузки видео-файла прямо в Supabase Storage (бакет
@@ -20194,17 +20187,17 @@ function renderAddBlockForm(day, editingBlock, target){
       insertVideoHtmlAtCursor(phHtml);
       try {
         const url = await uploadLessonVideo(file);
+        console.log('[video-insert] upload OK, URL:', url);
         const safe = url.replace(/"/g,'&quot;');
         const videoHtml = '<div><video src="' + safe +
           '" controls playsinline preload="metadata" style="width:100%;max-width:100%;border-radius:8px;background:#000;"></video></div><p><br></p>';
         const ph = bodyEditor.querySelector('[data-vid-uploading="1"]');
-        if(ph){
-          const wrap = document.createElement('div');
-          wrap.innerHTML = videoHtml;
-          ph.replaceWith(...wrap.childNodes);
-        } else {
-          insertVideoHtmlAtCursor(videoHtml);
-        }
+        console.log('[video-insert] плашка найдена:', !!ph);
+        if(ph) ph.remove();
+        /* Всегда вставляем через insertAdjacentHTML — единый надёжный путь */
+        insertVideoHtmlAtCursor(videoHtml);
+        console.log('[video-insert] финал innerHTML (хвост):',
+          bodyEditor.innerHTML.slice(-300));
         showToast('🎬 Видео добавлено');
       } catch(e){
         console.error('uploadLessonVideo', e);
