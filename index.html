@@ -549,6 +549,114 @@ try {
 /* Текущий профиль — заполняется после входа */
 let MY_PROFILE = null;
 
+/* ============================================================
+   PERSIST ПРОГРЕССА ТРЕНАЖЁРА В localStorage
+   Мобильный браузер при переключении вкладки/звонке выгружает
+   страницу из памяти, и STATE.testAnswers (вся попытка) теряется.
+   Сохраняем после каждого рендера тренажёра и при уходе в фон,
+   восстанавливаем при следующей загрузке. Очищаем после saveAttempt.
+   Ключ привязан к profile.id — на одном устройстве разные ученики
+   не пересекаются. TTL 6 часов (после уже мусор).
+   ============================================================ */
+const TEST_PROGRESS_TTL_MS = 6 * 60 * 60 * 1000;  // 6 часов
+function _testProgressKey(){
+  const uid = (MY_PROFILE && MY_PROFILE.id) ? MY_PROFILE.id : 'anon';
+  return 'zebrus_test_progress_' + uid;
+}
+function persistTestProgress(){
+  try {
+    if(!STATE.testOpen){
+      localStorage.removeItem(_testProgressKey());
+      return;
+    }
+    const payload = {
+      v: 1,
+      _t: Date.now(),
+      testOpen:             STATE.testOpen,
+      testAnswers:          STATE.testAnswers || {},
+      testChecked:          !!STATE.testChecked,
+      testInstantSubmitted: STATE.testInstantSubmitted || {},
+      testShuffle:          STATE.testShuffle || null,
+      testLimit:            STATE.testLimit || null,
+      testCollection:       STATE.testCollection || null,
+      /* ВАЖНО: shuffledBank — без него ответы привяжутся к другим
+         случайно вытянутым вопросам, потеряется смысл. */
+      shuffledBank:         STATE.shuffledBank || null,
+      /* commaPick — отдельная map расставленных запятых */
+      testCommas:           _serializeTestCommas(STATE.testCommas),
+    };
+    localStorage.setItem(_testProgressKey(), JSON.stringify(payload));
+  } catch(_){ /* QuotaExceeded и т.п. — молча, чтобы не ронять рендер */ }
+}
+function _serializeTestCommas(obj){
+  /* STATE.testCommas[qIdx][sentIdx] — это Set, JSON.stringify его не сохранит.
+     Конвертируем в массив. */
+  if(!obj || typeof obj !== 'object') return null;
+  const out = {};
+  Object.keys(obj).forEach(qIdx => {
+    const sentMap = obj[qIdx];
+    if(!sentMap) return;
+    out[qIdx] = {};
+    Object.keys(sentMap).forEach(sIdx => {
+      const s = sentMap[sIdx];
+      if(s && typeof s.size === 'number') out[qIdx][sIdx] = Array.from(s);
+      else if(Array.isArray(s)) out[qIdx][sIdx] = s.slice();
+    });
+  });
+  return out;
+}
+function _deserializeTestCommas(raw){
+  if(!raw || typeof raw !== 'object') return {};
+  const out = {};
+  Object.keys(raw).forEach(qIdx => {
+    out[qIdx] = {};
+    const sentMap = raw[qIdx] || {};
+    Object.keys(sentMap).forEach(sIdx => {
+      out[qIdx][sIdx] = new Set(sentMap[sIdx] || []);
+    });
+  });
+  return out;
+}
+function tryRestoreTestProgress(){
+  try {
+    const raw = localStorage.getItem(_testProgressKey());
+    if(!raw) return false;
+    const p = JSON.parse(raw);
+    if(!p || !p.testOpen) { localStorage.removeItem(_testProgressKey()); return false; }
+    if(p._t && (Date.now() - p._t) > TEST_PROGRESS_TTL_MS){
+      localStorage.removeItem(_testProgressKey());
+      return false;
+    }
+    STATE.testOpen             = p.testOpen;
+    STATE.testAnswers          = p.testAnswers || {};
+    STATE.testChecked          = !!p.testChecked;
+    STATE.testInstantSubmitted = p.testInstantSubmitted || {};
+    STATE.testShuffle          = p.testShuffle || null;
+    STATE.testLimit            = p.testLimit || null;
+    STATE.testCollection       = p.testCollection || null;
+    STATE.shuffledBank         = p.shuffledBank || null;
+    STATE.testCommas           = _deserializeTestCommas(p.testCommas);
+    console.log('[testProgress] восстановлен прогресс тренажёра задания', p.testOpen,
+                '· ответов:', Object.keys(STATE.testAnswers).length);
+    return true;
+  } catch(err){
+    console.warn('[testProgress] restore failed:', err && err.message);
+    return false;
+  }
+}
+function clearTestProgress(){
+  try { localStorage.removeItem(_testProgressKey()); } catch(_){}
+}
+/* При уходе в фон срочно сохраняем — на iOS Safari это лучший момент,
+   потому что render() может не успеть, если страница выгружается. */
+if(typeof document !== 'undefined'){
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'hidden') persistTestProgress();
+  });
+  /* На всякий случай — pagehide (когда вкладку закрывают/скрывают полностью) */
+  window.addEventListener('pagehide', persistTestProgress);
+}
+
 /* =======================================================================
    СОСТОЯНИЕ
    ======================================================================= */
@@ -1415,6 +1523,9 @@ async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, 
   };
   try {
     const inserted = await restRequest('POST', '/attempts', payload, { prefer: 'return=representation' });
+    /* Попытка успешно сохранена → чистим localStorage-черновик, иначе после
+       перезагрузки ученик увидит «↩ Восстановлен прогресс» к уже завершённой. */
+    try { clearTestProgress(); } catch(_){}
     /* Триггер on_attempt_insert сам обновит profiles.bee и добавит запись в bee_transactions. */
     if(MY_PROFILE){ MY_PROFILE.bee = (MY_PROFILE.bee || 0) + beeEarned; }
     /* Хуки на достижения — ждём последовательно, иначе a1 и b2 читают MY_PROFILE.bee
@@ -23344,6 +23455,23 @@ let _lastViewKey = '';
 function _renderNow(){
   const root = document.getElementById('root');
 
+  /* RESTORE прогресса тренажёра — ровно один раз после загрузки профиля.
+     Если ученик переключался на другую вкладку и страница перезагрузилась,
+     STATE.testOpen изначально null. Проверяем localStorage и если там
+     есть незавершённая попытка — восстанавливаем и сообщаем. */
+  if(MY_PROFILE && STATE.view === 'student' && !STATE._testProgressRestoreTried){
+    STATE._testProgressRestoreTried = true;
+    if(!STATE.testOpen){
+      const restored = tryRestoreTestProgress();
+      if(restored){
+        STATE.toast = '↩ Восстановлен прогресс тренажёра задания ' + STATE.testOpen;
+        setTimeout(() => { if(STATE.toast && STATE.toast.startsWith('↩')) { STATE.toast = ''; render(); } }, 3500);
+        /* Перерисуем сразу с восстановленным стейтом */
+        setTimeout(render, 0);
+      }
+    }
+  }
+
   /* Считаем ключ текущей страницы. Меняется только когда юзер реально
      переключается на другую вкладку/раздел. */
   const viewKey = STATE.view + ':' + STATE.studentTab + ':' +
@@ -23603,6 +23731,11 @@ function _renderNow(){
       }
     }
   }
+
+  /* PERSIST прогресса тренажёра: после каждого рендера сохраняем стейт
+     попытки в localStorage. Если ученик переключится на другую вкладку
+     и Safari/Chrome выгрузит страницу — при возврате восстановим. */
+  if(MY_PROFILE) persistTestProgress();
 }
 
 /* Стартуем с восстановления сессии (если есть) */
