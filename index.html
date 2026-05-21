@@ -19527,6 +19527,39 @@ const SAFE_VIDEO_HOSTS = [
   'rutube.ru'
 ];
 
+/* На iPhone Safari cross-origin iframe (Kinescope/VK/RuTube) не разрешает
+   фуллскрин по тапу на встроенную кнопку плеера — это ограничение Apple.
+   Для Kinescope усугубляется тем, что long-press iOS-меню перехвачен их
+   плеером для своей фичи (ускорение). Добавляем под каждым Kinescope-
+   iframe-ом нашу собственную ссылку-кнопку, которая открывает embed-
+   страницу Kinescope в новой вкладке — там плеер уже не во фрейме и
+   фуллскрин/PIP работают на iOS нативно. */
+function enhanceKinescopeIframes(container){
+  if(!container) return;
+  let iframes;
+  try { iframes = container.querySelectorAll('iframe[src*="kinescope.io/embed/"]'); }
+  catch(_){ return; }
+  iframes.forEach(iframe => {
+    const m = iframe.src.match(/kinescope\.io\/embed\/([A-Za-z0-9]+)/);
+    if(!m) return;
+    const videoId = m[1];
+    /* Если сразу после iframe уже стоит наша ссылка — не дублируем
+       (свежие посты уже содержат её, добавленную в parseVideoEmbed). */
+    const next = iframe.nextElementSibling;
+    if(next && next.tagName === 'A' && next.href &&
+       next.href.indexOf('kinescope.io/embed/' + videoId) > -1) return;
+    const btn = document.createElement('a');
+    btn.href = 'https://kinescope.io/embed/' + videoId;
+    btn.target = '_blank';
+    btn.rel = 'noopener';
+    btn.textContent = '🔲 На полный экран ↗';
+    btn.style.cssText = 'display:inline-block;margin:-4px 0 8px;padding:6px 14px;' +
+      'background:#1F2937;color:#fff;text-decoration:none;border-radius:6px;' +
+      'font-size:13px;font-weight:600;font-family:inherit;line-height:1.4;';
+    iframe.parentNode.insertBefore(btn, iframe.nextSibling);
+  });
+}
+
 /* Превращает ссылку (или полный iframe-код, скопированный со страницы платформы)
    в нормализованный <iframe ...> для вставки в редактор. Возвращает null, если
    не смогли распознать. */
@@ -19575,8 +19608,23 @@ function parseVideoEmbed(raw){
   if(host === 'kinescope.io'){
     const m = url.pathname.match(/^\/(?:embed\/)?([A-Za-z0-9]+)/);
     if(!m) return null;
-    return _wrapIframe('https://kinescope.io/embed/' + m[1],
+    const videoId = m[1];
+    const iframeHtml = _wrapIframe('https://kinescope.io/embed/' + videoId,
       'autoplay; fullscreen; picture-in-picture; encrypted-media;');
+    /* На iPhone Safari cross-origin iframe фуллскрин НЕ открывается
+       (ограничение Apple), а long-press по Kinescope-плееру он
+       перехватывает для своей фичи ускорения, поэтому стандартный
+       iOS-обход «Открыть ссылку» не появляется. Добавляем под видео
+       нашу собственную ссылку-кнопку, которая открывает Kinescope-
+       страницу в новой вкладке — там фуллскрин и PIP работают
+       нативно, потому что плеер уже не внутри iframe. */
+    const watchUrl = 'https://kinescope.io/embed/' + videoId;
+    const watchBtn = '<a href="' + watchUrl + '" target="_blank" rel="noopener" ' +
+      'style="display:inline-block;margin:-4px 0 8px;padding:6px 14px;' +
+      'background:#1F2937;color:#fff;text-decoration:none;border-radius:6px;' +
+      'font-size:13px;font-weight:600;font-family:inherit;line-height:1.4;">' +
+      '🔲 На полный экран ↗</a>';
+    return iframeHtml + watchBtn;
   }
 
   /* === VK Видео === */
@@ -20113,6 +20161,8 @@ function renderWarmupBlockTeacher(b, day){
     const bodyDiv = el('div', { style:{ fontSize:'13px', color:'var(--ink-2)', marginBottom:'6px' }});
     if(isHtml){ bodyDiv.innerHTML = b.body; }
     else { bodyDiv.style.whiteSpace = 'pre-wrap'; bodyDiv.textContent = b.body; }
+    /* Кнопка-обход iOS-фуллскрина для Kinescope */
+    enhanceKinescopeIframes(bodyDiv);
     card.append(bodyDiv);
   }
   if(b.url)   card.append(el('div', { style:{ fontSize:'12px', color:'var(--p-deep)', wordBreak:'break-all' }}, '🔗 ' + b.url));
@@ -20636,6 +20686,8 @@ function renderWarmupBlockStudent(b){
       bodyDiv.style.whiteSpace = 'pre-wrap';
       bodyDiv.textContent = b.body;
     }
+    /* Кнопка-обход iOS-фуллскрина для уже сохранённых Kinescope-iframe-ов */
+    enhanceKinescopeIframes(bodyDiv);
     inner.append(bodyDiv);
   }
 
