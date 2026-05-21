@@ -20192,8 +20192,15 @@ function renderAddBlockForm(day, editingBlock, target){
         const url = await uploadLessonVideo(file);
         console.log('[video-insert] upload OK, URL:', url);
         const safe = url.replace(/"/g,'&quot;');
-        const videoHtml = '<div><video src="' + safe +
-          '" controls playsinline preload="metadata" style="width:100%;max-width:100%;border-radius:8px;background:#000;"></video></div><p><br></p>';
+        /* Обёртка с aspect-ratio 16:9 — иначе video без загруженных метаданных
+           схлопывается в 0 пикселей высоты и не виден в редакторе.
+           Та же схема, что у iframe в parseVideoEmbed. */
+        const videoHtml =
+          '<div style="position:relative;width:100%;max-width:100%;padding-bottom:56.25%;height:0;margin:8px 0;background:#000;border-radius:8px;overflow:hidden;">' +
+            '<video src="' + safe + '" controls playsinline preload="metadata" ' +
+              'style="position:absolute;top:0;left:0;width:100%;height:100%;background:#000;">' +
+            '</video>' +
+          '</div><p><br></p>';
         const ph = bodyEditor.querySelector('[data-vid-uploading="1"]');
         console.log('[video-insert] плашка найдена:', !!ph);
         if(ph) ph.remove();
