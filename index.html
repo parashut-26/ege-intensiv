@@ -22409,37 +22409,21 @@ function sourceTextForNum(sourceTexts, num){
   return null;
 }
 
-/* === Черновик-разметка под заданием ===
-   Под каждым заданием в решалке появляется сворачиваемый блок с панелью
-   форматирования. Ученик может выделять/подчёркивать/красить текст
-   задания (грамматическая основа, границы придаточного, скобки и т.д.).
-   Сохраняется в STATE.solverScratch[num] + localStorage + БД (отдельный
-   PATCH на test_variant_answers.scratch — без блокировки UI). */
-function makeScratchPad(q){
+/* === Editable формулировка задания с панелью форматирования ===
+   Текст задания сам по себе — contenteditable: ученик выделяет фрагмент
+   и красит/подчёркивает/обводит скобками прямо в тексте. Никаких
+   разворачиваемых блоков-черновиков — всё сразу видно.
+   Сохранение: STATE.solverScratch[num] (html) → localStorage + БД
+   (test_variant_answers.scratch через live-attempt). */
+function makeEditableQuestionText(q){
   const num = q.num;
-  const wrap = el('div', { style:{ marginTop:'8px' }});
-  /* Кнопка «🖌 Разметить» сворачивает/раскрывает блок */
-  const isExpanded = !!(STATE.solverScratch && STATE.solverScratch[num]);
-  const expanded = { value: isExpanded };
-  const body = el('div', { style:{ marginTop:'6px', display: isExpanded ? 'block' : 'none' }});
-  const toggleBtn = el('button', {
-    type:'button',
-    style:{ padding:'4px 10px', fontSize:'12px', borderRadius:'6px',
-            border:'1px solid var(--border-2)', background:'#F9FAFB',
-            cursor:'pointer', color:'var(--ink-2)', fontFamily:'inherit' },
-    onclick: () => {
-      expanded.value = !expanded.value;
-      body.style.display = expanded.value ? 'block' : 'none';
-      toggleBtn.textContent = expanded.value ? '🖌 Свернуть разметку' : '🖌 Разметить текст';
-      if(expanded.value && !ed.innerHTML) ed.innerHTML = q.question_text || '';
-    }
-  }, isExpanded ? '🖌 Свернуть разметку' : '🖌 Разметить текст');
-  wrap.append(toggleBtn);
-  /* Панель форматирования — Ж/К/П + цветной маркер + подчёркнуть + скобки */
+  const wrap = el('div', { style:{ marginTop:'4px' }});
+  /* Панель форматирования сверху — компактная, всегда видна */
+  let ed; // forward-ref
   const exec = (cmd, val) => {
     document.execCommand(cmd, false, val || null);
     ed.focus();
-    onChange();
+    scheduleSave();
   };
   const mkBtn = (label, title, fn, style) => el('button', {
     type:'button',
@@ -22447,19 +22431,19 @@ function makeScratchPad(q){
     style: Object.assign({
       padding:'4px 8px', minWidth:'28px', fontSize:'12px', cursor:'pointer',
       background:'#fff', border:'1px solid var(--border-2)', borderRadius:'4px',
-      fontFamily:'inherit', fontWeight:'700'
+      fontFamily:'inherit', fontWeight:'700', lineHeight:'1.2'
     }, style || {}),
     onmousedown: (ev) => ev.preventDefault(),
     onclick: (ev) => { ev.preventDefault(); fn(); }
   }, label);
   const toolbar = el('div', {
-    style:{ display:'flex', gap:'3px', flexWrap:'wrap', padding:'5px',
-            background:'#fff', border:'1px solid var(--border-2)',
+    style:{ display:'flex', gap:'3px', flexWrap:'wrap', padding:'5px 6px',
+            background:'#F9FAFB', border:'1px solid var(--border-2)',
             borderRadius:'6px 6px 0 0', borderBottom:'none' }
   },
     mkBtn(el('b', null, 'Ж'), 'Жирный', () => exec('bold')),
     mkBtn(el('i', null, 'К'), 'Курсив', () => exec('italic')),
-    mkBtn(el('u', null, 'П'), 'Подчёркнутый — для основы, придаточного, и т.д.', () => exec('underline')),
+    mkBtn(el('u', null, 'П'), 'Подчёркнутый — для грамматической основы, придаточного и т.д.', () => exec('underline')),
     mkBtn(el('span', { style:{ background:'#FEF08A', padding:'0 4px', borderRadius:'2px' }}, 'A'),
       'Жёлтый маркер', () => exec('hiliteColor', '#FEF08A')),
     mkBtn(el('span', { style:{ background:'#86EFAC', padding:'0 4px', borderRadius:'2px' }}, 'A'),
@@ -22471,42 +22455,46 @@ function makeScratchPad(q){
     mkBtn('( )', 'Обернуть скобками — границы придаточного', () => {
       const sel = window.getSelection();
       if(!sel || !sel.toString()) return;
-      const t = sel.toString();
-      exec('insertHTML', '(' + t + ')');
+      exec('insertHTML', '(' + sel.toString() + ')');
     }, { fontWeight:'400' }),
-    mkBtn('A', 'Сбросить форматирование', () => exec('removeFormat'), { fontWeight:'400' }),
-    mkBtn('↺', 'Сбросить всю разметку', () => {
-      if(!confirm('Сбросить всю разметку этого задания?')) return;
-      ed.innerHTML = q.question_text || '';
-      onChange();
+    mkBtn('A', 'Сбросить форматирование выделенного', () => exec('removeFormat'), { fontWeight:'400' }),
+    mkBtn('↺', 'Откатить всю разметку к оригиналу', () => {
+      if(!confirm('Сбросить всю разметку и вернуть исходный текст задания?')) return;
+      ed.innerHTML = sanitizeQuestionHtml(q.question_text || '');
+      scheduleSave();
     }, { fontWeight:'400', color:'var(--red)' }));
-  const ed = el('div', {
+  /* Сам текст — contenteditable. Восстанавливаем разметку если была. */
+  ed = el('div', {
     contenteditable: 'true',
-    style:{ padding:'10px 12px', minHeight:'80px', background:'#FFFFFE',
-            border:'1px solid var(--border-2)', borderTop:'none',
-            borderRadius:'0 0 6px 6px', fontSize:'13px', lineHeight:'1.55',
-            outline:'none', fontFamily:'inherit', whiteSpace:'pre-wrap' }
+    style:{ padding:'10px 12px', background:'#FFFFFE',
+            border:'1px solid var(--border-2)', borderRadius:'0 0 6px 6px',
+            fontSize:'14px', lineHeight:'1.55', outline:'none',
+            fontFamily:'inherit', whiteSpace:'pre-wrap',
+            minHeight:'40px', userSelect:'text' }
   });
-  /* Восстанавливаем из STATE если есть, иначе пустое (заполнится при первом раскрытии) */
-  ed.innerHTML = (STATE.solverScratch && STATE.solverScratch[num])
-    ? STATE.solverScratch[num]
-    : (isExpanded ? (q.question_text || '') : '');
-  let onChangeTimer = null;
-  const onChange = () => {
+  const savedScratch = STATE.solverScratch && STATE.solverScratch[num];
+  ed.innerHTML = savedScratch || sanitizeQuestionHtml(q.question_text || '');
+  let saveTimer = null;
+  function scheduleSave(){
     if(!STATE.solverScratch) STATE.solverScratch = {};
     STATE.solverScratch[num] = ed.innerHTML;
-    if(onChangeTimer) clearTimeout(onChangeTimer);
-    onChangeTimer = setTimeout(() => {
+    if(saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
       saveSolverDraft();
-      /* Также пишем в БД через live-attempt — учитель потом увидит разметку */
       if(STATE.liveAttemptId){
         saveLiveScratch(num, ed.innerHTML);
       }
     }, 600);
-  };
-  ed.oninput = onChange;
-  body.append(toolbar, ed);
-  wrap.append(body);
+  }
+  ed.oninput = scheduleSave;
+  /* Чтобы случайная вставка из буфера обмена не приносила «грязный» html
+     с шрифтами Word — переносим только plain-текст */
+  ed.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const txt = (e.clipboardData || window.clipboardData).getData('text/plain');
+    document.execCommand('insertText', false, txt);
+  });
+  wrap.append(toolbar, ed);
   return wrap;
 }
 
@@ -22657,10 +22645,10 @@ function viewSolverVariant(){
         'Задание №' + q.num),
       el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }},
         Number(q.max_points) > 1 ? 'до ' + q.max_points + ' б' : '')));
-    /* Текст задания (HTML) */
-    const qText = el('div', { style:{ fontSize:'14px', lineHeight:'1.55', whiteSpace:'pre-wrap' }});
-    qText.innerHTML = sanitizeQuestionHtml(q.question_text || '');
-    card.append(qText);
+    /* Текст задания — редактируемый с панелью форматирования.
+       Ученик выделяет фрагменты, красит, подчёркивает, ставит скобки
+       прямо внутри формулировки. Изменения сохраняются как scratch. */
+    card.append(makeEditableQuestionText(q));
     /* Проверено ли уже это задание в текущей попытке? */
     const checkedInfo = (STATE.solverChecked || {})[q.num] || null;
     /* Поле ответа */
@@ -22747,9 +22735,6 @@ function viewSolverVariant(){
     }, checkedInfo ? '✓ Проверено' : '✓ Проверить');
     card.append(checkBtn);
     card.append(resultBox);
-    /* Черновик-разметка с панелью форматирования — для любого задания,
-       чтобы ребёнок мог пометить грамматическую основу, скобки, и т.д. */
-    card.append(makeScratchPad(q));
     left.append(card);
   });
 
