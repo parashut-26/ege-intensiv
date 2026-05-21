@@ -22327,13 +22327,29 @@ function clearSolverDraft(){
 function parseTask21Sentences(questionText){
   if(!questionText) return [];
   const txt = String(questionText).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-  /* Разделители: «1) текст 2) текст 3) ...» — берём 1-9 */
-  const parts = txt.split(/\s(?=[1-9]\)\s)/);
   const sentences = [];
+  /* Формат 1 — «(N)» в скобках (актуальный ФИПИ-2026): "(1)Человеку... (2)Он же..." */
+  const reParen = /\(([1-9])\)/g;
+  const positions = [];
+  let m;
+  while((m = reParen.exec(txt)) !== null){
+    positions.push({ num: parseInt(m[1], 10), start: m.index, contentStart: m.index + m[0].length });
+  }
+  if(positions.length >= 2){
+    for(let i = 0; i < positions.length; i++){
+      const p = positions[i];
+      const endIdx = i + 1 < positions.length ? positions[i+1].start : txt.length;
+      const text = txt.slice(p.contentStart, endIdx).trim();
+      if(text) sentences.push({ num: p.num, text });
+    }
+    if(sentences.length >= 2) return sentences;
+  }
+  /* Формат 2 — «N)» без скобок (старый): "1) текст 2) текст ..." */
+  const parts = txt.split(/\s(?=[1-9]\)\s)/);
   for(const p of parts){
-    const m = p.match(/^([1-9])\)\s*(.+)$/);
-    if(!m) continue;
-    sentences.push({ num: parseInt(m[1], 10), text: m[2].trim() });
+    const m2 = p.match(/^([1-9])\)\s*(.+)$/);
+    if(!m2) continue;
+    sentences.push({ num: parseInt(m2[1], 10), text: m2[2].trim() });
   }
   return sentences.length >= 2 ? sentences : [];
 }
