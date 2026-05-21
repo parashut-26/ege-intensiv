@@ -698,8 +698,11 @@ function getUnreadWarmupPosts(dayId){
   const lastTs = seen['warmup-' + dayId] || 0;
   return blocks.filter(b => {
     if(b.is_published === false) return false;
+    /* Если день ни разу не открывали (lastTs=0) — ВСЕ опубликованные посты «новые»,
+       независимо от created_at. Иначе сравниваем timestamp. */
+    if(lastTs === 0) return true;
     const created = b.created_at ? Date.parse(b.created_at) : 0;
-    return created > lastTs;
+    return !isNaN(created) && created > lastTs;
   });
 }
 function getUnreadIntensivePosts(dayOrd){
@@ -710,8 +713,9 @@ function getUnreadIntensivePosts(dayOrd){
   const lastTs = seen['intensive-' + dayOrd] || 0;
   return blocks.filter(b => {
     if(b.is_published === false) return false;
+    if(lastTs === 0) return true;
     const created = b.created_at ? Date.parse(b.created_at) : 0;
-    return created > lastTs;
+    return !isNaN(created) && created > lastTs;
   });
 }
 /* Суммарное количество непрочитанных постов по всем дням разогрева
