@@ -8469,6 +8469,10 @@ function shouldShowSplashToday(){
 }
 
 function viewStudentHome(){
+  /* Polling постов каждые 12 сек — чтобы плашка «🔥 Новый разогрев» и бейдж
+     на табе появлялись на главной без F5, пока WebSocket-realtime закрыт
+     через PHP-прокси. */
+  startPostsPolling();
   /* Умная плашка: вычисляем по реальной дате */
   const today = getRealTodayDay();
   const untilStart = daysUntilStart();
