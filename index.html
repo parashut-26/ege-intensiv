@@ -22075,6 +22075,7 @@ async function startSolvingVariant(variantId, opts){
   STATE.solverStartedAt = Date.now();
   STATE.solverParentAttemptId = opts.parentAttemptId || null;
   STATE.solverFilteredNums = opts.filterNums || null;
+  STATE.liveAttemptId = null;   // создаётся при первом «Проверить» — live-попытка
   render();
   try {
     STATE.solverData = await loadVariantForSolving(variantId);
@@ -22086,6 +22087,7 @@ async function startSolvingVariant(variantId, opts){
         const d = JSON.parse(raw);
         if(d.answers) STATE.solverAnswers = d.answers;
         if(d.checked) STATE.solverChecked = d.checked;
+        if(d.liveAttemptId) STATE.liveAttemptId = d.liveAttemptId;
         if(d.startedAt && !opts.parentAttemptId) STATE.solverStartedAt = d.startedAt;
       }
     } catch(_){}
@@ -22105,9 +22107,66 @@ function saveSolverDraft(){
     localStorage.setItem(draftKey, JSON.stringify({
       answers: STATE.solverAnswers,
       checked: STATE.solverChecked || {},
+      liveAttemptId: STATE.liveAttemptId || null,
       startedAt: STATE.solverStartedAt
     }));
   } catch(_){}
+}
+
+/* === LIVE-режим решалки ===
+   На каждый клик «Проверить» отправляем результат в БД: создаём попытку
+   с finished_at=null (если её ещё нет) и пишем ответ в test_variant_answers.
+   Учитель видит её как «🔴 решает прямо сейчас» и может зайти посмотреть
+   текущее состояние. При финальном «Сдать пробник» эта же попытка просто
+   завершается (UPDATE finished_at + итоговый балл), новой не создаётся. */
+async function ensureLiveAttempt(){
+  if(STATE.liveAttemptId) return STATE.liveAttemptId;
+  if(!MY_PROFILE || !MY_PROFILE.id) return null;
+  try {
+    const att = await restRequest('POST', '/test_variant_attempts', {
+      variant_id: STATE.solverVariantId,
+      profile_id: MY_PROFILE.id,
+      otp_full_name: MY_PROFILE.full_name || null,
+      otp_user: MY_PROFILE.full_name || null,
+      started_at: new Date(STATE.solverStartedAt || Date.now()).toISOString(),
+      parent_attempt_id: STATE.solverParentAttemptId,
+      attempt_no: STATE.solverParentAttemptId ? 2 : 1,
+    }, { prefer: 'return=representation' });
+    STATE.liveAttemptId = Array.isArray(att) ? att[0].id : att.id;
+    saveSolverDraft();
+    return STATE.liveAttemptId;
+  } catch(e){
+    console.warn('[live] не удалось создать попытку:', e.message);
+    return null;
+  }
+}
+
+/* Запись live-ответа: UPSERT в test_variant_answers (через saveAnswerField
+   с дополнительными колонками). Если строки нет — INSERT, иначе UPDATE.
+   Не блокирующая — выполняется в фоне, ошибку только логируем. */
+async function saveLiveAnswer(num, userAnswer, points, max){
+  const attId = await ensureLiveAttempt();
+  if(!attId) return;
+  try {
+    /* PATCH сразу со всеми полями */
+    const patch = {
+      user_answer: userAnswer || null,
+      points: Number(points) || 0,
+      max_points: Number(max) || 0,
+      is_correct: (Number(points) >= Number(max) && Number(max) > 0)
+    };
+    const resp = await restRequest('PATCH',
+      '/test_variant_answers?attempt_id=eq.' + attId +
+      '&question_num=eq.' + num,
+      patch, { prefer: 'return=representation' });
+    if(Array.isArray(resp) && resp.length > 0) return;
+    /* PATCH не нашёл строку — INSERT */
+    await restRequest('POST', '/test_variant_answers', {
+      attempt_id: attId, question_num: num, ...patch
+    }, { prefer: 'return=minimal' });
+  } catch(e){
+    console.warn('[live] saveLiveAnswer fail:', e.message);
+  }
 }
 
 /* Очистка черновика после завершения */
@@ -22146,24 +22205,35 @@ async function finishSolvingAndSave(){
   const timeSeconds = Math.round((STATE.solverFinishedAt - STATE.solverStartedAt) / 1000);
   const percent = max > 0 ? Math.round(total / max * 1000) / 10 : 0;
 
-  /* 1. Создать попытку */
+  /* 1. Создать попытку — либо новую, либо завершить существующую live-попытку */
   let attemptId = null;
+  const finalizeFields = {
+    finished_at: new Date(STATE.solverFinishedAt).toISOString(),
+    started_at: new Date(STATE.solverStartedAt).toISOString(),
+    time_spent_seconds: timeSeconds,
+    correct_count: correctCount,
+    percent_correct: percent,
+    total_score: Math.floor(total),
+  };
   try {
-    const att = await restRequest('POST', '/test_variant_attempts', {
-      variant_id: STATE.solverVariantId,
-      profile_id: MY_PROFILE.id,
-      otp_full_name: MY_PROFILE.full_name || null,
-      otp_user: MY_PROFILE.full_name || null,
-      finished_at: new Date(STATE.solverFinishedAt).toISOString(),
-      started_at: new Date(STATE.solverStartedAt).toISOString(),
-      time_spent_seconds: timeSeconds,
-      correct_count: correctCount,
-      percent_correct: percent,
-      total_score: Math.floor(total),
-      parent_attempt_id: STATE.solverParentAttemptId,
-      attempt_no: STATE.solverParentAttemptId ? 2 : 1,
-    }, { prefer: 'return=representation' });
-    attemptId = Array.isArray(att) ? att[0].id : att.id;
+    if(STATE.liveAttemptId){
+      /* Live-попытка уже создана (ученик нажимал «Проверить» хотя бы раз) —
+         просто завершаем её. Это спасает от дубликатов в учительском кабинете. */
+      await restRequest('PATCH',
+        '/test_variant_attempts?id=eq.' + STATE.liveAttemptId,
+        finalizeFields, { prefer: 'return=minimal' });
+      attemptId = STATE.liveAttemptId;
+    } else {
+      const att = await restRequest('POST', '/test_variant_attempts', Object.assign({
+        variant_id: STATE.solverVariantId,
+        profile_id: MY_PROFILE.id,
+        otp_full_name: MY_PROFILE.full_name || null,
+        otp_user: MY_PROFILE.full_name || null,
+        parent_attempt_id: STATE.solverParentAttemptId,
+        attempt_no: STATE.solverParentAttemptId ? 2 : 1,
+      }, finalizeFields), { prefer: 'return=representation' });
+      attemptId = Array.isArray(att) ? att[0].id : att.id;
+    }
   } catch(e){
     showToast('⚠ Не удалось сохранить попытку: ' + e.message);
     return;
@@ -22191,7 +22261,12 @@ async function finishSolvingAndSave(){
   }
   if(answersPayload.length){
     try {
-      await restRequest('POST', '/test_variant_answers', answersPayload, { prefer: 'return=minimal' });
+      /* UPSERT — на случай если live-режим уже создал строки в test_variant_answers
+         для этой попытки. Без on_conflict POST бы упал с duplicate key. */
+      await restRequest('POST',
+        '/test_variant_answers?on_conflict=attempt_id,question_num',
+        answersPayload,
+        { prefer: 'resolution=merge-duplicates,return=minimal' });
     } catch(e){ console.warn('answers save error', e.message); }
   }
   clearSolverDraft();
@@ -22422,6 +22497,8 @@ function viewSolverVariant(){
         input.style.background = '#FAFAFA';
         checkBtn.disabled = true;
         checkBtn.textContent = '✓ Проверено';
+        /* LIVE: шлём результат в БД, чтобы учитель видел прогресс. Не блокирующее. */
+        saveLiveAnswer(q.num, user, points, maxP);
       }
     }, checkedInfo ? '✓ Проверено' : '✓ Проверить');
     card.append(checkBtn);
@@ -23155,7 +23232,8 @@ async function loadVariantsByStudent(studentId){
   const attempts = await restRequest('GET',
     '/test_variant_attempts?profile_id=eq.' + studentId +
     '&select=*,variant:test_variants(id,title,questions_count,total_max_score,created_at)' +
-    '&order=finished_at.desc.nullslast,imported_at.desc');
+    /* nullsfirst — чтобы live-попытки (finished_at=null) были наверху списка */
+    '&order=finished_at.desc.nullsfirst,imported_at.desc');
   const attIds = (attempts || []).map(a => a.id);
   let answers = [];
   if(attIds.length){
@@ -23238,10 +23316,13 @@ function viewVariantsByStudent(){
     const v = a.variant || {};
     const ansForAttempt = answersByAttempt[a.id] || {};
     const row = computeAttemptRow(a, Object.values(ansForAttempt));
+    /* Live-попытка = есть started_at, но нет finished_at. Помечаем «🔴 решает сейчас». */
+    const isLive = a.started_at && !a.finished_at;
     const dateStr = a.finished_at
       ? new Date(a.finished_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' })
-      : (a.imported_at ? new Date(a.imported_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' }) : '—');
-    const tr = el('tr', null,
+      : (a.imported_at ? new Date(a.imported_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' })
+        : (isLive ? '🔴 сейчас' : '—'));
+    const tr = el('tr', { style: isLive ? { background:'#FEF2F2' } : null },
       el('td', { class:'vh-sticky vh-name', style:{ fontWeight:'600', cursor:'pointer' },
           onclick: () => {
             STATE.variantsView = 'by_variant';
@@ -23254,6 +23335,11 @@ function viewVariantsByStudent(){
           },
           title: 'Открыть полную сводную по варианту'
         }, v.title || '—',
+        isLive ? el('span', {
+          style:{ marginLeft:'6px', fontSize:'10px', padding:'2px 7px', borderRadius:'999px',
+                  background:'#DC2626', color:'#fff', fontWeight:'700',
+                  animation:'pulse 1.6s infinite' }
+        }, '🔴 решает сейчас') : null,
         a.parent_attempt_id ? el('span', {
           style:{ marginLeft:'6px', fontSize:'9px', padding:'1px 5px', borderRadius:'999px',
                   background:'#FEF3C7', color:'#92400E', fontWeight:'700' }
