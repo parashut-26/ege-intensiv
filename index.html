@@ -11145,6 +11145,32 @@ function modalExamineQuestion(){
       };
       const mic = makeMicButton();
       if(mic.ok) mic.attach(noteTa);
+      const noteSaveResult = el('div', { style:{ fontSize:'12px', marginTop:'6px', minHeight:'18px' }}, '');
+      const noteSaveBtn = el('button', {
+        type:'button',
+        style:{ padding:'5px 14px', borderRadius:'6px', border:'1px solid #1E3A8A',
+                background:'#1E40AF', color:'#fff', cursor:'pointer',
+                fontSize:'13px', fontWeight:'700', fontFamily:'inherit' },
+        onclick: async () => {
+          noteSaveBtn.disabled = true;
+          noteSaveBtn.textContent = '⏳ Сохраняю…';
+          noteSaveResult.textContent = '';
+          try {
+            await restRequest('PATCH',
+              '/test_variant_answers?attempt_id=eq.' + attemptId +
+              '&question_num=eq.' + num,
+              { student_note: (noteTa.value || '').trim() || null },
+              { prefer: 'return=minimal' });
+            noteSaveResult.innerHTML = '<span style="color:#065F46;font-weight:700;">✓ Сохранено — учитель увидит</span>';
+          } catch(e){
+            noteSaveResult.innerHTML = '<span style="color:#991B1B;font-weight:700;">⚠ Ошибка: ' +
+              (e && e.message || 'не удалось сохранить') + '</span>';
+          } finally {
+            noteSaveBtn.disabled = false;
+            noteSaveBtn.textContent = '💾 Сохранить';
+          }
+        }
+      }, '💾 Сохранить');
       body.append(
         el('div', { style:{ marginTop:'14px', padding:'10px 14px', background:'#EFF6FF', border:'1px solid #93C5FD', borderRadius:'10px' }},
           el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'4px', gap:'6px' }},
@@ -11154,7 +11180,9 @@ function modalExamineQuestion(){
               mic.ok ? mic.btn : null)),
           el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'6px' }},
             'Сначала напиши своими словами, почему правильно — потом сверишься с пояснением.'),
-          noteTa));
+          noteTa,
+          el('div', { style:{ display:'flex', justifyContent:'flex-end', marginTop:'8px' }}, noteSaveBtn),
+          noteSaveResult));
       /* Read-only комментарий учителя, если есть */
       const tc = (teacherComment || '').trim();
       if(tc){
@@ -22534,6 +22562,38 @@ function viewSolverResult(){
           }
         }, 800);
       };
+      /* Явная кнопка «Сохранить» — параллельно автосейву, чтобы ученик мог
+         нажать и увидеть чёткое «✓ Сохранено — учитель увидит». */
+      const noteSaveResult = el('div', { style:{ fontSize:'12px', marginTop:'6px', minHeight:'18px' }}, '');
+      const noteSaveBtn = el('button', {
+        type:'button',
+        style:{ padding:'5px 14px', borderRadius:'6px', border:'1px solid #1E3A8A',
+                background:'#1E40AF', color:'#fff', cursor:'pointer',
+                fontSize:'13px', fontWeight:'700', fontFamily:'inherit', marginTop:'6px' },
+        onclick: async () => {
+          if(!attemptId){
+            noteSaveResult.innerHTML = '<span style="color:#991B1B;font-weight:700;">— нет авторизации</span>';
+            return;
+          }
+          noteSaveBtn.disabled = true;
+          noteSaveBtn.textContent = '⏳ Сохраняю…';
+          noteSaveResult.textContent = '';
+          try {
+            await restRequest('PATCH',
+              '/test_variant_answers?attempt_id=eq.' + attemptId +
+              '&question_num=eq.' + r.num,
+              { student_note: (noteTa.value || '').trim() || null },
+              { prefer: 'return=minimal' });
+            noteSaveResult.innerHTML = '<span style="color:#065F46;font-weight:700;">✓ Сохранено — учитель увидит</span>';
+          } catch(e){
+            noteSaveResult.innerHTML = '<span style="color:#991B1B;font-weight:700;">⚠ ' +
+              (e && e.message || 'не удалось сохранить') + '</span>';
+          } finally {
+            noteSaveBtn.disabled = false;
+            noteSaveBtn.textContent = '💾 Сохранить РНО';
+          }
+        }
+      }, '💾 Сохранить РНО');
       /* Пояснение от учителя/AI скрыто по умолчанию: ученик сначала
          сам пишет РНО, потом раскрывает спойлер, чтобы сверить. */
       const explBlock = expl ? el('details', { style:{ marginTop:'8px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px' }},
@@ -22556,7 +22616,9 @@ function viewSolverResult(){
             status),
           el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px' }},
             'Сначала напиши своими словами, почему правильно — потом сверишься с пояснением.'),
-          noteTa),
+          noteTa,
+          el('div', { style:{ display:'flex', justifyContent:'flex-end', marginTop:'6px' }}, noteSaveBtn),
+          noteSaveResult),
         explBlock));
     });
   }
