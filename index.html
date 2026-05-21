@@ -6405,9 +6405,36 @@ function el(tag, props, ...children){
 }
 
 function showToast(text){
-  STATE.toast = text;
-  render();
-  setTimeout(() => { STATE.toast = null; render(); }, 2400);
+  /* ВАЖНО: НЕ дёргаем глобальный render() — он пересоздаёт DOM редактора
+     поста (contenteditable) и стирает всё, что туда было вставлено: видео,
+     iframe, форматирование, незавершённый ввод. Раньше showToast → render()
+     приводил к тому, что после успешного аплоада видео `<video>` тег уходил
+     в DOM, а в следующую микротаску — стирался render-ом, потому что тост
+     «🎬 Видео добавлено» сам же его и убивал.
+     Решение: тост рендерится через свой собственный фиксированный
+     div#zebrus-toast в body, независимо от STATE/render(). */
+  STATE.toast = text;  // оставляем для совместимости, если кто-то читает
+  let el = document.getElementById('zebrus-toast');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'zebrus-toast';
+    el.style.cssText = 'position:fixed;left:50%;bottom:24px;transform:translateX(-50%);' +
+      'background:#1F2937;color:#fff;padding:10px 16px;border-radius:8px;' +
+      'font-size:14px;font-family:inherit;box-shadow:0 4px 14px rgba(0,0,0,0.18);' +
+      'z-index:99999;max-width:90vw;text-align:center;line-height:1.4;' +
+      'opacity:0;transition:opacity 0.18s;';
+    document.body.appendChild(el);
+  }
+  el.textContent = text;
+  /* Дать браузеру время отрендерить, прежде чем тригерить transition */
+  requestAnimationFrame(() => { el.style.opacity = '1'; });
+  if(showToast._hideTimer) clearTimeout(showToast._hideTimer);
+  showToast._hideTimer = setTimeout(() => {
+    el.style.opacity = '0';
+    STATE.toast = null;
+    /* убираем из DOM после fade-out */
+    setTimeout(() => { if(el && el.style.opacity === '0') el.remove(); }, 250);
+  }, 2400);
 }
 
 /* =======================================================================
