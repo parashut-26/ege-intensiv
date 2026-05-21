@@ -22180,6 +22180,7 @@ async function startSolvingVariant(variantId, opts){
   STATE.solverFilteredNums = opts.filterNums || null;
   STATE.liveAttemptId = null;   // создаётся при первом «Проверить» — live-попытка
   STATE.solverPreview = !!opts.preview;  // режим «учитель смотрит как ученик»
+  STATE.solverTeacherEdit = !!opts.teacherEdit;  // как ученик, но с инлайн-редактированием
   render();
   try {
     STATE.solverData = await loadVariantForSolving(variantId);
@@ -22258,8 +22259,8 @@ function saveSolverDraft(){
    текущее состояние. При финальном «Сдать пробник» эта же попытка просто
    завершается (UPDATE finished_at + итоговый балл), новой не создаётся. */
 async function ensureLiveAttempt(){
-  /* В режиме просмотра учителем — ничего в БД не создаём */
-  if(STATE.solverPreview) return null;
+  /* В режиме просмотра/редактирования учителем — ничего в БД не создаём */
+  if(STATE.solverPreview || STATE.solverTeacherEdit) return null;
   if(STATE.liveAttemptId) return STATE.liveAttemptId;
   if(!MY_PROFILE || !MY_PROFILE.id) return null;
   try {
@@ -22590,6 +22591,138 @@ function makeTask21Field(q){
   return wrap;
 }
 
+/* === Панель учительского инлайн-редактирования под каждым заданием ===
+   Показывается в режиме solverTeacherEdit. Содержит:
+   • Правильный ответ (для 1-26) — через «/» альтернативы
+   • Пояснение (explanation) — почему правильно так
+   • Макс. баллов — по умолчанию из ФИПИ-шкалы
+   Все правки складываются в STATE.solverEditedQuestions[num] и сохраняются
+   пачкой по кнопке «💾 Сохранить вариант». Сама формулировка (question_text)
+   правится прямо в верхнем contenteditable-блоке (как у ученика). */
+function makeTeacherEditPanel(q){
+  if(!STATE.solverEditedQuestions) STATE.solverEditedQuestions = {};
+  const num = q.num;
+  /* Стартовые значения из объекта q (текущие из БД) */
+  if(!STATE.solverEditedQuestions[num]){
+    STATE.solverEditedQuestions[num] = {
+      correct_answer: q.correct_answer || '',
+      explanation: q.explanation || '',
+      max_points: q.max_points || 1
+    };
+  }
+  const edit = STATE.solverEditedQuestions[num];
+
+  const wrap = el('div', { style:{ marginTop:'12px', padding:'10px 12px',
+    background:'#EFF6FF', border:'2px dashed #93C5FD', borderRadius:'10px' }});
+  wrap.append(el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#1E40AF',
+    marginBottom:'8px', textTransform:'uppercase', letterSpacing:'.06em' }},
+    '✎ Учительские правки задания №' + num));
+
+  /* Для задания 27 правильного ответа нет — там есть только «пояснение» */
+  if(num !== 27){
+    const ansInput = el('input', { type:'text', value: edit.correct_answer,
+      placeholder:'Правильный ответ (через / если есть альтернативы)',
+      style:{ width:'100%', padding:'6px 10px', borderRadius:'6px',
+              border:'1px solid var(--border-2)', fontSize:'13px',
+              fontWeight:'700', boxSizing:'border-box', fontFamily:'inherit', marginBottom:'6px' }});
+    ansInput.oninput = () => { edit.correct_answer = ansInput.value; };
+    wrap.append(
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'2px' }},
+        'Правильный ответ (для проверки)'),
+      ansInput);
+  }
+
+  const explTa = el('textarea', { rows: 3,
+    placeholder:'Пояснение — ученик увидит после сдачи. Правило, разбор, ключ.',
+    style:{ width:'100%', padding:'6px 10px', borderRadius:'6px',
+            border:'1px solid var(--border-2)', fontSize:'13px',
+            lineHeight:'1.45', boxSizing:'border-box', resize:'vertical',
+            fontFamily:'inherit', marginBottom:'6px' }});
+  explTa.value = edit.explanation || '';
+  explTa.oninput = () => { edit.explanation = explTa.value; };
+  wrap.append(
+    el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'2px' }},
+      '💡 Пояснение (необязательно)'),
+    explTa);
+
+  const maxInput = el('input', { type:'number', min:'1', max:'30',
+    value: edit.max_points,
+    style:{ width:'80px', padding:'6px 10px', borderRadius:'6px',
+            border:'1px solid var(--border-2)', fontSize:'13px',
+            boxSizing:'border-box', fontFamily:'inherit' }});
+  maxInput.oninput = () => { edit.max_points = parseInt(maxInput.value, 10) || 1; };
+  wrap.append(
+    el('div', { style:{ display:'flex', alignItems:'center', gap:'8px' }},
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-2)' }}, 'Макс. баллов:'),
+      maxInput,
+      el('div', { style:{ fontSize:'10px', color:'var(--ink-3)' }},
+        '(ФИПИ-2026: №8 и №22 — 2, №27 — 22, остальные — 1)')));
+
+  return wrap;
+}
+
+/* Сохранение всех учительских правок варианта пачкой. */
+async function saveSolverTeacherEdits(){
+  if(!STATE.solverData){ showToast('Нет данных'); return; }
+  const data = STATE.solverData;
+  const edits = STATE.solverEditedQuestions || {};
+  /* 1. Собираем PATCH-payload для каждого изменённого задания */
+  const patches = [];
+  data.questions.forEach(q => {
+    /* question_text — текущее значение из STATE.solverScratch (там лежит редактируемый текст) */
+    const newText = (STATE.solverScratch && STATE.solverScratch[q.num])
+      ? STATE.solverScratch[q.num] : q.question_text;
+    const e = edits[q.num] || {};
+    /* ВАЖНО: что учитель набрал в основное поле ответа решалки — это и есть
+       правильный ответ. Если редактирование поля «correct_answer» в панели
+       инлайн-правок не использовалось, берём значение из solverAnswers. */
+    const answerFromSolver = (STATE.solverAnswers && STATE.solverAnswers[q.num] || '').trim();
+    const editedAnswer = (e.correct_answer || '').trim();
+    /* Приоритет: явная правка > поле решалки > старый ответ */
+    const finalAnswer = editedAnswer || answerFromSolver || (q.correct_answer || '');
+    /* Если ничего не менялось — пропускаем */
+    const changed =
+      newText !== q.question_text ||
+      finalAnswer !== (q.correct_answer || '') ||
+      (e.explanation !== undefined && e.explanation !== q.explanation) ||
+      (e.max_points !== undefined && Number(e.max_points) !== Number(q.max_points));
+    if(!changed) return;
+    patches.push({
+      id: q.id,
+      payload: {
+        question_text: newText,
+        correct_answer: q.num === 27 ? null : (finalAnswer.trim() || null),
+        explanation: (e.explanation || q.explanation || '').trim() || null,
+        max_points: e.max_points || q.max_points || 1
+      }
+    });
+  });
+
+  if(!patches.length){
+    showToast('Нечего сохранять — изменений нет');
+    return;
+  }
+
+  showToast('⏳ Сохраняю ' + patches.length + ' заданий…');
+  let ok = 0, fail = 0;
+  for(const p of patches){
+    try {
+      await restRequest('PATCH', '/test_variant_questions?id=eq.' + p.id,
+        p.payload, { prefer: 'return=minimal' });
+      ok++;
+    } catch(e){ console.warn('save fail q.id=' + p.id + ':', e.message); fail++; }
+  }
+  if(fail){
+    showToast('⚠ Сохранено ' + ok + ' из ' + (ok + fail) + ' (есть ошибки в консоли)');
+  } else {
+    showToast('✅ Сохранено: ' + ok + ' заданий');
+  }
+  /* Перезагружаем сводную, если открыта по этому варианту */
+  if(STATE.selectedVariantId === STATE.solverVariantId){
+    try { await loadVariantFull(STATE.solverVariantId); } catch(_){}
+  }
+}
+
 /* Завершение попытки: автопроверка + сохранение в БД */
 async function finishSolvingAndSave(){
   if(!STATE.solverData || !STATE.solverVariantId) return;
@@ -22863,37 +22996,58 @@ function viewSolverVariant(){
   }
 
   const isPreview = !!STATE.solverPreview;
+  const isTeacherEdit = !!STATE.solverTeacherEdit;
+  const isTeacherMode = isPreview || isTeacherEdit;
+  const headBg = isTeacherEdit ? '#EFF6FF' : isPreview ? '#FFFBEB' : 'var(--surface)';
+  const headBorder = isTeacherEdit ? '#3B82F6' : isPreview ? '#F59E0B' : 'var(--p)';
+  const headLabel = isTeacherEdit
+    ? '✎ Редактирование варианта учителем — те же блоки, что у ученика, плюс поля для правок'
+    : isPreview
+      ? '👁 Режим просмотра учителем — изменения не сохраняются'
+      : '🎯 Решаю пробник' + (STATE.solverParentAttemptId ? ' · работа над ошибками' : '');
   const header = el('div', { style:{ position:'sticky', top:0, zIndex:10,
-    background: isPreview ? '#FFFBEB' : 'var(--surface)',
-    borderBottom:'2px solid ' + (isPreview ? '#F59E0B' : 'var(--p)'),
+    background: headBg,
+    borderBottom:'2px solid ' + headBorder,
     padding:'12px 16px', marginBottom:'14px', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
     el('div', null,
-      el('div', { style:{ fontSize:'11px', color: isPreview ? '#92400E' : 'var(--ink-3)',
+      el('div', { style:{ fontSize:'11px',
+                          color: isTeacherEdit ? '#1E40AF' : isPreview ? '#92400E' : 'var(--ink-3)',
                           textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
-        isPreview
-          ? '👁 Режим просмотра учителем — изменения не сохраняются'
-          : '🎯 Решаю пробник' + (STATE.solverParentAttemptId ? ' · работа над ошибками' : '')),
+        headLabel),
       el('h2', { style:{ marginTop:'2px' }}, v.title)),
     el('div', { style:{ display:'flex', gap:'10px', alignItems:'center' }},
-      el('span', { style:{ fontSize:'10px', color:'var(--ink-3)' }}, '⏱'),
-      tickerEl,
+      isTeacherMode ? null : el('span', { style:{ fontSize:'10px', color:'var(--ink-3)' }}, '⏱'),
+      isTeacherMode ? null : tickerEl,
       el('button', { class:'btn btn-secondary btn-sm',
         onclick: () => {
+          if(isTeacherMode){
+            STATE.solverVariantId = null;
+            STATE.solverData = null;
+            STATE.solverPreview = false;
+            STATE.solverTeacherEdit = false;
+            render();
+            return;
+          }
           if(!confirm('Выйти и не сохранять? Черновик ответов останется — сможешь продолжить позже.')) return;
           STATE.solverVariantId = null;
           STATE.solverData = null;
           render();
         }
-      }, '✕ Выйти'),
-      el('button', { class:'btn btn-teal',
-        onclick: async () => {
-          const unanswered = questions.filter(q => !(STATE.solverAnswers[q.num] || '').trim());
-          if(unanswered.length){
-            if(!confirm('Не отвечено заданий: ' + unanswered.length + '. Всё равно завершить?')) return;
-          } else if(!confirm('Завершить пробник? Ответы будут проверены автоматически.')) return;
-          await finishSolvingAndSave();
-        }
-      }, '✅ Завершить')));
+      }, isTeacherMode ? '✕ Закрыть' : '✕ Выйти'),
+      isTeacherEdit
+        ? el('button', { class:'btn btn-teal',
+            onclick: () => saveSolverTeacherEdits()
+          }, '💾 Сохранить вариант')
+        : el('button', { class:'btn btn-teal',
+            onclick: async () => {
+              if(STATE.solverPreview){ await finishSolvingAndSave(); return; }
+              const unanswered = questions.filter(q => !(STATE.solverAnswers[q.num] || '').trim());
+              if(unanswered.length){
+                if(!confirm('Не отвечено заданий: ' + unanswered.length + '. Всё равно завершить?')) return;
+              } else if(!confirm('Завершить пробник? Ответы будут проверены автоматически.')) return;
+              await finishSolvingAndSave();
+            }
+          }, '✅ Завершить')));
   wrap.append(header);
 
   /* Инструкция */
@@ -23053,6 +23207,10 @@ function viewSolverVariant(){
     }, checkedInfo ? '✓ Проверено' : '✓ Проверить');
     card.append(checkBtn);
     card.append(resultBox);
+    /* Если режим учительского редактирования — добавляем блок инлайн-правок */
+    if(isTeacherEdit){
+      card.append(makeTeacherEditPanel(q));
+    }
     left.append(card);
   });
 
@@ -23628,10 +23786,7 @@ function modalEditVariant(){
     }
   }, '💾 Сохранить изменения');
   /* Кнопка «Просмотреть как ученик» — открывает решалку варианта в режиме
-     просмотра (никакие попытки/ответы в БД не пишутся). Полезно учителю
-     чтобы увидеть, как реально выглядит вариант со всеми интерактивами
-     (dropdown задания 21, scratch-разметка и т.д.) — без необходимости
-     заходить под аккаунтом ученика. */
+     просмотра (никакие попытки/ответы в БД не пишутся). */
   const previewBtn = el('button', { class:'btn btn-secondary',
     style:{ marginTop:'8px', width:'100%' },
     onclick: () => {
@@ -23643,8 +23798,24 @@ function modalEditVariant(){
       startSolvingVariant(vid, { preview: true });
     }
   }, '👁 Просмотреть как ученик');
+  /* Кнопка «Редактировать в стиле ученика» — тот же экран что у ученика,
+     плюс инлайн-блоки для редактирования правильного ответа, пояснения,
+     макс. баллов. Сами буквы / запятые / выбранные условия учитель тоже
+     вписывает прямо в поле ответа — это становится эталоном для проверки. */
+  const editAsStudentBtn = el('button', { class:'btn btn-p',
+    style:{ marginTop:'8px', width:'100%' },
+    onclick: () => {
+      const v = STATE.editVariantData && STATE.editVariantData.variant;
+      if(!v) return;
+      const vid = v.id;
+      STATE.editVariantId = null;
+      STATE.editVariantData = null;
+      startSolvingVariant(vid, { teacherEdit: true });
+    }
+  }, '✎ Редактировать в стиле ученика');
   body.append(saveBtn);
   body.append(previewBtn);
+  body.append(editAsStudentBtn);
 
   return el('div', { class:'modal-bg', style: bgStyle,
     onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
