@@ -8643,6 +8643,19 @@ function viewStudentHome(){
       'Сегодня Краш-тест в самом разгаре. Поехали 🐝'));
 
   /* === Плашка «🔥 Новый разогрев готов» — над hero === */
+  /* Подгружаем дни разогрева и их блоки в фоне — иначе бейдж и плашка пусты,
+     пока ученик сам не зайдёт на таб «Дни». render() вызовется второй раз
+     после загрузки и индикаторы появятся. */
+  if(!STATE.warmupDays) {
+    loadWarmupDays().then(render);
+  } else {
+    (STATE.warmupDays || []).filter(d => d.is_published).forEach(d => {
+      if(!STATE.warmupBlocksByDay || !STATE.warmupBlocksByDay[d.id]){
+        loadWarmupBlocks(d.id).then(render);
+      }
+    });
+  }
+
   /* Показываем если у ученика есть непрочитанные посты в каком-то дне разогрева
      или дне интенсива. Кликабельная — кидает на «Дни интенсива» и (для warmup)
      сразу открывает нужный день полноэкранно. */
@@ -23801,7 +23814,17 @@ function _renderNow(){
         setTimeout(() => { STATE.studentSplashActive = false; render(); }, 2100);
       }
     }
-    /* Бейдж непрочитанных постов на табе «Дни интенсива» — суммарно по всем дням разогрева+интенсива */
+    /* Бейдж непрочитанных постов на табе «Дни интенсива» — суммарно по всем
+       дням разогрева+интенсива. Чтобы не было пустого бейджа в первые секунды,
+       триггерим фоновую загрузку warmup_days и blocks (если ещё нет). */
+    if(MY_PROFILE && MY_PROFILE.role === 'student'){
+      if(!STATE.warmupDays) loadWarmupDays().then(render);
+      else (STATE.warmupDays || []).filter(d => d.is_published).forEach(d => {
+        if(!STATE.warmupBlocksByDay || !STATE.warmupBlocksByDay[d.id]){
+          loadWarmupBlocks(d.id).then(render);
+        }
+      });
+    }
     const unreadDayPostsCount = getTotalUnreadDayPosts();
     const tabs = [
       { key:'home', label:'Главная', ic:'🏠' },
