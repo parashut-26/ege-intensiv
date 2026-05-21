@@ -10958,6 +10958,59 @@ function makeMicButton(){
   };
 }
 
+/* После успешного save синхронизируем in-memory кеши ответов, иначе при
+   повторном открытии модалки разбора задания виден старый пустой комментарий
+   (модалка читает данные из STATE.studentVariantsData / .currentVariantData /
+   .myVariantAnswers, а не из БД). */
+function updateCachedAnswerField(attemptId, num, column, value){
+  const cleanVal = (value || '').trim() || null;
+  const buckets = [
+    STATE.studentVariantsData && STATE.studentVariantsData.answersByAttempt,
+    STATE.currentVariantData && STATE.currentVariantData.answersByAttempt,
+    STATE.myVariantAnswers
+  ];
+  buckets.forEach(b => {
+    if(!b) return;
+    if(!b[attemptId]) b[attemptId] = {};
+    if(!b[attemptId][num]){
+      b[attemptId][num] = { attempt_id: attemptId, question_num: num };
+    }
+    b[attemptId][num][column] = cleanVal;
+  });
+  /* И в открытом state модалки тоже — на случай, если модалка остаётся открытой */
+  if(STATE.examineQuestion){
+    if(column === 'teacher_comment') STATE.examineQuestion.teacherComment = cleanVal;
+    if(column === 'student_note')   STATE.examineQuestion.studentNote = cleanVal;
+  }
+}
+
+/* Сохранение поля в test_variant_answers с фолбэком INSERT, если строки нет.
+   Возвращает Promise<{ok:true, affected:N}> или кидает ошибку.
+   Зачем: PATCH на несуществующую строку — это «успех» в PostgREST (HTTP 204),
+   но 0 затронутых строк. Юзер видит «✓ Сохранено», а на самом деле в БД пусто.
+   Поэтому используем return=representation чтобы реально знать, апдейтнулось
+   или нет, и при 0 строк делаем INSERT. */
+async function saveAnswerField(attemptId, num, column, value){
+  if(!attemptId) throw new Error('нет attemptId');
+  const patch = {}; patch[column] = (value || '').trim() || null;
+  const resp = await restRequest('PATCH',
+    '/test_variant_answers?attempt_id=eq.' + attemptId +
+    '&question_num=eq.' + num,
+    patch, { prefer: 'return=representation' });
+  if(Array.isArray(resp) && resp.length > 0){
+    updateCachedAnswerField(attemptId, num, column, value);
+    return { ok: true, affected: resp.length, via: 'patch' };
+  }
+  /* PATCH ничего не нашёл — INSERT-им новую строку. user_answer, points,
+     max_points для тех заданий, где их ещё не было, оставляем null/0. */
+  const insertPayload = { attempt_id: attemptId, question_num: num };
+  insertPayload[column] = patch[column];
+  await restRequest('POST', '/test_variant_answers',
+    insertPayload, { prefer: 'return=minimal' });
+  updateCachedAnswerField(attemptId, num, column, value);
+  return { ok: true, affected: 1, via: 'insert' };
+}
+
 function modalExamineQuestion(){
   if(!STATE.examineQuestion) return null;
   const { variantId, num, userAnswer, points, max, studentNote, teacherComment, attemptId, isStudent } = STATE.examineQuestion;
@@ -11098,7 +11151,10 @@ function modalExamineQuestion(){
         el('div', { html: formatExplanation(expl), style:{ padding:'10px 14px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'10px', fontSize:'14px', lineHeight:'1.6', wordBreak:'break-word', color:'var(--ink)' }}));
     }
 
-    /* === Хелпер для дебаунс-сохранения произвольного поля answer'а === */
+    /* === Хелпер для дебаунс-сохранения произвольного поля answer'а ===
+       Использует saveAnswerField, который делает PATCH с фолбэком INSERT —
+       это спасает попытки, в которых для данного num ещё нет строки в БД
+       (например, у задания 27, если ученик не заполнил позицию автора). */
     const makeFieldSaver = (column) => {
       let t = null;
       const status = el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'8px' }}, '');
@@ -11111,11 +11167,7 @@ function modalExamineQuestion(){
         clearTimeout(t);
         t = setTimeout(async () => {
           try {
-            const patch = {}; patch[column] = (val || '').trim() || null;
-            await restRequest('PATCH',
-              '/test_variant_answers?attempt_id=eq.' + attemptId +
-              '&question_num=eq.' + num,
-              patch, { prefer: 'return=minimal' });
+            await saveAnswerField(attemptId, num, column, val);
             status.textContent = '✓ сохранено';
             setTimeout(() => { status.textContent = ''; }, 1500);
           } catch(e){
@@ -11156,12 +11208,8 @@ function modalExamineQuestion(){
           noteSaveBtn.textContent = '⏳ Сохраняю…';
           noteSaveResult.textContent = '';
           try {
-            await restRequest('PATCH',
-              '/test_variant_answers?attempt_id=eq.' + attemptId +
-              '&question_num=eq.' + num,
-              { student_note: (noteTa.value || '').trim() || null },
-              { prefer: 'return=minimal' });
-            noteSaveResult.innerHTML = '<span style="color:#065F46;font-weight:700;">✓ Сохранено — учитель увидит</span>';
+            const res = await saveAnswerField(attemptId, num, 'student_note', noteTa.value);
+            noteSaveResult.innerHTML = '<span style="color:#065F46;font-weight:700;">✓ Сохранено — учитель увидит (' + res.via + ')</span>';
           } catch(e){
             noteSaveResult.innerHTML = '<span style="color:#991B1B;font-weight:700;">⚠ Ошибка: ' +
               (e && e.message || 'не удалось сохранить') + '</span>';
@@ -11242,12 +11290,8 @@ function modalExamineQuestion(){
             saveBtn.textContent = '⏳ Сохраняю…';
             saveResult.textContent = '';
             try {
-              await restRequest('PATCH',
-                '/test_variant_answers?attempt_id=eq.' + attemptId +
-                '&question_num=eq.' + num,
-                { teacher_comment: (tcTa.value || '').trim() || null },
-                { prefer: 'return=minimal' });
-              saveResult.innerHTML = '<span style="color:#065F46;font-weight:700;">✓ Сохранено в БД</span>';
+              const res = await saveAnswerField(attemptId, num, 'teacher_comment', tcTa.value);
+              saveResult.innerHTML = '<span style="color:#065F46;font-weight:700;">✓ Сохранено в БД (' + res.via + ')</span>';
             } catch(e){
               saveResult.innerHTML = '<span style="color:#991B1B;font-weight:700;">⚠ Ошибка: ' +
                 (e && e.message || 'не удалось сохранить') + '</span>';
@@ -22579,12 +22623,8 @@ function viewSolverResult(){
           noteSaveBtn.textContent = '⏳ Сохраняю…';
           noteSaveResult.textContent = '';
           try {
-            await restRequest('PATCH',
-              '/test_variant_answers?attempt_id=eq.' + attemptId +
-              '&question_num=eq.' + r.num,
-              { student_note: (noteTa.value || '').trim() || null },
-              { prefer: 'return=minimal' });
-            noteSaveResult.innerHTML = '<span style="color:#065F46;font-weight:700;">✓ Сохранено — учитель увидит</span>';
+            const res = await saveAnswerField(attemptId, r.num, 'student_note', noteTa.value);
+            noteSaveResult.innerHTML = '<span style="color:#065F46;font-weight:700;">✓ Сохранено — учитель увидит (' + res.via + ')</span>';
           } catch(e){
             noteSaveResult.innerHTML = '<span style="color:#991B1B;font-weight:700;">⚠ ' +
               (e && e.message || 'не удалось сохранить') + '</span>';
