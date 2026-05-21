@@ -22171,6 +22171,7 @@ async function startSolvingVariant(variantId, opts){
   STATE.solverAnswers = {};
   STATE.solverChecked = {};   // { num: { points, max, correct, ts } } — мгновенная проверка
   STATE.solverScratch = {};   // { num: html } — черновик с разметкой текста задания
+  STATE.solverDropdowns21 = {};
   STATE.solverResult = null;
   STATE.solverResultAttemptId = null;
   STATE.solverFinishedAt = null;
@@ -22178,6 +22179,7 @@ async function startSolvingVariant(variantId, opts){
   STATE.solverParentAttemptId = opts.parentAttemptId || null;
   STATE.solverFilteredNums = opts.filterNums || null;
   STATE.liveAttemptId = null;   // создаётся при первом «Проверить» — live-попытка
+  STATE.solverPreview = !!opts.preview;  // режим «учитель смотрит как ученик»
   render();
   try {
     STATE.solverData = await loadVariantForSolving(variantId);
@@ -22256,6 +22258,8 @@ function saveSolverDraft(){
    текущее состояние. При финальном «Сдать пробник» эта же попытка просто
    завершается (UPDATE finished_at + итоговый балл), новой не создаётся. */
 async function ensureLiveAttempt(){
+  /* В режиме просмотра учителем — ничего в БД не создаём */
+  if(STATE.solverPreview) return null;
   if(STATE.liveAttemptId) return STATE.liveAttemptId;
   if(!MY_PROFILE || !MY_PROFILE.id) return null;
   try {
@@ -22589,6 +22593,15 @@ function makeTask21Field(q){
 /* Завершение попытки: автопроверка + сохранение в БД */
 async function finishSolvingAndSave(){
   if(!STATE.solverData || !STATE.solverVariantId) return;
+  /* В режиме просмотра учителем — просто выходим, ничего не сохраняем */
+  if(STATE.solverPreview){
+    STATE.solverVariantId = null;
+    STATE.solverData = null;
+    STATE.solverPreview = false;
+    showToast('👁 Просмотр завершён');
+    render();
+    return;
+  }
   if(!MY_PROFILE){ showToast('Нет профиля — авторизуйся'); return; }
   STATE.solverFinishedAt = Date.now();
   const data = STATE.solverData;
@@ -22849,10 +22862,17 @@ function viewSolverVariant(){
     }, 1000);
   }
 
-  const header = el('div', { style:{ position:'sticky', top:0, zIndex:10, background:'var(--surface)', borderBottom:'2px solid var(--p)', padding:'12px 16px', marginBottom:'14px', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
+  const isPreview = !!STATE.solverPreview;
+  const header = el('div', { style:{ position:'sticky', top:0, zIndex:10,
+    background: isPreview ? '#FFFBEB' : 'var(--surface)',
+    borderBottom:'2px solid ' + (isPreview ? '#F59E0B' : 'var(--p)'),
+    padding:'12px 16px', marginBottom:'14px', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
     el('div', null,
-      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
-        '🎯 Решаю пробник' + (STATE.solverParentAttemptId ? ' · работа над ошибками' : '')),
+      el('div', { style:{ fontSize:'11px', color: isPreview ? '#92400E' : 'var(--ink-3)',
+                          textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+        isPreview
+          ? '👁 Режим просмотра учителем — изменения не сохраняются'
+          : '🎯 Решаю пробник' + (STATE.solverParentAttemptId ? ' · работа над ошибками' : '')),
       el('h2', { style:{ marginTop:'2px' }}, v.title)),
     el('div', { style:{ display:'flex', gap:'10px', alignItems:'center' }},
       el('span', { style:{ fontSize:'10px', color:'var(--ink-3)' }}, '⏱'),
@@ -23607,7 +23627,24 @@ function modalEditVariant(){
       }
     }
   }, '💾 Сохранить изменения');
+  /* Кнопка «Просмотреть как ученик» — открывает решалку варианта в режиме
+     просмотра (никакие попытки/ответы в БД не пишутся). Полезно учителю
+     чтобы увидеть, как реально выглядит вариант со всеми интерактивами
+     (dropdown задания 21, scratch-разметка и т.д.) — без необходимости
+     заходить под аккаунтом ученика. */
+  const previewBtn = el('button', { class:'btn btn-secondary',
+    style:{ marginTop:'8px', width:'100%' },
+    onclick: () => {
+      const v = STATE.editVariantData && STATE.editVariantData.variant;
+      if(!v) return;
+      const vid = v.id;
+      STATE.editVariantId = null;
+      STATE.editVariantData = null;
+      startSolvingVariant(vid, { preview: true });
+    }
+  }, '👁 Просмотреть как ученик');
   body.append(saveBtn);
+  body.append(previewBtn);
 
   return el('div', { class:'modal-bg', style: bgStyle,
     onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
