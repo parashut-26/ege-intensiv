@@ -657,6 +657,96 @@ if(typeof document !== 'undefined'){
   window.addEventListener('pagehide', persistTestProgress);
 }
 
+/* ============================================================
+   ИНДИКАТОРЫ «НОВОЕ» / «НЕПРОЧИТАННОЕ» для ученика
+   Ученик видит точку/число на табе «Дни» и плашку на главной,
+   когда учитель опубликовал новый пост в Разогреве или дне
+   интенсива, который ученик ещё не открывал.
+
+   Ключ: zebrus_seen_days_<profileId>
+   Значение: { "warmup-<id>": <ts>, "intensive-<ord>": <ts> }
+   Хранится бессрочно; обновляется при открытии дня.
+   ============================================================ */
+function _seenDaysKey(){
+  const uid = (MY_PROFILE && MY_PROFILE.id) ? MY_PROFILE.id : 'anon';
+  return 'zebrus_seen_days_' + uid;
+}
+function getSeenDays(){
+  try {
+    const raw = localStorage.getItem(_seenDaysKey());
+    if(!raw) return {};
+    const p = JSON.parse(raw);
+    return (p && typeof p === 'object') ? p : {};
+  } catch(_){ return {}; }
+}
+function markDayAsSeen(scopeKey){
+  /* scopeKey = "warmup-<dayId>" или "intensive-<dayOrd>" */
+  if(!scopeKey) return;
+  try {
+    const map = getSeenDays();
+    map[scopeKey] = Date.now();
+    localStorage.setItem(_seenDaysKey(), JSON.stringify(map));
+  } catch(_){}
+}
+/* Возвращает массив постов в warmup-дне, опубликованных после lastSeen
+   (либо все опубликованные, если день ни разу не открывали). */
+function getUnreadWarmupPosts(dayId){
+  if(dayId == null) return [];
+  const blocks = (STATE.warmupBlocksByDay && STATE.warmupBlocksByDay[dayId]) || [];
+  if(!blocks.length) return [];
+  const seen = getSeenDays();
+  const lastTs = seen['warmup-' + dayId] || 0;
+  return blocks.filter(b => {
+    if(b.is_published === false) return false;
+    const created = b.created_at ? Date.parse(b.created_at) : 0;
+    return created > lastTs;
+  });
+}
+function getUnreadIntensivePosts(dayOrd){
+  if(dayOrd == null) return [];
+  const blocks = (STATE.intensivePostsByOrd && STATE.intensivePostsByOrd[dayOrd]) || [];
+  if(!blocks.length) return [];
+  const seen = getSeenDays();
+  const lastTs = seen['intensive-' + dayOrd] || 0;
+  return blocks.filter(b => {
+    if(b.is_published === false) return false;
+    const created = b.created_at ? Date.parse(b.created_at) : 0;
+    return created > lastTs;
+  });
+}
+/* Суммарное количество непрочитанных постов по всем дням разогрева
+   + всем опубликованным дням интенсива. Используется для бейджа на табе. */
+function getTotalUnreadDayPosts(){
+  let total = 0;
+  /* warmup */
+  const warmupDays = (STATE.warmupDays || []).filter(d => d.is_published);
+  warmupDays.forEach(d => { total += getUnreadWarmupPosts(d.id).length; });
+  /* intensive */
+  if(typeof DAYS !== 'undefined' && Array.isArray(DAYS)){
+    DAYS.filter(d => d.kind === 'work').forEach(d => {
+      total += getUnreadIntensivePosts(d.id).length;
+    });
+  }
+  return total;
+}
+/* Дни, в которых есть новые посты для отображения «к чему звать» — например,
+   на главной показываем плашку «🔥 Разогрев готов — открыть» с переходом
+   именно в этот день. Берём ПЕРВЫЙ день с непрочитанным. */
+function getFirstWarmupDayWithUnread(){
+  const warmupDays = (STATE.warmupDays || []).filter(d => d.is_published);
+  for(const d of warmupDays){
+    if(getUnreadWarmupPosts(d.id).length > 0) return d;
+  }
+  return null;
+}
+function getFirstIntensiveDayWithUnread(){
+  if(typeof DAYS === 'undefined' || !Array.isArray(DAYS)) return null;
+  for(const d of DAYS.filter(x => x.kind === 'work')){
+    if(getUnreadIntensivePosts(d.id).length > 0) return d;
+  }
+  return null;
+}
+
 /* =======================================================================
    СОСТОЯНИЕ
    ======================================================================= */
@@ -1790,6 +1880,7 @@ async function restoreSession(){
           }
           /* Live-обновления Сводки (только учитель) */
           if(profile.role === 'teacher') startTeacherRealtime();
+          if(profile.role === 'student') startStudentRealtime();
         }).catch(() => {});
         return;
       } else {
@@ -1855,6 +1946,7 @@ async function restoreSession(){
           startPresenceHeartbeat();
           if(profile.role === 'teacher' || profile.role === 'curator') startPresenceRefreshLoop();
           if(profile.role === 'teacher') startTeacherRealtime();
+          if(profile.role === 'student') startStudentRealtime();
         }).catch(() => {});
   } else {
     STATE.view = 'login';
@@ -2382,6 +2474,79 @@ function stopTeacherRealtime(){
   _REALTIME_CHANNELS.forEach(ch => { try { sb.removeChannel(ch); } catch(_){} });
   _REALTIME_CHANNELS = [];
   console.log('realtime: остановлено');
+}
+
+/* ===================================================
+   STUDENT REALTIME — in-app уведомления о новых постах
+   Когда учитель публикует пост в Разогреве/Дне — ученик,
+   если в этот момент онлайн, видит всплывающий toast.
+   =================================================== */
+let _STUDENT_REALTIME_CHANNELS = [];
+
+function startStudentRealtime(){
+  if(!sb) return;
+  if(!MY_PROFILE || MY_PROFILE.role !== 'student') return;
+  if(_STUDENT_REALTIME_CHANNELS.length){
+    console.log('student-realtime: уже подписаны');
+    return;
+  }
+  try {
+    const ch = sb
+      .channel('rt-warmup-blocks')
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'warmup_blocks' },
+        async (payload) => {
+          /* Реагируем только на INSERT с is_published=true ИЛИ
+             UPDATE где is_published стал true (учитель опубликовал скрытый пост). */
+          const eventType = payload.eventType || payload.event;
+          const newRow = payload.new || {};
+          const oldRow = payload.old || {};
+          const wasJustPublished =
+            (eventType === 'INSERT' && newRow.is_published !== false) ||
+            (eventType === 'UPDATE' && newRow.is_published === true && oldRow.is_published === false);
+          if(!wasJustPublished) return;
+          /* Освежаем кеш блоков для нужного дня и рендерим — это обновит
+             бейдж на табе «Дни» и плашку на главной автоматически. */
+          try {
+            if(newRow.day_id){
+              await loadWarmupBlocks(newRow.day_id);
+            } else if(newRow.intensive_day_ord){
+              await loadIntensivePosts(newRow.intensive_day_ord);
+            }
+          } catch(_){}
+          /* In-app тост — НЕ показываем если ученик прямо сейчас в этом дне */
+          const inThisWarmup  = newRow.day_id && STATE.openWarmupDayId === newRow.day_id;
+          const inDaysTab     = STATE.view === 'student' && STATE.studentTab === 'days';
+          if(!inThisWarmup){
+            /* Дружелюбный toast с CTA: показываем кнопкой на 7 секунд */
+            const dayLabel = newRow.title || (newRow.day_id ? '«Разогрев»' : 'интенсиве');
+            const emoji = newRow.emoji || '🔥';
+            STATE.toast = emoji + ' Новый пост в дне ' + dayLabel + ' — открой «Дни»';
+            if(typeof render === 'function') render();
+            setTimeout(() => {
+              if(STATE.toast && STATE.toast.startsWith(emoji)){
+                STATE.toast = '';
+                if(typeof render === 'function') render();
+              }
+            }, 7000);
+          } else {
+            /* Уже в этом дне — просто render() чтобы новый блок появился без F5 */
+            if(typeof render === 'function') render();
+          }
+        })
+      .subscribe((status) => {
+        if(status === 'SUBSCRIBED') console.log('✓ student-realtime: warmup_blocks подписаны');
+        else if(status === 'CHANNEL_ERROR') console.warn('student-realtime: warmup_blocks CHANNEL_ERROR (включи Realtime на таблице warmup_blocks)');
+      });
+    _STUDENT_REALTIME_CHANNELS.push(ch);
+  } catch(e){
+    console.warn('startStudentRealtime:', e.message);
+  }
+}
+function stopStudentRealtime(){
+  if(!sb || !_STUDENT_REALTIME_CHANNELS.length) return;
+  _STUDENT_REALTIME_CHANNELS.forEach(ch => { try { sb.removeChannel(ch); } catch(_){} });
+  _STUDENT_REALTIME_CHANNELS = [];
 }
 
 /* === ЧАТ ИНТЕНСИВА ===
@@ -6357,6 +6522,44 @@ async function disableWebPush(){
   } catch(_){}
 }
 
+/* Учитель опубликовал новый пост в Разогреве/Дне — fire-and-forget рассылка
+   push всем ученикам через Edge Function notify-warmup-published. */
+function notifyWarmupPublished(block){
+  if(!sb || !MY_PROFILE || !block) return;
+  const token = getAccessToken();
+  if(!token){ console.warn('[notify-warmup] нет токена'); return; }
+  /* Подберём человеко-понятный day_title */
+  let dayTitle = '';
+  if(block.day_id){
+    const d = (STATE.warmupDays || []).find(x => x.id === block.day_id);
+    if(d) dayTitle = (d.emoji ? d.emoji + ' ' : '') + (d.title || ('Разогрев · день ' + d.ord));
+  } else if(block.intensive_day_ord){
+    const d = (typeof DAYS !== 'undefined' && DAYS.find) ? DAYS.find(x => x.id === block.intensive_day_ord) : null;
+    if(d) dayTitle = 'День ' + d.id + (d.title ? ' · ' + d.title.split('+')[0].trim() : '');
+  }
+  const payload = {
+    day_id:            block.day_id || null,
+    intensive_day_ord: block.intensive_day_ord || null,
+    day_title:         dayTitle,
+    post_title:        block.title || null,
+    post_emoji:        block.emoji || null,
+    audience:          'active',
+  };
+  const url = SUPABASE_URL + '/functions/v1/notify-warmup-published';
+  console.log('[notify-warmup] POST →', url, payload);
+  fetch(url, {
+    method:'POST',
+    headers:{
+      'Content-Type':'application/json',
+      'Authorization':'Bearer ' + token,
+      'apikey': SUPABASE_KEY,
+    },
+    body: JSON.stringify(payload)
+  })
+  .then(r => r.json().then(j => console.log('[notify-warmup] ответ', r.status, j)).catch(() => {}))
+  .catch(e => console.warn('[notify-warmup] fetch упал:', e.message));
+}
+
 /* Универсальный вызов push-send (как notifyViaTelegram, fire-and-forget) */
 function notifyViaPush(userId, title, body, link){
   console.log('[PUSH] notifyViaPush вызван', { userId, hasSb: !!sb, hasProfile: !!MY_PROFILE });
@@ -8437,7 +8640,59 @@ function viewStudentHome(){
         (MY_PROFILE && MY_PROFILE.full_name ? MY_PROFILE.full_name.split(/\s+/)[0] : ME_STUDENT.name) + '!'),
       ' 👋'),
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'24px' }},
-      'Сегодня Краш-тест в самом разгаре. Поехали 🐝'),
+      'Сегодня Краш-тест в самом разгаре. Поехали 🐝'));
+
+  /* === Плашка «🔥 Новый разогрев готов» — над hero === */
+  /* Показываем если у ученика есть непрочитанные посты в каком-то дне разогрева
+     или дне интенсива. Кликабельная — кидает на «Дни интенсива» и (для warmup)
+     сразу открывает нужный день полноэкранно. */
+  const unreadWarmupDay = getFirstWarmupDayWithUnread();
+  const unreadIntensiveDay = getFirstIntensiveDayWithUnread();
+  const unreadTargetDay = unreadWarmupDay || unreadIntensiveDay;
+  if(unreadTargetDay){
+    const unreadCount = unreadWarmupDay
+      ? getUnreadWarmupPosts(unreadWarmupDay.id).length
+      : getUnreadIntensivePosts(unreadIntensiveDay.id).length;
+    const isWarmup = !!unreadWarmupDay;
+    const countLabel = unreadCount + ' ' + pluralRu(unreadCount, ['новый пост', 'новых поста', 'новых постов']);
+    const dayLabel = isWarmup
+      ? '«' + (unreadTargetDay.title || ('День ' + unreadTargetDay.ord)) + '»'
+      : '«День ' + unreadTargetDay.id + (unreadTargetDay.title ? ' · ' + unreadTargetDay.title.split('+')[0].trim() : '') + '»';
+    const banner = el('div', { class:'card',
+      style:{ marginBottom:'16px', padding:'16px 18px',
+              background:'linear-gradient(135deg, #FFF7ED, #FED7AA)',
+              border:'2px solid #FB923C',
+              cursor:'pointer',
+              display:'flex', alignItems:'center', justifyContent:'space-between',
+              gap:'12px', flexWrap:'wrap' },
+      onclick: () => {
+        if(isWarmup){
+          /* Прыгаем сразу на полноэкранный warmup-день */
+          openWarmupDayFullscreen(unreadTargetDay);
+        } else {
+          /* Просто на вкладку «Дни» — там посты в потоке */
+          STATE.studentTab = 'days';
+          render();
+        }
+      }
+    },
+      el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', flex:'1', minWidth:0 }},
+        el('div', { style:{ fontSize:'2.4rem' }}, isWarmup ? '🔥' : '📅'),
+        el('div', { style:{ minWidth:0 }},
+          el('div', { style:{ fontSize:'11px', color:'#9A3412', textTransform:'uppercase',
+                              letterSpacing:'.06em', fontWeight:'700' }},
+            isWarmup ? 'Новый разогрев' : 'Новые посты в дне'),
+          el('div', { style:{ fontSize:'17px', fontWeight:'800', marginTop:'2px' }},
+            countLabel + ' в ' + dayLabel),
+          el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginTop:'2px' }},
+            'Тапни, чтобы открыть и посмотреть'))),
+      el('button', { class:'btn btn-y btn-sm',
+        style:{ background:'#FB923C', color:'#fff', borderColor:'#FB923C', flexShrink:0 }
+      }, 'Открыть →'));
+    wrap.append(banner);
+  }
+
+  wrap.append(
     hero, el('div', { style:{ height:'16px' }}),
     freeEssayCard,
     mistakeBankCard(), el('div', { style:{ height:'16px' }}),
@@ -8537,6 +8792,11 @@ function mapDayCard(d){
 function viewStudentDays(){
   /* Запускаем polling — обновляем посты/реакции/комментарии каждые 12 сек */
   startPostsPolling();
+  /* Помечаем дни интенсива как прочитанные: ученик зашёл на вкладку «Дни»
+     и сейчас увидит все посты в потоке. Бейдж пропадёт. */
+  if(typeof DAYS !== 'undefined' && Array.isArray(DAYS)){
+    DAYS.filter(d => d.kind === 'work').forEach(d => markDayAsSeen('intensive-' + d.id));
+  }
   const wrap = el('div', { class:'fade-in' });
   wrap.append(
     el('h1', null, 'Дни интенсива'),
@@ -19153,6 +19413,10 @@ async function addWarmupBlock(target, payload){
     STATE.addingPostToDayId = null;
     STATE.addingPostToIntensiveOrd = null;
     showToast('✓ Пост добавлен');
+    /* Push-уведомление ученикам — если пост сразу опубликован */
+    if(payload.is_published !== false){
+      notifyWarmupPublished(payload);
+    }
     render();
   } catch(e){
     console.error('addWarmupBlock', e);
@@ -19490,6 +19754,8 @@ async function toggleWarmupBlockPublished(block, next){
       { is_published: next }, { prefer: 'return=minimal' });
     block.is_published = next;
     showToast(next ? '👁 Пост виден ученикам' : '🙈 Пост скрыт');
+    /* Включили из скрытого — рассылаем push */
+    if(next){ notifyWarmupPublished(block); }
     render();
   } catch(e){ showToast('⚠ ' + e.message); }
 }
@@ -19971,11 +20237,19 @@ function renderAddBlockForm(day, editingBlock, target){
 /* === Ученик: открытие дня в полноэкранном overlay === */
 function openWarmupDayFullscreen(day){
   STATE.openWarmupDayId = day.id;
+  /* Помечаем день как «прочитанный» — пропадает бейдж непрочитанного и плашка */
+  markDayAsSeen('warmup-' + day.id);
   /* Подгружаем игры (для блоков типа 'игра' внутри постов) и блоки дня
      параллельно, потом рендерим overlay. */
   const tasks = [loadWarmupBlocks(day.id)];
   if(!STATE.studentGamesList) tasks.push(loadStudentGamesList());
-  Promise.all(tasks).then(() => renderWarmupOverlay(day));
+  Promise.all(tasks).then(() => {
+    renderWarmupOverlay(day);
+    /* После загрузки блоков может оказаться больше «новых», чем до открытия —
+       обновим seen-метку второй раз, чтобы и эти посты тоже стали прочитанными. */
+    markDayAsSeen('warmup-' + day.id);
+    render();  /* обновим бейдж/плашку */
+  });
 }
 function closeWarmupOverlay(){
   STATE.openWarmupDayId = null;
@@ -23527,9 +23801,13 @@ function _renderNow(){
         setTimeout(() => { STATE.studentSplashActive = false; render(); }, 2100);
       }
     }
+    /* Бейдж непрочитанных постов на табе «Дни интенсива» — суммарно по всем дням разогрева+интенсива */
+    const unreadDayPostsCount = getTotalUnreadDayPosts();
     const tabs = [
       { key:'home', label:'Главная', ic:'🏠' },
-      { key:'days', label:'Дни интенсива', ic:'📅' },
+      { key:'days', label:'Дни интенсива', ic:'📅',
+        badge: unreadDayPostsCount > 0 ? unreadDayPostsCount : null,
+        badgeKind: 'warn' },
       { key:'theory', label:'Задания', ic:'📚' },
       { key:'variants', label:'Пробники', ic:'📋' },
       { key:'games', label:'Игры', ic:'🎮' },
