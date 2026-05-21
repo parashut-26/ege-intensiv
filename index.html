@@ -11013,7 +11013,7 @@ async function saveAnswerField(attemptId, num, column, value){
 
 function modalExamineQuestion(){
   if(!STATE.examineQuestion) return null;
-  const { variantId, num, userAnswer, points, max, studentNote, teacherComment, attemptId, isStudent } = STATE.examineQuestion;
+  const { variantId, num, userAnswer, points, max, studentNote, teacherComment, scratch, attemptId, isStudent } = STATE.examineQuestion;
   const close = () => {
     STATE.examineQuestion = null;
     STATE.examineQuestionData = null;
@@ -11102,6 +11102,28 @@ function modalExamineQuestion(){
     body.append(
       el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }}, '📝 Формулировка'),
       textBlock);
+
+    /* === Разметка ученика (scratch) ===
+       Если ученик во время решения красил/подчёркивал текст задания,
+       показываем его версию здесь. Это нужно учителю чтобы увидеть, что
+       ребёнок думал во время решения (грам.основу, границы придаточных).
+       Сохраняем все цвета и стили — innerHTML без санитайзера. */
+    const sc = (scratch || '').trim();
+    if(sc){
+      const scratchBlock = el('div', {
+        style:{ padding:'12px 14px', background:'#FFFBEB', borderLeft:'4px solid #FACC15',
+                borderRadius:'8px', marginBottom:'14px', fontSize:'14px',
+                lineHeight:'1.6', whiteSpace:'pre-wrap' }
+      });
+      scratchBlock.innerHTML = sc;
+      body.append(
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E', marginBottom:'6px',
+                            display:'flex', justifyContent:'space-between', alignItems:'center' }},
+          el('span', null, '🖌 Разметка ученика'),
+          el('span', { style:{ fontSize:'10px', fontWeight:'400', color:'var(--ink-3)' }},
+            'Цвета, подчёркивания и скобки, которые ученик отметил в тексте.')),
+        scratchBlock);
+    }
 
     /* Твой ответ / Позиция автора (для задания 27) */
     const isCorrect = points >= max && max > 0;
@@ -11365,7 +11387,7 @@ function studentVariantsCard(){
         if(attIds.length){
           const answers = await restRequest('GET',
             '/test_variant_answers?attempt_id=in.(' + attIds.join(',') + ')' +
-            '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment');
+            '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch');
           const byA = {};
           (answers || []).forEach(an => {
             if(!byA[an.attempt_id]) byA[an.attempt_id] = {};
@@ -11545,6 +11567,8 @@ function studentVariantsCard(){
               points: pts, max: max,
               attemptId: a.id,
               studentNote: ans ? (ans.student_note || null) : null,
+              teacherComment: ans ? (ans.teacher_comment || null) : null,
+              scratch: ans ? (ans.scratch || null) : null,
               isStudent: true  /* открыто учеником из «Мои пробники» — даём редактировать РНО */
             };
             render();
@@ -19522,7 +19546,7 @@ async function loadVariantFull(variantId){
   if(attemptIds.length){
     answers = await restRequest('GET',
       '/test_variant_answers?attempt_id=in.(' + attemptIds.join(',') + ')' +
-      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment');
+      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch');
   }
   const byAttempt = {};
   (answers || []).forEach(a => {
@@ -21727,6 +21751,7 @@ function variantCell(ans, opts){
         attemptId: opts.attemptId || ans.attempt_id || null,
         studentNote: ans.student_note || null,
         teacherComment: ans.teacher_comment || null,
+        scratch: ans.scratch || null,
         isStudent: false   // учительский путь — может редактировать teacher_comment
       };
       render();
@@ -23471,7 +23496,7 @@ async function loadVariantsByStudent(studentId){
   if(attIds.length){
     answers = await restRequest('GET',
       '/test_variant_answers?attempt_id=in.(' + attIds.join(',') + ')' +
-      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment');
+      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch');
   }
   const byAttempt = {};
   (answers || []).forEach(a => {
@@ -23595,7 +23620,10 @@ function viewVariantsByStudent(){
           STATE.examineQuestion = {
             variantId: v.id, num: 27,
             userAnswer: pos27, points: 0, max: 0,
-            studentNote: ans27 && ans27.student_note || null
+            attemptId: a.id,
+            studentNote: ans27 && ans27.student_note || null,
+            teacherComment: ans27 && ans27.teacher_comment || null,
+            scratch: ans27 && ans27.scratch || null
           };
           render();
         }
