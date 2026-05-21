@@ -20160,6 +20160,40 @@ function renderAddBlockForm(day, editingBlock, target){
       onclick: (ev) => { ev.preventDefault(); fn(); }
     }, label);
   };
+  /* Безопасная вставка HTML в contenteditable: ОБХОДИМ execCommand('insertHTML'),
+     потому что Chrome/Safari вырезают из вставляемого HTML <iframe>, <video>
+     и другие потенциально опасные теги. Делаем напрямую через Range API. */
+  function insertVideoHtmlAtCursor(html){
+    bodyEditor.focus();
+    const sel = window.getSelection();
+    let range;
+    if(sel && sel.rangeCount && bodyEditor.contains(sel.anchorNode)){
+      range = sel.getRangeAt(0);
+      range.deleteContents();
+    } else {
+      /* Фокус ушёл из редактора (мы прокликали prompt) — вставим в конец. */
+      range = document.createRange();
+      range.selectNodeContents(bodyEditor);
+      range.collapse(false);
+    }
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const frag = document.createDocumentFragment();
+    let lastNode = null;
+    while(tmp.firstChild){
+      lastNode = tmp.firstChild;
+      frag.appendChild(lastNode);
+    }
+    range.insertNode(frag);
+    if(lastNode && sel){
+      const after = document.createRange();
+      after.setStartAfter(lastNode);
+      after.collapse(true);
+      sel.removeAllRanges();
+      sel.addRange(after);
+    }
+  }
+
   /* Скрытый input для загрузки видео-файла прямо в Supabase Storage (бакет
      lesson-videos). До 100 МБ. См. uploadLessonVideo выше. */
   const videoFileInput = el('input', { type:'file',
@@ -20168,23 +20202,22 @@ function renderAddBlockForm(day, editingBlock, target){
     onchange: async (ev) => {
       const file = ev.target.files && ev.target.files[0];
       if(!file) return;
-      bodyEditor.focus();
       /* Жёлтая плашка-индикатор, заменим на <video> когда загрузится. */
       const phHtml = '<p data-vid-uploading="1" style="color:#92400E;background:#FEF3C7;padding:6px 10px;border-radius:6px;font-size:13px;">⏳ загружаю видео ' +
         (file.name || '').replace(/</g,'&lt;') + ' (' + Math.round(file.size/1024/1024) + ' МБ)…</p>';
-      try { document.execCommand('insertHTML', false, phHtml); } catch(_){}
+      insertVideoHtmlAtCursor(phHtml);
       try {
         const url = await uploadLessonVideo(file);
         const safe = url.replace(/"/g,'&quot;');
-        const videoHtml = '<p><video src="' + safe +
-          '" controls playsinline preload="metadata" style="width:100%;max-width:100%;border-radius:8px;background:#000;"></video></p><p><br></p>';
+        const videoHtml = '<div><video src="' + safe +
+          '" controls playsinline preload="metadata" style="width:100%;max-width:100%;border-radius:8px;background:#000;"></video></div><p><br></p>';
         const ph = bodyEditor.querySelector('[data-vid-uploading="1"]');
         if(ph){
           const wrap = document.createElement('div');
           wrap.innerHTML = videoHtml;
           ph.replaceWith(...wrap.childNodes);
         } else {
-          try { document.execCommand('insertHTML', false, videoHtml); } catch(_){}
+          insertVideoHtmlAtCursor(videoHtml);
         }
         showToast('🎬 Видео добавлено');
       } catch(e){
@@ -20241,8 +20274,9 @@ function renderAddBlockForm(day, editingBlock, target){
         showToast('⚠ Не понял ссылку. Разрешены: Kinescope, VK Видео, RuTube');
         return;
       }
-      bodyEditor.focus();
-      try { document.execCommand('insertHTML', false, '<p>' + embedHtml + '</p><p><br></p>'); } catch(_){}
+      /* Обёртка <div> вместо <p> — у <p> запрещено содержать блочные элементы,
+         браузер при автокоррекции может выкинуть iframe. */
+      insertVideoHtmlAtCursor('<div>' + embedHtml + '</div><p><br></p>');
       showToast('🎬 Видео встроено');
     }),
     videoFileInput   // скрытый input — должен лежать в DOM редактора
