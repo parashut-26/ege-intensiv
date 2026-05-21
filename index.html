@@ -17646,7 +17646,10 @@ function modalEditTheory(n){
           const ta = {
             get value(){
               const plain = (theoryEditor.textContent || '').trim();
-              if(!plain) return '';
+              /* Если в редакторе есть медиа (video/iframe/img), это контент,
+                 даже без текста — иначе теория с одним видео сохранится пустой. */
+              const hasMedia = !!theoryEditor.querySelector('video, iframe, img');
+              if(!plain && !hasMedia) return '';
               return (theoryEditor.innerHTML || '').trim();
             },
             set value(v){
@@ -20284,9 +20287,12 @@ function renderAddBlockForm(day, editingBlock, target){
   const bodyTextarea = {
     get value(){
       const html = (bodyEditor.innerHTML || '').trim();
-      /* Пустой редактор может содержать <br> или пустые <div> — считаем пустым */
+      /* Пустой редактор может содержать <br> или пустые <div> — считаем пустым.
+         НО: если в редакторе есть медиа (video / iframe / img) — это уже контент,
+         даже если текста нет. Иначе пост с одним видео сохранится как пустой. */
       const plain = (bodyEditor.textContent || '').trim();
-      if(!plain) return '';
+      const hasMedia = !!bodyEditor.querySelector('video, iframe, img');
+      if(!plain && !hasMedia) return '';
       return html;
     },
     set value(v){
