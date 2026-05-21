@@ -80,19 +80,18 @@ serve(async (req) => {
     : 'Открой Разогрев — там ждёт новое задание';
   const notifUrl = 'https://zebrus.online/?utm_source=push&utm_medium=warmup';
 
-  // === 3. Найти всех учеников с push_subscriptions ===
-  const audienceFilter = body.audience === 'active' ? 'status=eq.active&' : '';
+  // === 3. Найти всех учеников ===
+  // Колонки статуса в profiles нет (на старте интенсива пусть приходит всем),
+  // так что просто берём всех role='student'.
   const { data: students, error: studErr } = await sbAdmin
     .from('profiles')
-    .select('id, full_name, status, role')
+    .select('id, full_name, role')
     .eq('role', 'student');
   if (studErr) {
     console.error('[notify-warmup] students query failed:', studErr);
     return json({ error: 'students_query_failed', message: studErr.message }, 500);
   }
-  const studentIds = (students || [])
-    .filter(s => body.audience === 'active' ? s.status === 'active' : true)
-    .map(s => s.id);
+  const studentIds = (students || []).map(s => s.id);
 
   if (!studentIds.length) {
     return json({ ok: true, sent: 0, failed: 0, note: 'no_students' });
