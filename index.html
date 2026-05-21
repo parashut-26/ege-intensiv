@@ -8690,6 +8690,15 @@ function viewStudentHome(){
       }
     });
   }
+  /* То же самое для постов дней интенсива — иначе плашка/бейдж не считают
+     новые посты дней, пока ученик сам не зашёл в таб «Дни». */
+  if(typeof DAYS !== 'undefined' && Array.isArray(DAYS)){
+    DAYS.filter(d => d.kind === 'work').forEach(d => {
+      if(!STATE.intensivePostsByOrd || !STATE.intensivePostsByOrd[d.id]){
+        loadIntensivePosts(d.id).then(render);
+      }
+    });
+  }
 
   /* Показываем если у ученика есть непрочитанные посты в каком-то дне разогрева
      или дне интенсива. Кликабельная — кидает на «Дни интенсива» и (для warmup)
@@ -24086,6 +24095,15 @@ function _renderNow(){
           loadWarmupBlocks(d.id).then(render);
         }
       });
+      /* Аналогично для постов дней интенсива — иначе бейдж на табе «Дни»
+         не считает новые посты дней, пока ученик сам не зайдёт в таб. */
+      if(typeof DAYS !== 'undefined' && Array.isArray(DAYS)){
+        DAYS.filter(d => d.kind === 'work').forEach(d => {
+          if(!STATE.intensivePostsByOrd || !STATE.intensivePostsByOrd[d.id]){
+            loadIntensivePosts(d.id).then(render);
+          }
+        });
+      }
     }
     const unreadDayPostsCount = getTotalUnreadDayPosts();
     const tabs = [
