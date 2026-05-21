@@ -10907,9 +10907,60 @@ function modalVariantBuilder(){
 /* Модалка просмотра конкретного задания ученика (Drill-down).
    Открывается из «Мои пробники» при клике на цветную ячейку — показывает
    формулировку задания, твой ответ, правильный ответ, балл. */
+/* === Голосовой ввод через Web Speech API ===
+   Возвращает {ok:true, btn, attach} либо {ok:false, btn:null}. attach(textarea)
+   подвязывает кнопку к конкретной textarea: при клике запускается распознавание
+   речи, признанный текст ДОПИСЫВАЕТСЯ в конец textarea (с пробелом-разделителем)
+   и триггерится событие input, чтобы сработал автосейв. Работает в Chrome
+   (десктоп/Android), Safari iOS 14.5+, не работает в Firefox — там кнопка
+   просто не показывается. */
+function makeMicButton(){
+  const Rec = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if(!Rec) return { ok:false, btn: null, attach: () => {} };
+  let rec = null, listening = false, targetTa = null;
+  const btn = el('button', {
+    type:'button',
+    title:'Записать голосом (рус.)',
+    style:{ padding:'4px 10px', borderRadius:'6px', border:'1px solid var(--border-2)',
+            background:'#fff', cursor:'pointer', fontSize:'13px', fontFamily:'inherit',
+            lineHeight:'1.2' }
+  }, '🎤');
+  const setIdle = () => { btn.textContent = '🎤'; btn.style.background = '#fff'; };
+  const setActive = () => { btn.textContent = '⏺ запись…'; btn.style.background = '#FEE2E2'; };
+  btn.onclick = () => {
+    if(listening){ try { rec && rec.stop(); } catch(_){} return; }
+    if(!targetTa) return;
+    rec = new Rec();
+    rec.lang = 'ru-RU';
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
+    rec.onresult = (ev) => {
+      let txt = '';
+      for(let i = 0; i < ev.results.length; i++){
+        if(ev.results[i].isFinal) txt += ev.results[i][0].transcript;
+      }
+      if(!txt) return;
+      const cur = targetTa.value || '';
+      const joined = cur && !/\s$/.test(cur) ? (cur + ' ' + txt) : (cur + txt);
+      targetTa.value = joined;
+      targetTa.dispatchEvent(new Event('input', { bubbles:true }));
+    };
+    rec.onend = () => { listening = false; setIdle(); };
+    rec.onerror = () => { listening = false; setIdle(); };
+    try { rec.start(); listening = true; setActive(); }
+    catch(e){ listening = false; setIdle(); }
+  };
+  return {
+    ok: true,
+    btn,
+    attach: (ta) => { targetTa = ta; }
+  };
+}
+
 function modalExamineQuestion(){
   if(!STATE.examineQuestion) return null;
-  const { variantId, num, userAnswer, points, max, studentNote, attemptId, isStudent } = STATE.examineQuestion;
+  const { variantId, num, userAnswer, points, max, studentNote, teacherComment, attemptId, isStudent } = STATE.examineQuestion;
   const close = () => {
     STATE.examineQuestion = null;
     STATE.examineQuestionData = null;
@@ -11047,8 +11098,39 @@ function modalExamineQuestion(){
         el('div', { html: formatExplanation(expl), style:{ padding:'10px 14px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'10px', fontSize:'14px', lineHeight:'1.6', wordBreak:'break-word', color:'var(--ink)' }}));
     }
 
-    /* РНО — для ученика редактируемое поле, для учителя только просмотр */
+    /* === Хелпер для дебаунс-сохранения произвольного поля answer'а === */
+    const makeFieldSaver = (column) => {
+      let t = null;
+      const status = el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'8px' }}, '');
+      const save = (val) => {
+        if(!attemptId){
+          status.textContent = '— нужна авторизация';
+          return;
+        }
+        status.textContent = '⏳';
+        clearTimeout(t);
+        t = setTimeout(async () => {
+          try {
+            const patch = {}; patch[column] = (val || '').trim() || null;
+            await restRequest('PATCH',
+              '/test_variant_answers?attempt_id=eq.' + attemptId +
+              '&question_num=eq.' + num,
+              patch, { prefer: 'return=minimal' });
+            status.textContent = '✓ сохранено';
+            setTimeout(() => { status.textContent = ''; }, 1500);
+          } catch(e){
+            status.textContent = '⚠ не сохранилось';
+            console.warn('[' + column + '] save fail:', e.message);
+          }
+        }, 800);
+      };
+      return { status, save };
+    };
+
+    /* === Блок «Работа над ошибкой» (student_note) ===
+       Ученик пишет туда сам после проверки — рефлексия. Учитель только видит. */
     if(isStudent && attemptId){
+      const { status: noteStatus, save: saveNote } = makeFieldSaver('student_note');
       const noteTa = el('textarea', {
         placeholder:'Напиши, почему правильный ответ именно такой. Учитель увидит твоё пояснение.',
         rows: 3,
@@ -11057,35 +11139,30 @@ function modalExamineQuestion(){
                 fontFamily:'inherit', marginTop:'4px' }
       });
       noteTa.value = studentNote || '';
-      const status = el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'8px' }}, '');
-      let noteTimer = null;
       noteTa.oninput = () => {
         STATE.examineQuestion.studentNote = noteTa.value;
-        status.textContent = '⏳';
-        clearTimeout(noteTimer);
-        noteTimer = setTimeout(async () => {
-          try {
-            await restRequest('PATCH',
-              '/test_variant_answers?attempt_id=eq.' + attemptId +
-              '&question_num=eq.' + num,
-              { student_note: noteTa.value || null },
-              { prefer: 'return=minimal' });
-            status.textContent = '✓ сохранено';
-            setTimeout(() => { status.textContent = ''; }, 1500);
-          } catch(e){
-            status.textContent = '⚠ не сохранилось';
-            console.warn('[note] save fail:', e.message);
-          }
-        }, 800);
+        saveNote(noteTa.value);
       };
+      const mic = makeMicButton();
+      if(mic.ok) mic.attach(noteTa);
       body.append(
         el('div', { style:{ marginTop:'14px', padding:'10px 14px', background:'#EFF6FF', border:'1px solid #93C5FD', borderRadius:'10px' }},
-          el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'4px' }},
+          el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'4px', gap:'6px' }},
             el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF' }}, '✍️ Работа над ошибкой'),
-            status),
+            el('div', { style:{ display:'flex', alignItems:'center', gap:'6px' }},
+              noteStatus,
+              mic.ok ? mic.btn : null)),
           el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'6px' }},
             'Сначала напиши своими словами, почему правильно — потом сверишься с пояснением.'),
           noteTa));
+      /* Read-only комментарий учителя, если есть */
+      const tc = (teacherComment || '').trim();
+      if(tc){
+        body.append(
+          el('div', { style:{ marginTop:'12px', padding:'10px 14px', background:'#FFFBEB', border:'1px solid #F59E0B', borderRadius:'10px' }},
+            el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💬 Комментарий учителя'),
+            el('div', { style:{ fontSize:'14px', lineHeight:'1.55', whiteSpace:'pre-wrap', color:'var(--ink)' }}, tc)));
+      }
       /* Спойлер с пояснением учителя — после РНО, чтобы ученик сначала думал сам */
       if(expl){
         body.append(el('details', { style:{ marginTop:'14px', padding:'10px 14px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'10px' }},
@@ -11094,11 +11171,51 @@ function modalExamineQuestion(){
           el('div', { html: formatExplanation(expl), style:{ fontSize:'14px', lineHeight:'1.6', wordBreak:'break-word', color:'var(--ink)', marginTop:'8px' }})));
       }
     } else {
+      /* Учитель: видит РНО ученика read-only + редактирует свой комментарий */
       const note = (studentNote || '').trim();
       if(note){
         body.append(
           el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF', marginTop:'14px', marginBottom:'6px' }}, '✍️ Работа над ошибкой ученика'),
           el('div', { style:{ padding:'10px 14px', background:'#EFF6FF', border:'1px solid #93C5FD', borderRadius:'10px', fontSize:'14px', lineHeight:'1.6', whiteSpace:'pre-wrap', color:'var(--ink)' }}, note));
+      }
+      /* Поле комментария учителя — редактируется только если есть attemptId
+         и пользователь действительно учитель/куратор. */
+      const canTeacherEdit = !!attemptId && MY_PROFILE &&
+        (MY_PROFILE.role === 'teacher' || MY_PROFILE.role === 'curator');
+      if(canTeacherEdit){
+        const { status: tcStatus, save: saveTc } = makeFieldSaver('teacher_comment');
+        const tcTa = el('textarea', {
+          placeholder:'Комментарий ученику по этому заданию — увидит в своём разборе.',
+          rows: 3,
+          style:{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1px solid var(--border-2)',
+                  fontSize:'13px', lineHeight:'1.4', boxSizing:'border-box', resize:'vertical',
+                  fontFamily:'inherit', marginTop:'4px' }
+        });
+        tcTa.value = teacherComment || '';
+        tcTa.oninput = () => {
+          STATE.examineQuestion.teacherComment = tcTa.value;
+          saveTc(tcTa.value);
+        };
+        const mic = makeMicButton();
+        if(mic.ok) mic.attach(tcTa);
+        body.append(
+          el('div', { style:{ marginTop:'14px', padding:'10px 14px', background:'#FFFBEB', border:'1px solid #F59E0B', borderRadius:'10px' }},
+            el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'4px', gap:'6px' }},
+              el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E' }}, '💬 Комментарий учителя'),
+              el('div', { style:{ display:'flex', alignItems:'center', gap:'6px' }},
+                tcStatus,
+                mic.ok ? mic.btn : null)),
+            el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'6px' }},
+              'Ученик увидит этот комментарий в своём разборе пробника.'),
+            tcTa));
+      } else {
+        /* read-only комментарий, если по какой-то причине нет прав */
+        const tc = (teacherComment || '').trim();
+        if(tc){
+          body.append(
+            el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E', marginTop:'14px', marginBottom:'6px' }}, '💬 Комментарий учителя'),
+            el('div', { style:{ padding:'10px 14px', background:'#FFFBEB', border:'1px solid #F59E0B', borderRadius:'10px', fontSize:'14px', lineHeight:'1.6', whiteSpace:'pre-wrap', color:'var(--ink)' }}, tc));
+        }
       }
     }
   }
@@ -11140,7 +11257,7 @@ function studentVariantsCard(){
         if(attIds.length){
           const answers = await restRequest('GET',
             '/test_variant_answers?attempt_id=in.(' + attIds.join(',') + ')' +
-            '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note');
+            '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment');
           const byA = {};
           (answers || []).forEach(an => {
             if(!byA[an.attempt_id]) byA[an.attempt_id] = {};
@@ -21423,7 +21540,10 @@ function variantCell(ans, opts){
       STATE.examineQuestion = {
         variantId: opts.variantId, num: opts.num,
         userAnswer: ans.user_answer, points, max,
-        studentNote: ans.student_note || null
+        attemptId: opts.attemptId || ans.attempt_id || null,
+        studentNote: ans.student_note || null,
+        teacherComment: ans.teacher_comment || null,
+        isStudent: false   // учительский путь — может редактировать teacher_comment
       };
       render();
     };
@@ -22644,14 +22764,31 @@ function modalEditVariant(){
     onChange: (html) => { src22Obj.body = html; }});
   const src27Ed = richTextEditor(q27.question_text || '', { minHeight:'240px', fontSize:'13px',
     onChange: (html) => { q27.question_text = html; }});
+  /* Предполагаемый ответ / пояснение к 27 заданию — учитель пишет
+     модельный ответ или комментарий по теме сочинения. Лежит в
+     q27.explanation (то же поле, что и для заданий 1-26). */
+  const expl27 = el('textarea', { rows: 6,
+    placeholder:'Например: автор считает, что настоящая дружба не требует слов. Возможные аргументы: …',
+    style:{ width:'100%', padding:'8px 10px', border:'1px solid var(--border-2)',
+            borderRadius:'8px', fontSize:'13px', boxSizing:'border-box',
+            marginTop:'4px', minHeight:'140px', resize:'vertical',
+            fontFamily:'inherit', lineHeight:'1.5' }
+  });
+  expl27.value = q27.explanation || '';
+  expl27.oninput = () => { q27.explanation = expl27.value; };
 
   body.append(
     el('div', { style:{ marginTop:'14px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }}, '📖 Исходный текст для заданий 1-3'),
     src13Ed,
-    el('div', { style:{ marginTop:'10px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }}, '📖 Исходный текст для заданий 22-26'),
+    el('div', { style:{ marginTop:'10px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }}, '📖 Исходный текст для заданий 23-26'),
     src22Ed,
     el('div', { style:{ marginTop:'10px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }}, '✍️ Текст для сочинения (№27)'),
-    src27Ed);
+    src27Ed,
+    el('div', { style:{ marginTop:'10px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }},
+      '💡 Предполагаемый ответ / пояснение к №27'),
+    el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', marginTop:'2px', marginBottom:'2px' }},
+      'Модельная позиция автора, ключевые аргументы, тезисы. Ученик не увидит, пока не сдаст пробник.'),
+    expl27);
 
   /* Сохранить и закрыть.
      Берём значения из STATE.editVariantData (а не из DOM-ссылок), потому что
@@ -22675,7 +22812,10 @@ function modalEditVariant(){
           if(q.num < 1 || q.num > 27) return;
           const txt = (q.question_text || '').trim();
           const ans = q.num === 27 ? null : ((q.correct_answer || '').trim() || null);
-          if(!txt && !ans) return;
+          const expl = (q.explanation || '').trim();
+          /* Сохраняем строку, если есть хоть что-то полезное —
+             для 27 explanation тоже считается контентом. */
+          if(!txt && !ans && !expl) return;
           /* Дефолты max_points по ФИПИ-2026: 8 и 22 — 2 балла, 27 — 22 балла, остальные — 1 */
           const defaultMax = (q.num === 8 || q.num === 22) ? 2 : (q.num === 27 ? 22 : 1);
           qBatch.push({
@@ -22883,7 +23023,7 @@ async function loadVariantsByStudent(studentId){
   if(attIds.length){
     answers = await restRequest('GET',
       '/test_variant_answers?attempt_id=in.(' + attIds.join(',') + ')' +
-      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note');
+      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment');
   }
   const byAttempt = {};
   (answers || []).forEach(a => {
