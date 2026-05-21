@@ -19338,7 +19338,7 @@ async function loadWarmupBlocks(dayId){
   try {
     const list = await restRequest('GET',
       '/warmup_blocks?day_id=eq.' + dayId +
-      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord,is_published&order=ord.asc');
+      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord,is_published,created_at&order=ord.asc');
     if(!STATE.warmupBlocksByDay) STATE.warmupBlocksByDay = {};
     STATE.warmupBlocksByDay[dayId] = list || [];
   } catch(e){
@@ -19353,7 +19353,7 @@ async function loadIntensivePosts(dayOrd){
   try {
     const list = await restRequest('GET',
       '/warmup_blocks?intensive_day_ord=eq.' + dayOrd +
-      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord,is_published&order=ord.asc');
+      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord,is_published,created_at&order=ord.asc');
     if(!STATE.intensivePostsByOrd) STATE.intensivePostsByOrd = {};
     STATE.intensivePostsByOrd[dayOrd] = list || [];
   } catch(e){
