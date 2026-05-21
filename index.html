@@ -11194,10 +11194,44 @@ function modalExamineQuestion(){
         tcTa.value = teacherComment || '';
         tcTa.oninput = () => {
           STATE.examineQuestion.teacherComment = tcTa.value;
+          /* Автосейв тоже оставляем — на случай, если учитель забудет нажать
+             «Сохранить». Но кнопка ниже даёт мгновенную явную обратную связь. */
           saveTc(tcTa.value);
         };
         const mic = makeMicButton();
         if(mic.ok) mic.attach(tcTa);
+        /* Явная кнопка «Сохранить» — на случай, когда автосейв не сработал
+           (например, миграция не запущена и колонки нет). По клику делает
+           синхронный PATCH и показывает результат жирной полоской. */
+        const saveResult = el('div', { style:{ fontSize:'12px', marginTop:'6px', minHeight:'18px' }}, '');
+        const saveBtn = el('button', {
+          type:'button',
+          style:{ padding:'5px 14px', borderRadius:'6px', border:'1px solid var(--p-deep)',
+                  background:'var(--p)', color:'#fff', cursor:'pointer',
+                  fontSize:'13px', fontWeight:'700', fontFamily:'inherit' },
+          onclick: async () => {
+            saveBtn.disabled = true;
+            saveBtn.textContent = '⏳ Сохраняю…';
+            saveResult.textContent = '';
+            try {
+              await restRequest('PATCH',
+                '/test_variant_answers?attempt_id=eq.' + attemptId +
+                '&question_num=eq.' + num,
+                { teacher_comment: (tcTa.value || '').trim() || null },
+                { prefer: 'return=minimal' });
+              saveResult.innerHTML = '<span style="color:#065F46;font-weight:700;">✓ Сохранено в БД</span>';
+            } catch(e){
+              saveResult.innerHTML = '<span style="color:#991B1B;font-weight:700;">⚠ Ошибка: ' +
+                (e && e.message || 'не удалось сохранить') + '</span>';
+              if(e && e.message && /teacher_comment/i.test(e.message)){
+                saveResult.innerHTML += '<br><span style="color:#991B1B;font-size:11px;">Скорее всего не запущена SQL-миграция. Запусти 2026-05-21_teacher_comment.sql в Supabase Dashboard.</span>';
+              }
+            } finally {
+              saveBtn.disabled = false;
+              saveBtn.textContent = '💾 Сохранить';
+            }
+          }
+        }, '💾 Сохранить');
         body.append(
           el('div', { style:{ marginTop:'14px', padding:'10px 14px', background:'#FFFBEB', border:'1px solid #F59E0B', borderRadius:'10px' }},
             el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom:'4px', gap:'6px' }},
@@ -11207,7 +11241,9 @@ function modalExamineQuestion(){
                 mic.ok ? mic.btn : null)),
             el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'6px' }},
               'Ученик увидит этот комментарий в своём разборе пробника.'),
-            tcTa));
+            tcTa,
+            el('div', { style:{ display:'flex', justifyContent:'flex-end', marginTop:'8px' }}, saveBtn),
+            saveResult));
       } else {
         /* read-only комментарий, если по какой-то причине нет прав */
         const tc = (teacherComment || '').trim();
@@ -19345,7 +19381,7 @@ async function loadVariantFull(variantId){
   if(attemptIds.length){
     answers = await restRequest('GET',
       '/test_variant_answers?attempt_id=in.(' + attemptIds.join(',') + ')' +
-      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note');
+      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment');
   }
   const byAttempt = {};
   (answers || []).forEach(a => {
