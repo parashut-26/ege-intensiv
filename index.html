@@ -22194,6 +22194,7 @@ async function startSolvingVariant(variantId, opts){
         if(d.checked) STATE.solverChecked = d.checked;
         if(d.scratch) STATE.solverScratch = d.scratch;
         if(d.dropdowns21) STATE.solverDropdowns21 = d.dropdowns21;
+        if(d.matching22) STATE.solverMatching22 = d.matching22;
         if(d.liveAttemptId) STATE.liveAttemptId = d.liveAttemptId;
         if(d.startedAt && !opts.parentAttemptId) STATE.solverStartedAt = d.startedAt;
       }
@@ -22246,6 +22247,7 @@ function saveSolverDraft(){
       checked: STATE.solverChecked || {},
       scratch: STATE.solverScratch || {},
       dropdowns21: STATE.solverDropdowns21 || {},
+      matching22: STATE.solverMatching22 || {},
       liveAttemptId: STATE.liveAttemptId || null,
       startedAt: STATE.solverStartedAt
     }));
@@ -22587,6 +22589,120 @@ function makeTask21Field(q){
     targetSel,
     genBtn);
   wrap.append(footer);
+
+  return wrap;
+}
+
+/* === Задание 22: парсер «Установите соответствие» ===
+   Тип А (соответствие): фрагменты А) Б) В) Г) Д) + термины 1) 2) 3) ... 9)
+   Возвращает { letters: [{letter,text}], terms: [{num,text}] } или null. */
+function parseTask22Matching(questionText){
+  if(!questionText) return null;
+  const stripped = String(questionText).replace(/<[^>]+>/g, '\n');
+  /* Разбиваем по строкам или двойным переносам. Каждый сегмент — потенциальная
+     запись «А) текст» или «1) текст». Не требуем чистоты — данные после
+     импорта PDF могут быть рваными. */
+  const segments = stripped.split(/\n+|\s{2,}/).map(s => s.trim()).filter(Boolean);
+  const letters = [];
+  const terms = [];
+  for(const seg of segments){
+    /* Соответствие фрагменту А-Д */
+    const lm = seg.match(/^([А-Д])\)\s*(.+)$/);
+    if(lm){
+      letters.push({ letter: lm[1], text: lm[2].trim() });
+      continue;
+    }
+    /* Соответствие термину 1-9 */
+    const nm = seg.match(/^([1-9])\)\s*(.+)$/);
+    if(nm){
+      terms.push({ num: parseInt(nm[1], 10), text: nm[2].trim() });
+    }
+  }
+  if(letters.length < 2 || terms.length < 2) return null;
+  /* Удалим дубликаты по букве/номеру (на случай парсера задвоения) */
+  const uniqLetters = [];
+  const seenL = new Set();
+  for(const l of letters){
+    if(!seenL.has(l.letter)){ seenL.add(l.letter); uniqLetters.push(l); }
+  }
+  const uniqTerms = [];
+  const seenN = new Set();
+  for(const t of terms){
+    if(!seenN.has(t.num)){ seenN.add(t.num); uniqTerms.push(t); }
+  }
+  return { letters: uniqLetters, terms: uniqTerms };
+}
+
+/* Рендер UI задания 22 (соответствие). Возвращает узел или null. */
+function makeTask22Field(q){
+  const parsed = parseTask22Matching(q.question_text);
+  if(!parsed) return null;
+  const { letters, terms } = parsed;
+  const num = q.num;
+
+  /* Сохраняем выбор: STATE.solverMatching22[num] = { 'А': 3, 'Б': 5, ... } */
+  if(!STATE.solverMatching22) STATE.solverMatching22 = {};
+  if(!STATE.solverMatching22[num]) STATE.solverMatching22[num] = {};
+  const picks = STATE.solverMatching22[num];
+
+  const wrap = el('div', { style:{ marginTop:'10px',
+    padding:'10px 12px', background:'#F9FAFB',
+    border:'1px solid var(--border)', borderRadius:'10px' }},
+    el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
+                        marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }},
+      '📌 Соответствие: каждой букве подбери термин'),
+    el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
+      'Выбери номер термина из списка для каждой буквы А, Б, В, Г, Д.'));
+
+  letters.forEach(l => {
+    const sel = el('select', {
+      style:{ padding:'4px 8px', fontSize:'12px', borderRadius:'6px',
+              border:'1px solid var(--border-2)', minWidth:'200px',
+              fontFamily:'inherit', background:'#fff', cursor:'pointer' },
+      onchange: (ev) => {
+        const v = ev.target.value;
+        if(v === '') delete picks[l.letter];
+        else picks[l.letter] = parseInt(v, 10);
+        saveSolverDraft();
+      }
+    });
+    sel.append(el('option', { value: '' }, '— не выбрано'));
+    terms.forEach(t => {
+      sel.append(el('option', { value: String(t.num) },
+        t.num + ') ' + t.text));
+    });
+    if(picks[l.letter]) sel.value = String(picks[l.letter]);
+
+    const row = el('div', {
+      style:{ display:'flex', flexWrap:'wrap', gap:'8px', alignItems:'flex-start',
+              padding:'8px 0', borderTop:'1px dashed var(--border)' }
+    },
+      el('div', { style:{ minWidth:'28px', fontWeight:'700', color:'var(--p-deep)', fontSize:'14px' }},
+        l.letter + ')'),
+      el('div', { style:{ flex:'1 1 200px', minWidth:'150px', fontSize:'13px',
+                          lineHeight:'1.4', color:'var(--ink)' }}, l.text),
+      sel);
+    wrap.append(row);
+  });
+
+  /* Кнопка собрать ответ — последовательная строка из выбранных номеров (для каждой буквы по порядку) */
+  const genBtn = el('button', {
+    type:'button',
+    class:'btn btn-p btn-sm',
+    style:{ marginTop:'12px', fontSize:'13px', fontWeight:'700' },
+    onclick: () => {
+      const result = letters.map(l => picks[l.letter] != null ? String(picks[l.letter]) : '?').join('');
+      if(result.includes('?')){
+        showToast('⚠ Выбери термин для каждой буквы');
+        return;
+      }
+      STATE.solverAnswers[num] = result;
+      saveSolverDraft();
+      render();
+      showToast('✓ Ответ сгенерирован: ' + result);
+    }
+  }, '📝 Сформировать ответ');
+  wrap.append(genBtn);
 
   return wrap;
 }
@@ -23120,6 +23236,11 @@ function viewSolverVariant(){
     if(q.num === 21){
       const t21 = makeTask21Field(q);
       if(t21) card.append(t21);
+    }
+    /* Для задания 22 — UI «Установите соответствие»: dropdown с терминами для каждой буквы */
+    if(q.num === 22){
+      const t22 = makeTask22Field(q);
+      if(t22) card.append(t22);
     }
     /* Проверено ли уже это задание в текущей попытке? */
     const checkedInfo = (STATE.solverChecked || {})[q.num] || null;
