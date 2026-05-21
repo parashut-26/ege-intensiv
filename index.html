@@ -22155,24 +22155,31 @@ async function saveLiveAnswer(num, userAnswer, points, max){
   const attId = await ensureLiveAttempt();
   if(!attId) return;
   try {
-    /* PATCH сразу со всеми полями */
+    /* PATCH сразу со всеми полями. is_correct НЕ ставим — в БД она обычно
+       generated column на основе points >= max_points; явная установка ломает
+       INSERT. Остальное (user_answer, points, max_points) ставим как обычно. */
     const patch = {
       user_answer: userAnswer || null,
       points: Number(points) || 0,
-      max_points: Number(max) || 0,
-      is_correct: (Number(points) >= Number(max) && Number(max) > 0)
+      max_points: Number(max) || 0
     };
     const resp = await restRequest('PATCH',
       '/test_variant_answers?attempt_id=eq.' + attId +
       '&question_num=eq.' + num,
       patch, { prefer: 'return=representation' });
-    if(Array.isArray(resp) && resp.length > 0) return;
+    if(Array.isArray(resp) && resp.length > 0){
+      console.log('[live] saved (patch) num=' + num + ' pts=' + patch.points + '/' + patch.max_points);
+      return;
+    }
     /* PATCH не нашёл строку — INSERT */
-    await restRequest('POST', '/test_variant_answers', {
+    const insertResp = await restRequest('POST', '/test_variant_answers', {
       attempt_id: attId, question_num: num, ...patch
-    }, { prefer: 'return=minimal' });
+    }, { prefer: 'return=representation' });
+    console.log('[live] saved (insert) num=' + num,
+      Array.isArray(insertResp) ? insertResp.length + ' rows' : 'ok');
   } catch(e){
-    console.warn('[live] saveLiveAnswer fail:', e.message);
+    console.error('[live] saveLiveAnswer FAIL num=' + num + ':', e.message, e);
+    showToast('⚠ live: ' + e.message);
   }
 }
 
