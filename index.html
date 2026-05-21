@@ -10965,15 +10965,19 @@ function modalExamineQuestion(){
     /* === Исходный текст варианта ===
        Задания 1-3 опираются на text_1_3, задания 23-26 — на text_22_26
        (имя поля legacy, но сейчас задание 22 в нём НЕ нуждается — оно
-       работает без большого исходного текста). Показываем сверху
-       раскрывающимся блоком (открытым по умолчанию), чтобы ребёнок мог
-       проанализировать ошибку с опорой на текст. */
+       работает без большого исходного текста). Для задания 27 — тоже
+       text_22_26, ведь позиция автора и сочинение пишутся по этому
+       тексту. Показываем сверху раскрывающимся блоком (открытым по
+       умолчанию), чтобы было можно проанализировать с опорой на текст. */
     const sourceTexts = STATE.examineSourceTexts || {};
     let sourceKind = null;
     if(num >= 1 && num <= 3)  sourceKind = 'text_1_3';
     else if(num >= 23 && num <= 26) sourceKind = 'text_22_26';
+    else if(num === 27) sourceKind = 'text_22_26';
     const sourceBody = sourceKind ? sourceTexts[sourceKind] : null;
     if(sourceBody){
+      const srcLabel = sourceKind === 'text_1_3' ? 'к заданиям 1-3'
+        : (num === 27 ? 'к заданию 27' : 'к заданиям 23-26');
       const srcBox = el('details', { style:{
         padding:'12px 14px', background:'#FFFCF2', borderRadius:'10px',
         borderLeft:'4px solid var(--y)', marginBottom:'14px', fontSize:'14px',
@@ -10984,7 +10988,7 @@ function modalExamineQuestion(){
         el('summary', { style:{ cursor:'pointer', fontWeight:'700', color:'var(--ink-2)',
                                   fontSize:'11px', textTransform:'uppercase', letterSpacing:'.06em',
                                   marginBottom:'8px', listStyle:'none' }},
-          '📖 Исходный текст (' + (sourceKind === 'text_1_3' ? 'к заданиям 1-3' : 'к заданиям 23-26') + ') ▾'),
+          '📖 Исходный текст (' + srcLabel + ') ▾'),
         el('div', { style:{ marginTop:'8px', whiteSpace:'pre-wrap' } }, sourceBody));
       body.append(srcBox);
     }
@@ -10995,16 +10999,32 @@ function modalExamineQuestion(){
       el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }}, '📝 Формулировка'),
       textBlock);
 
-    /* Твой ответ */
+    /* Твой ответ / Позиция автора (для задания 27) */
     const isCorrect = points >= max && max > 0;
     const isPartial = points > 0 && points < max;
     const ansColor = isCorrect ? '#065F46' : isPartial ? '#92400E' : '#991B1B';
     const ansBg = isCorrect ? '#D1FAE5' : isPartial ? '#FEF3C7' : '#FEE2E2';
-    body.append(
-      el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }}, '✍️ Твой ответ'),
-      el('div', { style:{ padding:'10px 14px', background:ansBg, color:ansColor, borderRadius:'10px', fontSize:'16px', fontWeight:'700', marginBottom:'14px' }},
-        userAnswer || '(пусто)',
-        el('span', { style:{ float:'right', fontSize:'12px' }}, 'Балл: ' + points + ' / ' + max)));
+    /* Для задания 27 это не «ответ», а сформулированная позиция автора —
+       balls=0/max=0, поэтому красить серым, а заголовок другой. */
+    if(num === 27){
+      body.append(
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }},
+          '🎯 Позиция автора, сформулированная учеником'),
+        el('div', { style:{ padding:'10px 14px', background:'#FFFDF7', color:'var(--ink)',
+                            borderRadius:'10px', fontSize:'14px', fontWeight:'500',
+                            lineHeight:'1.55', whiteSpace:'pre-wrap',
+                            border:'1px solid #FACC15', marginBottom:'14px' }},
+          userAnswer || '(пусто)'),
+        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'-8px',
+                            marginBottom:'14px', fontStyle:'italic' }},
+          'На балл не влияет — оценивается через полное сочинение К1-К10.'));
+    } else {
+      body.append(
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }}, '✍️ Твой ответ'),
+        el('div', { style:{ padding:'10px 14px', background:ansBg, color:ansColor, borderRadius:'10px', fontSize:'16px', fontWeight:'700', marginBottom:'14px' }},
+          userAnswer || '(пусто)',
+          el('span', { style:{ float:'right', fontSize:'12px' }}, 'Балл: ' + points + ' / ' + max)));
+    }
 
     /* Правильный ответ */
     if(q.correct_answer){
@@ -22863,7 +22883,7 @@ async function loadVariantsByStudent(studentId){
   if(attIds.length){
     answers = await restRequest('GET',
       '/test_variant_answers?attempt_id=in.(' + attIds.join(',') + ')' +
-      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct');
+      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note');
   }
   const byAttempt = {};
   (answers || []).forEach(a => {
@@ -22918,6 +22938,10 @@ function viewVariantsByStudent(){
   for(let q = 1; q <= maxQ; q++){
     trHead.append(el('th', { class:'vh-q', title:'Задание №' + q }, q));
   }
+  /* Колонка «Поз.» — позиция автора, которую ученик сформулировал в задании 27.
+     Клик по ячейке откроет модалку с текстом. */
+  trHead.append(el('th', { class:'vh-q', style:{ background:'#FFFDF7' },
+    title:'🎯 Позиция автора, как ученик сформулировал её в задании 27' }, 'Поз.'));
   Object.keys(K_LIMITS).forEach(k => {
     trHead.append(el('th', { class:'vh-q', style:{ background:'#FFFBEB' },
       title: K_TITLES[k] + ' (макс ' + K_LIMITS[k] + ')' }, k.toUpperCase()));
@@ -22961,6 +22985,28 @@ function viewVariantsByStudent(){
     for(let q = 1; q <= maxQ; q++){
       const ans = ansForAttempt[q];
       tr.append(variantCell(ans, { variantId: v.id, num: q }));
+    }
+    /* Ячейка «Поз.» (задание 27) — кликабельная, открывает позицию автора в модалке */
+    const ans27 = ansForAttempt[27];
+    const pos27 = (ans27 && ans27.user_answer || '').trim();
+    if(pos27){
+      tr.append(el('td', {
+        style:{ background:'#FFFDF7', color:'#92400E', textAlign:'center',
+                fontWeight:'700', fontSize:'14px', cursor:'pointer' },
+        title:'Клик — посмотреть полный текст позиции автора',
+        onclick: (ev) => {
+          ev.stopPropagation();
+          STATE.examineQuestion = {
+            variantId: v.id, num: 27,
+            userAnswer: pos27, points: 0, max: 0,
+            studentNote: ans27 && ans27.student_note || null
+          };
+          render();
+        }
+      }, '📝'));
+    } else {
+      tr.append(el('td', { style:{ background:'#FFFDF7', color:'#9CA3AF',
+        textAlign:'center', fontSize:'14px' }, title:'Позиция автора не заполнена' }, '—'));
     }
     const review = row.essay && row.essay.review;
     Object.keys(K_LIMITS).forEach(k => {
