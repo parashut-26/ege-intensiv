@@ -21492,7 +21492,8 @@ function viewVariantSummary(){
 
   const tbody = el('tbody', null);
   attempts.forEach((a, idx) => {
-    const tr = el('tr', null);
+    const isLive = a.started_at && !a.finished_at;
+    const tr = el('tr', { style: isLive ? { background:'#FEF2F2' } : null });
     const profileName = (a.profile && a.profile.full_name) || a.otp_full_name || a.otp_user || '?';
     const isLinked = !!a.profile_id;
     const otpRaw = a.otp_full_name || a.otp_user || 'без имени';
@@ -21508,6 +21509,11 @@ function viewVariantSummary(){
         el('div', { style:{ display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' }},
           el('span', null, profileName),
           el('span', { style:{ fontSize:'11px', color:'var(--p)', opacity:.7 }}, '🔗'),
+          isLive ? el('span', {
+            style:{ fontSize:'10px', padding:'2px 7px', borderRadius:'999px',
+                    background:'#DC2626', color:'#fff', fontWeight:'700',
+                    animation:'pulse 1.6s infinite' }
+          }, '🔴 решает сейчас') : null,
           a.parent_attempt_id ? el('span', {
             style:{ fontSize:'9px', padding:'1px 5px', borderRadius:'999px',
                     background:'#FEF3C7', color:'#92400E', fontWeight:'700' }
@@ -21516,7 +21522,8 @@ function viewVariantSummary(){
           isLinked
             ? '✓ привязан · OTP: ' + otpRaw
             : '⚠ ' + otpRaw + ' — нет в базе, нажми чтобы выбрать')),
-      el('td', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, otpFormatTime(a.time_spent_seconds)));
+      el('td', { style:{ fontSize:'11px', color:'var(--ink-3)' }},
+        isLive ? '🔴 сейчас' : otpFormatTime(a.time_spent_seconds)));
     for(let q = 1; q <= qCount; q++){
       const ans = byAttempt[a.id] && byAttempt[a.id][q];
       tr.append(variantCell(ans, { variantId: v.id, num: q }));
