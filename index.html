@@ -10910,18 +10910,36 @@ function modalVariantBuilder(){
 function modalExamineQuestion(){
   if(!STATE.examineQuestion) return null;
   const { variantId, num, userAnswer, points, max, studentNote, attemptId, isStudent } = STATE.examineQuestion;
-  const close = () => { STATE.examineQuestion = null; STATE.examineQuestionData = null; render(); };
+  const close = () => {
+    STATE.examineQuestion = null;
+    STATE.examineQuestionData = null;
+    STATE.examineSourceTexts = null;
+    render();
+  };
 
-  /* Загружаем вопрос если ещё не загружали */
+  /* Загружаем вопрос если ещё не загружали. Параллельно тянем исходные тексты
+     варианта (если они есть): задания 1-3 опираются на 'text_1_3',
+     задания 22-26 — на 'text_22_26'. Без этого текста ребёнок не может
+     проанализировать ошибку, потому что в формулировке только вопрос. */
   if(!STATE.examineQuestionData){
     (async () => {
       try {
-        const arr = await restRequest('GET',
-          '/test_variant_questions?variant_id=eq.' + variantId + '&num=eq.' + num + '&limit=1');
-        if(Array.isArray(arr) && arr.length){
-          STATE.examineQuestionData = arr[0];
+        const [qArr, srcArr] = await Promise.all([
+          restRequest('GET',
+            '/test_variant_questions?variant_id=eq.' + variantId + '&num=eq.' + num + '&limit=1'),
+          restRequest('GET',
+            '/test_variant_source_texts?variant_id=eq.' + variantId + '&select=kind,body')
+        ]);
+        if(Array.isArray(qArr) && qArr.length){
+          STATE.examineQuestionData = qArr[0];
         } else {
           STATE.examineQuestionData = { question_text: '(текст задания не найден в базе)', correct_answer: null };
+        }
+        /* Кешируем исходные тексты в STATE — могут пригодиться и для других
+           заданий в этой же модалке, и для сочинения. */
+        if(Array.isArray(srcArr)){
+          STATE.examineSourceTexts = {};
+          srcArr.forEach(r => { STATE.examineSourceTexts[r.kind] = r.body; });
         }
         render();
       } catch(e){
@@ -10944,6 +10962,30 @@ function modalExamineQuestion(){
     body.append(el('div', { style:{ textAlign:'center', color:'var(--ink-3)', padding:'30px' }}, '⏳ Загружаю задание…'));
   } else {
     const q = STATE.examineQuestionData;
+    /* === Исходный текст варианта ===
+       Задания 1-3 опираются на text_1_3, задания 22-26 — на text_22_26.
+       Показываем сверху раскрывающимся блоком (открытым по умолчанию),
+       чтобы ребёнок мог проанализировать ошибку с опорой на текст. */
+    const sourceTexts = STATE.examineSourceTexts || {};
+    let sourceKind = null;
+    if(num >= 1 && num <= 3)  sourceKind = 'text_1_3';
+    else if(num >= 22 && num <= 26) sourceKind = 'text_22_26';
+    const sourceBody = sourceKind ? sourceTexts[sourceKind] : null;
+    if(sourceBody){
+      const srcBox = el('details', { style:{
+        padding:'12px 14px', background:'#FFFCF2', borderRadius:'10px',
+        borderLeft:'4px solid var(--y)', marginBottom:'14px', fontSize:'14px',
+        lineHeight:'1.6', color:'var(--ink)'
+      }});
+      srcBox.setAttribute('open', '');
+      srcBox.append(
+        el('summary', { style:{ cursor:'pointer', fontWeight:'700', color:'var(--ink-2)',
+                                  fontSize:'11px', textTransform:'uppercase', letterSpacing:'.06em',
+                                  marginBottom:'8px', listStyle:'none' }},
+          '📖 Исходный текст (' + (sourceKind === 'text_1_3' ? 'к заданиям 1-3' : 'к заданиям 22-26') + ') ▾'),
+        el('div', { style:{ marginTop:'8px', whiteSpace:'pre-wrap' } }, sourceBody));
+      body.append(srcBox);
+    }
     /* Текст задания (HTML с форматированием) */
     const textBlock = el('div', { style:{ padding:'12px 14px', background:'#F9FAFB', borderRadius:'10px', marginBottom:'14px', fontSize:'14px', lineHeight:'1.6', whiteSpace:'pre-wrap' }});
     textBlock.innerHTML = sanitizeQuestionHtml(q.question_text || '(пусто)');
