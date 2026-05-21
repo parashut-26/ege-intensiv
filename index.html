@@ -22145,6 +22145,7 @@ async function startSolvingVariant(variantId, opts){
   STATE.solverData = null;
   STATE.solverAnswers = {};
   STATE.solverChecked = {};   // { num: { points, max, correct, ts } } — мгновенная проверка
+  STATE.solverScratch = {};   // { num: html } — черновик с разметкой текста задания
   STATE.solverResult = null;
   STATE.solverResultAttemptId = null;
   STATE.solverFinishedAt = null;
@@ -22163,6 +22164,7 @@ async function startSolvingVariant(variantId, opts){
         const d = JSON.parse(raw);
         if(d.answers) STATE.solverAnswers = d.answers;
         if(d.checked) STATE.solverChecked = d.checked;
+        if(d.scratch) STATE.solverScratch = d.scratch;
         if(d.liveAttemptId) STATE.liveAttemptId = d.liveAttemptId;
         if(d.startedAt && !opts.parentAttemptId) STATE.solverStartedAt = d.startedAt;
       }
@@ -22213,6 +22215,7 @@ function saveSolverDraft(){
     localStorage.setItem(draftKey, JSON.stringify({
       answers: STATE.solverAnswers,
       checked: STATE.solverChecked || {},
+      scratch: STATE.solverScratch || {},
       liveAttemptId: STATE.liveAttemptId || null,
       startedAt: STATE.solverStartedAt
     }));
@@ -22404,6 +22407,128 @@ function sourceTextForNum(sourceTexts, num){
   if(num >= 1 && num <= 3) return { title: 'Текст к заданиям 1-3', body: findSourceText(sourceTexts, 'text_1_3') };
   if(num >= 23 && num <= 26) return { title: 'Текст к заданиям 23-26', body: findSourceText(sourceTexts, 'text_22_26') };
   return null;
+}
+
+/* === Черновик-разметка под заданием ===
+   Под каждым заданием в решалке появляется сворачиваемый блок с панелью
+   форматирования. Ученик может выделять/подчёркивать/красить текст
+   задания (грамматическая основа, границы придаточного, скобки и т.д.).
+   Сохраняется в STATE.solverScratch[num] + localStorage + БД (отдельный
+   PATCH на test_variant_answers.scratch — без блокировки UI). */
+function makeScratchPad(q){
+  const num = q.num;
+  const wrap = el('div', { style:{ marginTop:'8px' }});
+  /* Кнопка «🖌 Разметить» сворачивает/раскрывает блок */
+  const isExpanded = !!(STATE.solverScratch && STATE.solverScratch[num]);
+  const expanded = { value: isExpanded };
+  const body = el('div', { style:{ marginTop:'6px', display: isExpanded ? 'block' : 'none' }});
+  const toggleBtn = el('button', {
+    type:'button',
+    style:{ padding:'4px 10px', fontSize:'12px', borderRadius:'6px',
+            border:'1px solid var(--border-2)', background:'#F9FAFB',
+            cursor:'pointer', color:'var(--ink-2)', fontFamily:'inherit' },
+    onclick: () => {
+      expanded.value = !expanded.value;
+      body.style.display = expanded.value ? 'block' : 'none';
+      toggleBtn.textContent = expanded.value ? '🖌 Свернуть разметку' : '🖌 Разметить текст';
+      if(expanded.value && !ed.innerHTML) ed.innerHTML = q.question_text || '';
+    }
+  }, isExpanded ? '🖌 Свернуть разметку' : '🖌 Разметить текст');
+  wrap.append(toggleBtn);
+  /* Панель форматирования — Ж/К/П + цветной маркер + подчёркнуть + скобки */
+  const exec = (cmd, val) => {
+    document.execCommand(cmd, false, val || null);
+    ed.focus();
+    onChange();
+  };
+  const mkBtn = (label, title, fn, style) => el('button', {
+    type:'button',
+    title: title,
+    style: Object.assign({
+      padding:'4px 8px', minWidth:'28px', fontSize:'12px', cursor:'pointer',
+      background:'#fff', border:'1px solid var(--border-2)', borderRadius:'4px',
+      fontFamily:'inherit', fontWeight:'700'
+    }, style || {}),
+    onmousedown: (ev) => ev.preventDefault(),
+    onclick: (ev) => { ev.preventDefault(); fn(); }
+  }, label);
+  const toolbar = el('div', {
+    style:{ display:'flex', gap:'3px', flexWrap:'wrap', padding:'5px',
+            background:'#fff', border:'1px solid var(--border-2)',
+            borderRadius:'6px 6px 0 0', borderBottom:'none' }
+  },
+    mkBtn(el('b', null, 'Ж'), 'Жирный', () => exec('bold')),
+    mkBtn(el('i', null, 'К'), 'Курсив', () => exec('italic')),
+    mkBtn(el('u', null, 'П'), 'Подчёркнутый — для основы, придаточного, и т.д.', () => exec('underline')),
+    mkBtn(el('span', { style:{ background:'#FEF08A', padding:'0 4px', borderRadius:'2px' }}, 'A'),
+      'Жёлтый маркер', () => exec('hiliteColor', '#FEF08A')),
+    mkBtn(el('span', { style:{ background:'#86EFAC', padding:'0 4px', borderRadius:'2px' }}, 'A'),
+      'Зелёный маркер', () => exec('hiliteColor', '#86EFAC')),
+    mkBtn(el('span', { style:{ background:'#FCA5A5', padding:'0 4px', borderRadius:'2px' }}, 'A'),
+      'Розовый маркер', () => exec('hiliteColor', '#FCA5A5')),
+    mkBtn(el('span', { style:{ color:'#DC2626' }}, 'A'), 'Красный текст', () => exec('foreColor', '#DC2626')),
+    mkBtn(el('span', { style:{ color:'#2563EB' }}, 'A'), 'Синий текст', () => exec('foreColor', '#2563EB')),
+    mkBtn('( )', 'Обернуть скобками — границы придаточного', () => {
+      const sel = window.getSelection();
+      if(!sel || !sel.toString()) return;
+      const t = sel.toString();
+      exec('insertHTML', '(' + t + ')');
+    }, { fontWeight:'400' }),
+    mkBtn('A', 'Сбросить форматирование', () => exec('removeFormat'), { fontWeight:'400' }),
+    mkBtn('↺', 'Сбросить всю разметку', () => {
+      if(!confirm('Сбросить всю разметку этого задания?')) return;
+      ed.innerHTML = q.question_text || '';
+      onChange();
+    }, { fontWeight:'400', color:'var(--red)' }));
+  const ed = el('div', {
+    contenteditable: 'true',
+    style:{ padding:'10px 12px', minHeight:'80px', background:'#FFFFFE',
+            border:'1px solid var(--border-2)', borderTop:'none',
+            borderRadius:'0 0 6px 6px', fontSize:'13px', lineHeight:'1.55',
+            outline:'none', fontFamily:'inherit', whiteSpace:'pre-wrap' }
+  });
+  /* Восстанавливаем из STATE если есть, иначе пустое (заполнится при первом раскрытии) */
+  ed.innerHTML = (STATE.solverScratch && STATE.solverScratch[num])
+    ? STATE.solverScratch[num]
+    : (isExpanded ? (q.question_text || '') : '');
+  let onChangeTimer = null;
+  const onChange = () => {
+    if(!STATE.solverScratch) STATE.solverScratch = {};
+    STATE.solverScratch[num] = ed.innerHTML;
+    if(onChangeTimer) clearTimeout(onChangeTimer);
+    onChangeTimer = setTimeout(() => {
+      saveSolverDraft();
+      /* Также пишем в БД через live-attempt — учитель потом увидит разметку */
+      if(STATE.liveAttemptId){
+        saveLiveScratch(num, ed.innerHTML);
+      }
+    }, 600);
+  };
+  ed.oninput = onChange;
+  body.append(toolbar, ed);
+  wrap.append(body);
+  return wrap;
+}
+
+/* Сохранение черновика-разметки в test_variant_answers.scratch
+   (не блокирует UI, ошибки молча логируем). */
+async function saveLiveScratch(num, html){
+  const attId = await ensureLiveAttempt();
+  if(!attId) return;
+  try {
+    const resp = await restRequest('PATCH',
+      '/test_variant_answers?attempt_id=eq.' + attId +
+      '&question_num=eq.' + num,
+      { scratch: html || null },
+      { prefer: 'return=representation' });
+    if(Array.isArray(resp) && resp.length > 0) return;
+    /* PATCH не нашёл строку — INSERT */
+    await restRequest('POST', '/test_variant_answers', {
+      attempt_id: attId, question_num: num, scratch: html || null
+    }, { prefer: 'return=minimal' });
+  } catch(e){
+    console.warn('[live scratch] fail num=' + num + ':', e.message);
+  }
 }
 
 /* ====== Главный экран решения ======
@@ -22622,6 +22747,9 @@ function viewSolverVariant(){
     }, checkedInfo ? '✓ Проверено' : '✓ Проверить');
     card.append(checkBtn);
     card.append(resultBox);
+    /* Черновик-разметка с панелью форматирования — для любого задания,
+       чтобы ребёнок мог пометить грамматическую основу, скобки, и т.д. */
+    card.append(makeScratchPad(q));
     left.append(card);
   });
 
