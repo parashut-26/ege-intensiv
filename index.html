@@ -20170,6 +20170,16 @@ function renderAddBlockForm(day, editingBlock, target){
     bodyEditor.insertAdjacentHTML('beforeend', html);
     bodyEditor.focus();
     try { bodyEditor.scrollTop = bodyEditor.scrollHeight; } catch(_){}
+    /* ВАЖНО: редактор растёт по высоте без max-height, поэтому внутренний
+       scrollTop ничего не делает — медиа просто оказывается ниже видимой
+       области страницы. Прокручиваем страницу к свежевставленному элементу. */
+    try {
+      const last = bodyEditor.lastElementChild ||
+                   bodyEditor.querySelector('video, iframe');
+      if(last && last.scrollIntoView){
+        last.scrollIntoView({ block:'center', behavior:'smooth' });
+      }
+    } catch(_){}
     console.log('[video-insert] вставка:',
       'было', before, '→ стало', bodyEditor.innerHTML.length,
       '| iframe:', !!bodyEditor.querySelector('iframe'),
