@@ -11360,38 +11360,55 @@ function makeTeacherMarksEditor(opts){
 
 /* === Read-only рендер пометок учителя для ученика === */
 function renderTeacherMarksReadOnly(opts){
-  const { questionText, teacherScratch, teacherDrawing } = opts;
+  const { questionText, teacherScratch, teacherDrawing, teacherComment } = opts;
   const sc = (teacherScratch || '').trim();
   const dr = (teacherDrawing || '').trim();
-  if(!sc && !dr) return null;
-  /* Ширина 480 — зеркало холста учителя в makeTeacherMarksEditor.
-     Тогда текст ляжет в те же строки, что и при рисовании, и SVG
-     попадёт ровно на те же слова, куда учитель писал. */
-  const wrap = el('div', { style:{ position:'relative',
-    width: MARK_CANVAS_WIDTH + 'px', boxSizing:'border-box',
-    padding:'12px 14px', background:'#FFFEF7', borderLeft:'4px solid #F59E0B',
-    borderRadius:'8px', fontSize:'14px',
-    lineHeight:'1.6', whiteSpace:'pre-wrap', overflow:'visible' }});
-  const inner = el('div', { style:{ position:'relative', zIndex:'1' }});
-  inner.innerHTML = sc || sanitizeQuestionHtml(questionText || '');
-  wrap.append(inner);
-  if(dr){
-    /* parseDrawing вернёт {paths, w, h} (для нового JSON-формата) или
-       {paths, w:0, h:0} (для старых записей без размеров). buildOverlaySvg
-       соберёт SVG с viewBox если знаем размеры, иначе без — тогда у учителя
-       на десктопе вернётся старое поведение, но новые рисунки масштабируются. */
-    const parsed = parseDrawing(dr);
-    if(parsed){
-      const tmp = document.createElement('div');
-      tmp.innerHTML = buildOverlaySvg(parsed);
-      if(tmp.firstChild) wrap.append(tmp.firstChild);
-    }
-  }
-  return el('div', { style:{ marginBottom:'14px' }},
+  const cm = (teacherComment || '').trim();
+  if(!sc && !dr && !cm) return null;
+  const root = el('div', { style:{ marginBottom:'14px' }},
     el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E',
                         marginBottom:'6px' }},
-      '✏️ Пометки учителя'),
-    wrapInScrollContainer(wrap));
+      '✏️ Пометки учителя'));
+  /* === Текстовый комментарий учителя (teacher_comment) ===
+     Лежит отдельно от scratch/drawing — это плоский текст из textarea
+     «💬 Комментарий учителя» в модалке. Показываем сверху, до карандашных
+     пометок, чтобы ученик сразу видел и не пропустил. */
+  if(cm){
+    root.append(el('div', { style:{ padding:'10px 12px', background:'#FFFEF7',
+      borderLeft:'4px solid #F59E0B', borderRadius:'8px',
+      fontSize:'14px', lineHeight:'1.55', whiteSpace:'pre-wrap',
+      color:'var(--ink)', fontWeight:'500',
+      marginBottom: (sc || dr) ? '8px' : '0' }},
+      el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#92400E',
+                          textTransform:'uppercase', letterSpacing:'.05em',
+                          marginBottom:'4px' }}, '💬 Комментарий'),
+      cm));
+  }
+  /* === Карандаш + текстовое форматирование над формулировкой ===
+     Только если они есть — иначе скипаем эту часть и показываем только
+     комментарий. Ширина 480 — зеркало холста учителя в makeTeacherMarksEditor.
+     Тогда текст ляжет в те же строки, что и при рисовании, и SVG попадёт
+     ровно на те же слова, куда учитель писал. */
+  if(sc || dr){
+    const wrap = el('div', { style:{ position:'relative',
+      width: MARK_CANVAS_WIDTH + 'px', boxSizing:'border-box',
+      padding:'12px 14px', background:'#FFFEF7', borderLeft:'4px solid #F59E0B',
+      borderRadius:'8px', fontSize:'14px',
+      lineHeight:'1.6', whiteSpace:'pre-wrap', overflow:'visible' }});
+    const inner = el('div', { style:{ position:'relative', zIndex:'1' }});
+    inner.innerHTML = sc || sanitizeQuestionHtml(questionText || '');
+    wrap.append(inner);
+    if(dr){
+      const parsed = parseDrawing(dr);
+      if(parsed){
+        const tmp = document.createElement('div');
+        tmp.innerHTML = buildOverlaySvg(parsed);
+        if(tmp.firstChild) wrap.append(tmp.firstChild);
+      }
+    }
+    root.append(wrapInScrollContainer(wrap));
+  }
+  return root;
 }
 
 /* === Рендер структурированного ответа ученика для модалки учителя/ученика ===
@@ -11779,7 +11796,8 @@ function modalExamineQuestion(){
       const teacherReadOnly = renderTeacherMarksReadOnly({
         questionText: q.question_text || '',
         teacherScratch: teacherScratch || '',
-        teacherDrawing: teacherDrawing || ''
+        teacherDrawing: teacherDrawing || '',
+        teacherComment: teacherComment || ''
       });
       if(teacherReadOnly) body.append(teacherReadOnly);
     }
@@ -25197,14 +25215,15 @@ function startSolverTeacherMarksPolling(){
     try {
       const rows = await restRequest('GET',
         '/test_variant_answers?attempt_id=eq.' + attId +
-        '&select=question_num,teacher_scratch,teacher_drawing');
+        '&select=question_num,teacher_scratch,teacher_drawing,teacher_comment');
       if(!Array.isArray(rows)) return;
       const next = {};
       rows.forEach(r => {
-        if(r.teacher_scratch || r.teacher_drawing){
+        if(r.teacher_scratch || r.teacher_drawing || r.teacher_comment){
           next[r.question_num] = {
             teacher_scratch: r.teacher_scratch || null,
-            teacher_drawing: r.teacher_drawing || null
+            teacher_drawing: r.teacher_drawing || null,
+            teacher_comment: r.teacher_comment || null
           };
         }
       });
@@ -25433,11 +25452,12 @@ function viewSolverVariant(){
        Polling ниже подтягивает teacher_scratch + teacher_drawing раз в 15с,
        и они отображаются read-only прямо над инструментами ответа. */
     const tm = (STATE.solverTeacherMarks || {})[q.num];
-    if(tm && (tm.teacher_scratch || tm.teacher_drawing)){
+    if(tm && (tm.teacher_scratch || tm.teacher_drawing || tm.teacher_comment)){
       const tmBlock = renderTeacherMarksReadOnly({
         questionText: q.question_text || '',
         teacherScratch: tm.teacher_scratch || '',
-        teacherDrawing: tm.teacher_drawing || ''
+        teacherDrawing: tm.teacher_drawing || '',
+        teacherComment: tm.teacher_comment || ''
       });
       if(tmBlock) card.append(tmBlock);
     }
