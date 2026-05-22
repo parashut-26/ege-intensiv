@@ -23076,8 +23076,10 @@ function parseParensWords(text){
       /* (приставка)КОРЕНЬ */
       tokens.push({ type:'word', prefix: m[1], root: m[2], parensPos: 'before' });
     } else if(m[3] && m[4]){
-      /* КОРЕНЬ(окончание) */
-      tokens.push({ type:'word', prefix: m[3], root: m[4], parensPos: 'after' });
+      /* КОРЕНЬ(окончание): m[3]='ЧТО' = корень, m[4]='БЫ' = то что в скобках.
+         В формат token складываем единообразно: prefix = «то что в скобках»,
+         root = «главное слово». Поэтому для after меняем местами. */
+      tokens.push({ type:'word', prefix: m[4], root: m[3], parensPos: 'after' });
     }
     lastEnd = m.index + m[0].length;
   }
