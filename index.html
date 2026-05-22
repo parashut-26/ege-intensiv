@@ -22636,19 +22636,19 @@ function makeTask21Field(q){
 function parseTask22Matching(questionText){
   if(!questionText) return null;
   const stripped = String(questionText).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-  /* Находим все маркеры — буквы А-Д и цифры 1-9, за которыми скобка »)«.
-     Перед маркером требуем пробел или начало строки, чтобы не ловить
-     случайные совпадения внутри слов (например, в «Глава 1)»). */
-  const markerRe = /(^|\s)([А-Д]|[1-9])\)/g;
+  /* Находим все маркеры — буквы А-Д и цифры 1-9, за которыми идёт текст.
+     Для БУКВ скобка ) необязательна (импорт PDF иногда теряет её для Д).
+     Для ЦИФР скобка обязательна — иначе будем ловить любые числа в тексте.
+     После маркера требуем пробел или конец строки (чтобы не ловить «Дом»). */
+  const markerRe = /(^|\s)(?:([А-Д])\)?|([1-9])\))(?=\s|$)/g;
   const markers = [];
   let m;
   while((m = markerRe.exec(stripped)) !== null){
-    const v = m[2];
-    const ch = v.charCodeAt(0);
-    const isLetter = ch >= 0x0400;   // кириллица — буква
+    const isLetter = !!m[2];
+    const val = m[2] || m[3];
     markers.push({
       type: isLetter ? 'letter' : 'num',
-      val: isLetter ? v : parseInt(v, 10),
+      val: isLetter ? val : parseInt(val, 10),
       start: m.index + m[1].length,
       end: m.index + m[0].length
     });
