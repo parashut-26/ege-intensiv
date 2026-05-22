@@ -23731,17 +23731,41 @@ function parseTask22Matching(questionText){
     }
   }
   if(letters.length < 2 || terms.length < 2) return null;
-  /* Удалим дубликаты по букве/номеру (на случай парсера задвоения) */
+  /* Удалим дубликаты по букве/номеру (на случай парсера задвоения).
+     ЗАОДНО фильтруем «лже-маркеры» — если после буквы идёт текст в
+     сплошных CAPS (типа «ГРАММАТИЧЕСКИЕ ОШИБКИ»), это заголовок, а не
+     категория, и попало случайно. У настоящих категорий первая буква
+     обычно строчная и текст развёрнутый. */
+  const isLikelyHeader = (s) => {
+    const t = (s || '').trim();
+    if(t.length < 12) return true;
+    /* Доля заглавных кириллических букв среди всех кириллических */
+    const cyr = t.match(/[А-ЯЁа-яё]/g) || [];
+    const upper = t.match(/[А-ЯЁ]/g) || [];
+    if(cyr.length === 0) return true;
+    return (upper.length / cyr.length) > 0.6;
+  };
   const uniqLetters = [];
   const seenL = new Set();
   for(const l of letters){
-    if(!seenL.has(l.letter)){ seenL.add(l.letter); uniqLetters.push(l); }
+    if(seenL.has(l.letter)) continue;
+    if(isLikelyHeader(l.text)) continue;   // отбрасываем фейк
+    seenL.add(l.letter);
+    uniqLetters.push(l);
   }
   const uniqTerms = [];
   const seenN = new Set();
   for(const t of terms){
     if(!seenN.has(t.num)){ seenN.add(t.num); uniqTerms.push(t); }
   }
+  /* Сортируем буквы по русскому алфавиту А→Б→В→Г→Д. Без этого порядок
+     зависит от того, в каком виде маркеры попались парсеру (если в формулировке
+     перед А есть Д из заголовка — Д улетала наверх).
+     Аналогично сортируем термины по номеру 1→9. */
+  const LETTER_ORDER = { 'А':1, 'Б':2, 'В':3, 'Г':4, 'Д':5 };
+  uniqLetters.sort((a, b) =>
+    (LETTER_ORDER[a.letter] || 99) - (LETTER_ORDER[b.letter] || 99));
+  uniqTerms.sort((a, b) => a.num - b.num);
   return { letters: uniqLetters, terms: uniqTerms };
 }
 
