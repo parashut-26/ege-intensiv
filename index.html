@@ -11520,7 +11520,28 @@ function studentVariantsCard(){
       el('td', { style:{ padding:'8px 6px', textAlign:'center', background:'#EFF6FF', fontWeight:'700', borderBottom:'1px solid var(--border)' }},
         row.testSum == null ? '—' : String(row.testSum)),
       el('td', { style:{ padding:'8px 6px', textAlign:'center', background:'#FEF3C7', fontWeight:'700', borderBottom:'1px solid var(--border)' }},
-        row.essaySum == null ? '—' : String(row.essaySum)),
+        row.essay
+          ? String(row.essaySum == null ? '—' : row.essaySum)
+          : el('button', {
+              style:{ padding:'4px 8px', borderRadius:'6px',
+                      border:'1px solid #F59E0B', background:'#FEF3C7',
+                      color:'#92400E', cursor:'pointer', fontSize:'10px',
+                      fontWeight:'700', fontFamily:'inherit', lineHeight:'1.2' },
+              title:'Сдать сочинение по этому варианту',
+              onclick: (ev) => {
+                ev.stopPropagation();
+                const variantIdForEssay = (a.variant && a.variant.id) || a.variant_id;
+                STATE.essayDraftOpen = true;
+                STATE.essayDraftText = '';
+                STATE.essayDraftPhotos = [];
+                STATE.essayDraftMode = 'typed';
+                STATE.essayDraftSourceMode = 'variant';
+                STATE.essayDraftSourceVariantId = variantIdForEssay || null;
+                STATE.essayDraftSourceText = '';
+                STATE.essayDraftSourceProblem = '';
+                render();
+              }
+            }, '✍️ сдать')),
       el('td', { style:{ padding:'8px 6px', textAlign:'center', background:'#DBEAFE', fontWeight:'700', borderBottom:'1px solid var(--border)' }},
         row.primary == null ? '—' : String(row.primary)),
       el('td', { style:{ padding:'8px 6px', textAlign:'center', background:'#D1FAE5', fontWeight:'700', borderBottom:'1px solid var(--border)' }},
@@ -11597,6 +11618,23 @@ function studentVariantsCard(){
 
       /* Сочинение К1-К10 */
       const review = row.essay && row.essay.review;
+      const variantIdForEssay = (a.variant && a.variant.id) || a.variant_id;
+      /* Хелпер — открыть модалку сдачи сочинения с предзаполненной привязкой
+         к этому варианту. essayDraftSourceMode='variant' переводит радио на
+         «Из вариантов пробников», а essayDraftSourceVariantId выставляет
+         нужный <option> заранее. */
+      const openEssayDraftForVariant = (ev) => {
+        if(ev) ev.stopPropagation();
+        STATE.essayDraftOpen = true;
+        STATE.essayDraftText = '';
+        STATE.essayDraftPhotos = [];
+        STATE.essayDraftMode = 'typed';
+        STATE.essayDraftSourceMode = 'variant';
+        STATE.essayDraftSourceVariantId = variantIdForEssay || null;
+        STATE.essayDraftSourceText = '';
+        STATE.essayDraftSourceProblem = '';
+        render();
+      };
       if(row.essay){
         cell.append(el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginTop:'14px', marginBottom:'6px' }},
           '✍️ Сочинение' +
@@ -11618,9 +11656,24 @@ function studentVariantsCard(){
           cell.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px', fontSize:'12px', color:'var(--ink-2)' }},
             '💬 ' + review.general_comment));
         }
+        /* Кнопка «➕ Сдать ещё одно сочинение» — для случая, когда ученик
+           переписал работу после РНО и хочет, чтобы учитель посмотрел заново.
+           Новое сочинение пойдёт отдельной строкой в БД с привязкой к тому
+           же варианту через source_variant_id. */
+        cell.append(el('div', { style:{ marginTop:'10px', display:'flex', flexWrap:'wrap', gap:'8px' }},
+          el('button', { class:'btn btn-secondary btn-sm',
+            onclick: openEssayDraftForVariant
+          }, '➕ Сдать ещё одно сочинение по этому варианту')));
       } else {
-        cell.append(el('div', { style:{ marginTop:'12px', padding:'8px 10px', background:'#F3F4F6', borderRadius:'8px', fontSize:'12px', color:'var(--ink-3)' }},
-          '✍️ Сочинение к этому варианту ещё не привязано. Когда учитель проверит — данные появятся.'));
+        cell.append(el('div', { style:{ marginTop:'12px', padding:'10px 12px',
+          background:'#FFFDF7', border:'1px dashed #FACC15', borderRadius:'8px',
+          display:'flex', justifyContent:'space-between', alignItems:'center',
+          gap:'10px', flexWrap:'wrap' }},
+          el('div', { style:{ fontSize:'12px', color:'#92400E', flex:'1 1 200px' }},
+            '✍️ По этому варианту сочинение ещё не сдано. Можно сдать прямо сейчас — учитель проверит вручную.'),
+          el('button', { class:'btn btn-y btn-sm',
+            onclick: openEssayDraftForVariant
+          }, '✍️ Сдать сочинение')));
       }
       detail.append(cell);
       tbody.append(detail);
