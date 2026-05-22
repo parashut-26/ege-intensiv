@@ -22102,9 +22102,66 @@ function viewTeacherVariants(){
 }
 
 /* --- Сводная по конкретному варианту -- */
+/* === Polling сводной по варианту (live-просмотр класса) ===
+   Раз в 10 секунд тихо перезагружаем `loadVariantFull` пока учитель сидит
+   на странице конкретного варианта. Сравниваем по хэшу — если изменилось,
+   render(). Это и про новых учеников (появилась попытка), и про текущих
+   (поменялись ответы / баллы / scratch / drawing).
+   Отдельный поток ловится в startSolverTeacherMarksPolling для решалки;
+   тут — обратный путь, учитель видит ученика. */
+let _variantSummaryHash = '';
+function startVariantSummaryPolling(){
+  if(STATE._variantSummaryIntervalId) return;
+  const tick = async () => {
+    /* Сами останавливаемся, если ушёл с экрана конкретного варианта */
+    if(!STATE.selectedVariantId){
+      stopVariantSummaryPolling();
+      return;
+    }
+    try {
+      const vId = STATE.selectedVariantId;
+      await loadVariantFull(vId);
+      const d = STATE.currentVariantData;
+      if(!d || d.variant.id !== vId) return;
+      /* Хэш — список попыток + краткая сводка ответов */
+      const summary = {
+        attempts: (d.attempts || []).map(a => ({
+          id: a.id, started: a.started_at, finished: a.finished_at,
+          essay: a.essay_id || null, profile: a.profile_id || null
+        })),
+        answers: Object.keys(d.answersByAttempt || {}).map(aid => {
+          const byNum = d.answersByAttempt[aid] || {};
+          return aid + ':' + Object.keys(byNum).map(n => {
+            const an = byNum[n] || {};
+            return n + '=' + (an.points == null ? '·' : an.points) +
+              '/' + (an.user_answer || '');
+          }).join(',');
+        })
+      };
+      const hash = JSON.stringify(summary);
+      if(hash === _variantSummaryHash) return;
+      _variantSummaryHash = hash;
+      render();
+    } catch(e){
+      console.warn('[variant summary poll]', e.message);
+    }
+  };
+  STATE._variantSummaryIntervalId = setInterval(tick, 10000);
+}
+function stopVariantSummaryPolling(){
+  if(STATE._variantSummaryIntervalId){
+    clearInterval(STATE._variantSummaryIntervalId);
+    STATE._variantSummaryIntervalId = null;
+  }
+  _variantSummaryHash = '';
+}
+
 function viewVariantSummary(){
   const wrap = el('div', { class:'fade-in' });
   const data = STATE.currentVariantData;
+  /* Запускаем live-обновление пока учитель на этой странице. Polling сам
+     завершится, как только selectedVariantId станет null. */
+  startVariantSummaryPolling();
 
   /* Хлебная крошка */
   wrap.append(
@@ -22124,13 +22181,24 @@ function viewVariantSummary(){
      оно учтено отдельно через К1-К10 (по привязанной работе). */
   const qCount = Math.min(26, v.questions_count || 26);
 
+  const liveCount = attempts.filter(a => a.started_at && !a.finished_at).length;
   wrap.append(
     el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'18px', flexWrap:'wrap', gap:'10px' }},
       el('div', null,
         el('h1', null, '📋 ' + v.title),
         el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }},
           attempts.length + ' учеников · ' + qCount + ' заданий (1-26) + сочинение К1-К10' +
-          (v.source === 'pdf_import' ? ' · 🎯 решаемый' : ''))),
+          (v.source === 'pdf_import' ? ' · 🎯 решаемый' : '')),
+        el('div', { style:{ display:'flex', alignItems:'center', gap:'8px', marginTop:'6px', fontSize:'12px' }},
+          el('span', { style:{ display:'inline-flex', alignItems:'center', gap:'4px',
+                                padding:'2px 8px', borderRadius:'999px',
+                                background:'#D1FAE5', color:'#065F46', fontWeight:'700' }},
+            el('span', { style:{ display:'inline-block', width:'7px', height:'7px',
+                                  borderRadius:'50%', background:'#10B981',
+                                  animation:'pulse 1.6s infinite' }}),
+            'live · обновление каждые 10 сек'),
+          liveCount > 0 ? el('span', { style:{ color:'#DC2626', fontWeight:'700' }},
+            '🔴 решают сейчас: ' + liveCount) : null)),
       /* Кнопки управления — экспорт всегда, редактирование и пересчёт только для pdf_import */
       el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }},
         el('button', { class:'btn btn-y btn-sm',
@@ -22330,16 +22398,45 @@ function exportVariantToExcel(variant, attempts, byAttempt, qCount){
 function variantCell(ans, opts){
   opts = opts || {};
   if(!ans) return el('td', { class:'vc-empty' }, '—');
-  const points = Number(ans.points || 0);
   const max = Number(ans.max_points || 0);
+  /* Различаем три состояния, помимо «нет строки в БД»:
+       a) есть строка, но ученик НЕ дал ответ (user_answer пустое и
+          structured_state пустое, и points не оценены) — значит он только
+          открыл задание / начал рисовать. Показываем серую «·», НЕ красный 0.
+       b) есть ответ или структурированный выбор, но points ещё null —
+          ученик что-то выбрал, но не нажал «Проверить». Показываем жёлтую «?».
+       c) points оценены — обычная зелёная/жёлтая/красная цветовая логика. */
+  const hasUserAnswer = ans.user_answer != null && String(ans.user_answer).trim() !== '';
+  const hasStructured = !!(ans.structured_state && (typeof ans.structured_state === 'object'
+    ? Object.keys(ans.structured_state).length > 0
+    : true));
+  const hasAnyMark   = !!(ans.scratch || ans.student_drawing);
+  const pointsSet = ans.points != null && ans.max_points != null;
   let bg, color, label;
-  if(max === 0){ bg = '#F3F4F6'; color = '#9CA3AF'; label = '—'; }
-  else if(points >= max){ bg = '#D1FAE5'; color = '#065F46'; label = points; }
-  else if(points <= 0){ bg = '#FEE2E2'; color = '#991B1B'; label = '0'; }
-  else { bg = '#FEF3C7'; color = '#92400E'; label = points; }  /* частично */
-  const title = 'Ответ ученика: ' + (ans.user_answer == null ? '(пусто)' : ans.user_answer) +
-                '\nБалл: ' + points + ' из ' + max +
-                (opts.variantId ? '\nКлик — открыть текст задания' : '');
+  if(max === 0){
+    bg = '#F3F4F6'; color = '#9CA3AF'; label = '—';
+  } else if(!pointsSet && !hasUserAnswer && !hasStructured){
+    /* (a) только начал — открыл задание, может быть рисовал */
+    bg = hasAnyMark ? '#FFFBEB' : '#F9FAFB';
+    color = hasAnyMark ? '#92400E' : '#9CA3AF';
+    label = hasAnyMark ? '✏︎' : '·';
+  } else if(!pointsSet && (hasUserAnswer || hasStructured)){
+    /* (b) что-то выбрал, но Проверить не нажимал */
+    bg = '#EFF6FF'; color = '#1E40AF'; label = '?';
+  } else {
+    const points = Number(ans.points || 0);
+    if(points >= max){ bg = '#D1FAE5'; color = '#065F46'; label = points; }
+    else if(points <= 0){ bg = '#FEE2E2'; color = '#991B1B'; label = '0'; }
+    else { bg = '#FEF3C7'; color = '#92400E'; label = points; }
+  }
+  const status = !pointsSet
+    ? (hasUserAnswer || hasStructured ? '\nСтатус: выбрал, не проверил' : (hasAnyMark ? '\nСтатус: размечает' : '\nСтатус: открыл, не отвечал'))
+    : '';
+  const title = 'Ответ ученика: ' + (hasUserAnswer ? ans.user_answer : '(пусто)') +
+                (pointsSet ? '\nБалл: ' + (Number(ans.points)||0) + ' из ' + max : '') +
+                status +
+                (opts.variantId ? '\nКлик — открыть разбор' : '');
+  const points = pointsSet ? Number(ans.points) || 0 : 0;
   const td = el('td', { class:'vc', style:{ background:bg, color, textAlign:'center', fontWeight:'700', fontSize:'12px',
     cursor: opts.variantId ? 'pointer' : 'default' }, title }, String(label));
   if(opts.variantId && opts.num){
