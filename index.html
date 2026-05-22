@@ -23059,17 +23059,26 @@ function makeTasks9_12Field(q){
    считается «попадает в ответ». Целевая форма определяется по формулировке
    («пишутся СЛИТНО»/«РАЗДЕЛЬНО»/«ЧЕРЕЗ ДЕФИС»). */
 function parseParensWords(text){
-  /* Находим все шаблоны «(приставка)корень» и возвращаем токены:
-     [{type:'text',value:'Отец '}, {type:'word', prefix:'В', root:'ТЕЧЕНИЕ'}, ...] */
+  /* Находим все шаблоны выделенных слов в ЕГЭ и возвращаем токены:
+     1) «(В)ТЕЧЕНИЕ» — приставка в скобках, перед корнем (parensPos='before')
+     2) «ЧТО(БЫ)» — окончание в скобках, после корня (parensPos='after')
+     Токен типа 'word' хранит { prefix, root, parensPos }. */
   const tokens = [];
-  const re = /\(([А-ЯЁа-яё]+)\)([А-ЯЁ]+)/g;
+  /* Объединённый регекс: либо ()WORD, либо WORD() */
+  const re = /\(([А-ЯЁа-яё]+)\)([А-ЯЁ]+)|([А-ЯЁ]+)\(([А-ЯЁа-яё]+)\)/g;
   let lastEnd = 0;
   let m;
   while((m = re.exec(text)) !== null){
     if(m.index > lastEnd){
       tokens.push({ type:'text', value: text.slice(lastEnd, m.index) });
     }
-    tokens.push({ type:'word', prefix: m[1], root: m[2] });
+    if(m[1] && m[2]){
+      /* (приставка)КОРЕНЬ */
+      tokens.push({ type:'word', prefix: m[1], root: m[2], parensPos: 'before' });
+    } else if(m[3] && m[4]){
+      /* КОРЕНЬ(окончание) */
+      tokens.push({ type:'word', prefix: m[3], root: m[4], parensPos: 'after' });
+    }
     lastEnd = m.index + m[0].length;
   }
   if(lastEnd < text.length){
@@ -23156,16 +23165,23 @@ function makeTask13_14Field(q){
     });
     function paint(){
       const code = picks[key];
-      if(code && FORM_COLORS_13_14[code]){
-        const display = code === 's' ? (token.prefix + token.root).toLowerCase()
-                      : code === 'r' ? (token.prefix.toLowerCase() + ' ' + token.root.toLowerCase())
-                      : (token.prefix.toLowerCase() + '-' + token.root.toLowerCase());
-        btn.textContent = display;
+      /* Разделитель для формы: пусто/пробел/дефис */
+      const sep = code === 's' ? '' : code === 'r' ? ' ' : code === 'd' ? '-' : null;
+      /* Порядок слов зависит от того, где была скобка:
+         'before' — (приставка)КОРЕНЬ → приставка + sep + корень
+         'after'  — КОРЕНЬ(окончание) → корень + sep + окончание */
+      if(sep !== null && FORM_COLORS_13_14[code]){
+        const lo1 = (token.parensPos === 'after' ? token.root : token.prefix).toLowerCase();
+        const lo2 = (token.parensPos === 'after' ? token.prefix : token.root).toLowerCase();
+        btn.textContent = lo1 + sep + lo2;
         btn.style.background = FORM_COLORS_13_14[code].bg;
         btn.style.color = FORM_COLORS_13_14[code].fg;
         btn.style.borderColor = FORM_COLORS_13_14[code].fg;
       } else {
-        btn.textContent = '(' + token.prefix + ')' + token.root;
+        /* Не выбрано — показываем как в исходнике */
+        btn.textContent = token.parensPos === 'after'
+          ? (token.prefix + '(' + token.root + ')')
+          : ('(' + token.prefix + ')' + token.root);
         btn.style.background = '#fff';
         btn.style.color = 'var(--ink)';
         btn.style.borderColor = 'var(--border-2)';
@@ -23809,20 +23825,36 @@ function makeEditableQuestionText(q){
     }, 600);
   }
   ed.oninput = scheduleSave;
-  /* Блокируем ЛЮБОЙ ввод текста или удаление — формулировка задания неприкосновенна.
-     Разрешены только программные команды форматирования через тулбар (выставляем
-     флаг allowExec на время exec()). Это превращает текст в «можно выделять и
-     красить, но нельзя изменять». */
+  /* Блокируем ввод текста — но ТОЛЬКО для ученика. Учитель в режиме
+     «✎ Редактировать в стиле ученика» (или preview) должен мочь править
+     формулировку (например, исправить «СЛИТНО» на «РАЗДЕЛЬНО» или другую
+     опечатку). Для ученика — only формат через тулбар. */
   ed.addEventListener('beforeinput', (e) => {
     if(allowExec) return;
-    /* Формат-команды от системы (например, Ctrl+B в браузере) — пропускаем тоже */
+    /* Формат-команды от системы (например, Ctrl+B в браузере) — пропускаем */
     if(e.inputType && /^format/i.test(e.inputType)) return;
+    /* В учительском режиме редактирования — всё разрешено */
+    if(STATE.solverTeacherEdit) return;
     e.preventDefault();
   });
-  /* Блокируем вставку из буфера обмена — нельзя добавить чужой текст в формулировку */
-  ed.addEventListener('paste', (e) => { e.preventDefault(); });
-  /* Drag-and-drop текста тоже блокируем */
-  ed.addEventListener('drop', (e) => { e.preventDefault(); });
+  /* Блокируем вставку из буфера обмена ТОЛЬКО для ученика */
+  ed.addEventListener('paste', (e) => {
+    if(STATE.solverTeacherEdit){
+      /* Для учителя — переносим только plain-текст, чтобы не тащить шрифты Word */
+      e.preventDefault();
+      const txt = (e.clipboardData || window.clipboardData).getData('text/plain');
+      allowExec = true;
+      document.execCommand('insertText', false, txt);
+      allowExec = false;
+      return;
+    }
+    e.preventDefault();
+  });
+  /* Drag-and-drop текста — блокируем для ученика */
+  ed.addEventListener('drop', (e) => {
+    if(STATE.solverTeacherEdit) return;
+    e.preventDefault();
+  });
   /* === SVG-слой для карандаша поверх текста ===
      Лежит абсолютно поверх ed, прозрачно ловит pointer events когда
      активен карандаш. Координаты в пикселях относительно контейнера —
