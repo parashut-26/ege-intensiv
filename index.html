@@ -23721,10 +23721,12 @@ function viewSolverVariant(){
       const t21 = makeTask21Field(q);
       if(t21) card.append(t21);
     }
-    /* Для задания 22 — UI «Установите соответствие»: dropdown с терминами для каждой буквы */
-    if(q.num === 22){
-      const t22 = makeTask22Field(q);
-      if(t22) card.append(t22);
+    /* Задание 8 и 22 — оба формата «Установите соответствие»: dropdown с
+       терминами/предложениями для каждой буквы А-Д. Логика парсера и UI
+       одинаковая, поэтому переиспользуем makeTask22Field. */
+    if(q.num === 8 || q.num === 22){
+      const tMatching = makeTask22Field(q);
+      if(tMatching) card.append(tMatching);
     }
     /* Задания 9-12 — вставка пропущенной буквы в 5 рядов слов */
     if(q.num >= 9 && q.num <= 12){
