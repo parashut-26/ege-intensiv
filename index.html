@@ -24150,6 +24150,18 @@ function viewSolverVariant(){
   const isPreview = !!STATE.solverPreview;
   const isTeacherEdit = !!STATE.solverTeacherEdit;
   const isTeacherMode = isPreview || isTeacherEdit;
+
+  /* Универсальный поток «Завершить» — используется и в верхней панели, и в
+     дублирующей кнопке внизу списка заданий. Спрашивает подтверждение и
+     (в учительском режиме просмотра) сразу сохраняет. */
+  const finishSolverFlow = async (qList) => {
+    if(STATE.solverPreview){ await finishSolvingAndSave(); return; }
+    const unanswered = qList.filter(q => !(STATE.solverAnswers[q.num] || '').trim());
+    if(unanswered.length){
+      if(!confirm('Не отвечено заданий: ' + unanswered.length + '. Всё равно завершить?')) return;
+    } else if(!confirm('Завершить пробник? Ответы будут проверены автоматически.')) return;
+    await finishSolvingAndSave();
+  };
   const headBg = isTeacherEdit ? '#EFF6FF' : isPreview ? '#FFFBEB' : 'var(--surface)';
   const headBorder = isTeacherEdit ? '#3B82F6' : isPreview ? '#F59E0B' : 'var(--p)';
   const headLabel = isTeacherEdit
@@ -24191,14 +24203,7 @@ function viewSolverVariant(){
             onclick: () => saveSolverTeacherEdits()
           }, '💾 Сохранить вариант')
         : el('button', { class:'btn btn-teal',
-            onclick: async () => {
-              if(STATE.solverPreview){ await finishSolvingAndSave(); return; }
-              const unanswered = questions.filter(q => !(STATE.solverAnswers[q.num] || '').trim());
-              if(unanswered.length){
-                if(!confirm('Не отвечено заданий: ' + unanswered.length + '. Всё равно завершить?')) return;
-              } else if(!confirm('Завершить пробник? Ответы будут проверены автоматически.')) return;
-              await finishSolvingAndSave();
-            }
+            onclick: () => finishSolverFlow(questions)
           }, '✅ Завершить')));
   wrap.append(header);
 
@@ -24460,6 +24465,32 @@ function viewSolverVariant(){
     left.append(ecard);
   }
 
+  /* Дубль кнопки «Завершить» внизу списка заданий — чтобы не приходилось
+     скроллить наверх. В учительском режиме (preview / teacherEdit) — это
+     не нужно: сверху уже есть «Сохранить вариант» / «Закрыть». */
+  if(!isTeacherMode){
+    const bottomFinish = el('div', {
+      style:{ marginTop:'18px', padding:'14px', background:'#FFFDF7',
+              border:'2px solid #FACC15', borderRadius:'12px',
+              display:'flex', flexDirection:'column', gap:'8px',
+              alignItems:'stretch' }
+    },
+      el('div', { style:{ fontSize:'13px', color:'#92400E', fontWeight:'700',
+        textAlign:'center' }},
+        '🏁 Это последнее задание. Готов(а) завершить пробник?'),
+      el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', textAlign:'center' }},
+        'После «Завершить» ответы будут проверены автоматически и появятся итоговые баллы. ' +
+        'Сочинение №27 можно сдать отдельно — кнопка появится на странице результатов.'),
+      el('button', {
+        class:'btn btn-teal',
+        style:{ fontSize:'16px', fontWeight:'700', padding:'14px',
+                marginTop:'4px' },
+        onclick: () => finishSolverFlow(questions)
+      }, '✅ Завершить пробник')
+    );
+    left.append(bottomFinish);
+  }
+
   grid.append(left, right);
   wrap.append(grid);
 
@@ -24495,26 +24526,83 @@ function viewSolverResult(){
     el('div', { style:{ marginTop:'8px', fontSize:'14px', color:'var(--ink-2)' }},
       total + ' из ' + max + ' первичных баллов · ⏱ ' + otpFormatTime(timeSec))));
 
-  /* Сетка ячеек */
-  wrap.append(el('h3', { style:{ marginBottom:'8px' }}, 'Твои ответы'));
-  const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(64px, 1fr))', gap:'6px', marginBottom:'16px' }});
+  /* Соответствие num → объект вопроса (нужен для пояснений и формулировок) */
+  const qByNum = {};
+  (data.questions || []).forEach(q => { qByNum[q.num] = q; });
+
+  /* Сетка ячеек. Тап — раскрывает панель с формулировкой задания, ответами
+     и пояснением (если есть). Раньше была только title-подсказка, которая
+     на мобильном не показывается → ученик не мог посмотреть текст задания
+     без перезагрузки. */
+  wrap.append(el('h3', { style:{ marginBottom:'8px' }},
+    'Твои ответы ', el('span', { style:{ fontSize:'12px', fontWeight:'500', color:'var(--ink-3)' }},
+      '· тапни номер, чтобы посмотреть формулировку')));
+  const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(64px, 1fr))', gap:'6px', marginBottom:'10px' }});
+  const detailBox = el('div', { style:{ marginBottom:'16px' }});
+  let activeCell = null;
   result.forEach(r => {
     const bg = r.isCorrect ? '#D1FAE5' : '#FEE2E2';
     const fg = r.isCorrect ? '#065F46' : '#991B1B';
-    grid.append(el('div', {
-      style:{ padding:'10px 6px', borderRadius:'8px', background:bg, color:fg, textAlign:'center', fontWeight:'700', fontSize:'13px', cursor:'help' },
-      title:'Задание №' + r.num + '\nТвой ответ: ' + (r.user || '(пусто)') +
-            '\nПравильный: ' + r.correct +
-            '\nБалл: ' + r.points + ' / ' + r.max
+    const cell = el('div', {
+      style:{ padding:'10px 6px', borderRadius:'8px', background:bg, color:fg,
+              textAlign:'center', fontWeight:'700', fontSize:'13px', cursor:'pointer',
+              border:'2px solid transparent', transition:'all .12s' }
     },
       el('div', { style:{ fontSize:'10px', opacity:.7 }}, '№' + r.num),
-      el('div', null, r.isCorrect ? '✓' : '✗')));
+      el('div', null, r.isCorrect ? '✓' : '✗'));
+    cell.onclick = () => {
+      /* Подсвечиваем текущую ячейку и рендерим формулировку под сеткой */
+      if(activeCell) activeCell.style.borderColor = 'transparent';
+      cell.style.borderColor = 'var(--p)';
+      activeCell = cell;
+      const q = qByNum[r.num];
+      detailBox.innerHTML = '';
+      const card = el('div', { class:'card',
+        style:{ background: r.isCorrect ? '#F0FDF4' : '#FEF2F2',
+                borderColor: r.isCorrect ? '#86EFAC' : '#FCA5A5' }},
+        el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                            marginBottom:'8px', gap:'10px' }},
+          el('div', { style:{ fontSize:'13px', fontWeight:'700',
+                              color: r.isCorrect ? '#065F46' : '#991B1B' }},
+            (r.isCorrect ? '✓ ' : '✗ ') + 'Задание №' + r.num +
+            ' · ' + r.points + '/' + r.max + ' б'),
+          el('button', {
+            style:{ padding:'4px 10px', borderRadius:'6px', border:'1px solid var(--border-2)',
+                    background:'#fff', cursor:'pointer', fontSize:'12px',
+                    fontFamily:'inherit', color:'var(--ink-2)' },
+            onclick: () => { detailBox.innerHTML = ''; if(activeCell){ activeCell.style.borderColor='transparent'; activeCell = null; } }
+          }, '✕ Закрыть')));
+      /* Сама формулировка */
+      if(q && (q.question_text || '').trim()){
+        const fb = el('div', { style:{ marginBottom:'8px', padding:'10px 12px',
+          background:'#fff', border:'1px solid var(--border)', borderRadius:'8px',
+          fontSize:'13px', lineHeight:'1.55', whiteSpace:'pre-wrap' }});
+        fb.innerHTML = sanitizeQuestionHtml(q.question_text);
+        card.append(fb);
+      }
+      card.append(
+        el('div', { style:{ fontSize:'13px', marginBottom:'2px' }},
+          'Твой ответ: ', el('b', null, r.user || '(пусто)')),
+        el('div', { style:{ fontSize:'13px', color:'#065F46' }},
+          'Правильный: ', el('b', null, r.correct || '—')));
+      const expl = q && q.explanation ? String(q.explanation).trim() : '';
+      if(expl){
+        card.append(el('details', { style:{ marginTop:'8px', padding:'8px 10px',
+          background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px' }},
+          el('summary', { style:{ cursor:'pointer', fontSize:'12px',
+            fontWeight:'700', color:'#92400E' }}, '🔍 Пояснение учителя'),
+          el('div', { html: formatExplanation(expl),
+            style:{ fontSize:'13px', color:'var(--ink)', lineHeight:'1.5',
+                    wordBreak:'break-word', marginTop:'6px' }})));
+      }
+      detailBox.append(card);
+      /* Плавный скролл к карточке, чтобы её было видно */
+      setTimeout(() => { try { card.scrollIntoView({ behavior:'smooth', block:'center' }); } catch(_){} }, 30);
+    };
+    grid.append(cell);
   });
   wrap.append(grid);
-
-  /* Соответствие num → объект вопроса (нужен для пояснений) */
-  const qByNum = {};
-  (data.questions || []).forEach(q => { qByNum[q.num] = q; });
+  wrap.append(detailBox);
 
   /* Позиция автора (задание 27, опорная заметка) — показываем отдельной
      карточкой, если ученик её заполнил. На балл не влияет, но видна. */
@@ -24612,12 +24700,30 @@ function viewSolverResult(){
         el('div', { html: formatExplanation(expl), style:{ fontSize:'13px', color:'var(--ink)', lineHeight:'1.5', wordBreak:'break-word', marginTop:'6px' }})
       ) : null;
 
+      /* Формулировка задания — скрыта в спойлер, чтобы карточка ошибки не
+         была слишком длинной. Раньше формулировки тут не было, ученик
+         перезагружал страницу чтобы вернуться к решалке и посмотреть текст. */
+      const qFormul = qByNum[r.num] && (qByNum[r.num].question_text || '').trim();
+      const qFormulBlock = qFormul ? el('details', {
+        style:{ marginTop:'8px', padding:'8px 10px', background:'#FFF',
+                border:'1px solid var(--border-2)', borderRadius:'6px' }
+      },
+        el('summary', { style:{ cursor:'pointer', fontSize:'12px',
+          fontWeight:'700', color:'var(--ink-2)' }}, '📋 Показать формулировку задания'),
+        (function(){
+          const inner = el('div', { style:{ marginTop:'6px', fontSize:'13px',
+            lineHeight:'1.55', color:'var(--ink)', whiteSpace:'pre-wrap' }});
+          inner.innerHTML = sanitizeQuestionHtml(qFormul);
+          return inner;
+        })()
+      ) : null;
       wrap.append(el('div', { class:'card', style:{ marginBottom:'8px', background:'#FEF2F2', borderColor:'#FCA5A5' }},
         el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--red)', marginBottom:'4px' }}, 'Задание №' + r.num),
         el('div', { style:{ fontSize:'13px', marginBottom:'2px' }},
           'Твой ответ: ', el('b', null, r.user || '(пусто)')),
         el('div', { style:{ fontSize:'13px', color:'var(--green)' }},
           'Правильный: ', el('b', null, r.correct)),
+        qFormulBlock,
         /* Блок РНО — пояснение ученика. Идёт ВЫШЕ спойлера с пояснением учителя,
            чтобы ученик сначала написал своё, потом сравнил. */
         el('div', { style:{ marginTop:'10px', padding:'8px 10px', background:'#EFF6FF', border:'1px solid #93C5FD', borderRadius:'6px' }},
@@ -26706,6 +26812,20 @@ function render(){
   });
 }
 
+/* Хелпер для солверного режима: после рендера решалки делаем early-return
+   из _renderNow, поэтому модалки в конце функции не цепляются. Здесь
+   докидываем те модалки, которые могут открыться из решалки/результата:
+   — modalEssayDraft (сдать сочинение после завершения теста)
+   — modalLightbox  (просмотр фото в формулировках, если кто-то откроет)
+   — toast
+   — chat panel (если ученик откроет чат поверх теста). */
+function mountSolverOverlays(root){
+  if(STATE.essayDraftOpen) root.append(modalEssayDraft());
+  if(STATE.lightbox) root.append(modalLightbox());
+  if(STATE.chatOpen && STATE.view !== 'login') root.append(chatPanel(STATE.view));
+  if(STATE.toast) root.append(el('div', { class:'toast' }, STATE.toast));
+}
+
 /* Запоминаем последний «вид + вкладка» — если совпадает с прошлым
    рендером, это переотрисовка по приходу async-данных (а не смена
    страницы), значит fade-in отключаем — иначе содержимое мигает. */
@@ -26773,6 +26893,7 @@ function _renderNow(){
         el('main', { class:'main' }, viewSolverVariant()),
         legalFooter()
       );
+      mountSolverOverlays(root);
       return;
     }
     /* Splash-анимация: проверяем localStorage один раз за вкладку.
@@ -26844,6 +26965,7 @@ function _renderNow(){
         el('main', { class:'main' }, viewSolverVariant()),
         legalFooter()
       );
+      mountSolverOverlays(root);
       return;
     }
     const perms = myCuratorPerms();
@@ -26907,6 +27029,7 @@ function _renderNow(){
         el('main', { class:'main' }, viewSolverVariant()),
         legalFooter()
       );
+      mountSolverOverlays(root);
       return;
     }
     /* Бейджи на табах считаем только когда реальные данные пришли,
