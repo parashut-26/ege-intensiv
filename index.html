@@ -22615,27 +22615,45 @@ function makeTask21Field(q){
 
 /* === Задание 22: парсер «Установите соответствие» ===
    Тип А (соответствие): фрагменты А) Б) В) Г) Д) + термины 1) 2) 3) ... 9)
-   Возвращает { letters: [{letter,text}], terms: [{num,text}] } или null. */
+   Возвращает { letters: [{letter,text}], terms: [{num,text}] } или null.
+   Позиционный парсер: находит ВСЕ маркеры (буквы и цифры) в тексте, и для
+   каждого берёт текст до следующего маркера. Работает даже если маркеры
+   склеены в одну строку без переносов. */
 function parseTask22Matching(questionText){
   if(!questionText) return null;
-  const stripped = String(questionText).replace(/<[^>]+>/g, '\n');
-  /* Разбиваем по строкам или двойным переносам. Каждый сегмент — потенциальная
-     запись «А) текст» или «1) текст». Не требуем чистоты — данные после
-     импорта PDF могут быть рваными. */
-  const segments = stripped.split(/\n+|\s{2,}/).map(s => s.trim()).filter(Boolean);
+  const stripped = String(questionText).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  /* Находим все маркеры — буквы А-Д и цифры 1-9, за которыми скобка »)«.
+     Перед маркером требуем пробел или начало строки, чтобы не ловить
+     случайные совпадения внутри слов (например, в «Глава 1)»). */
+  const markerRe = /(^|\s)([А-Д]|[1-9])\)/g;
+  const markers = [];
+  let m;
+  while((m = markerRe.exec(stripped)) !== null){
+    const v = m[2];
+    const ch = v.charCodeAt(0);
+    const isLetter = ch >= 0x0400;   // кириллица — буква
+    markers.push({
+      type: isLetter ? 'letter' : 'num',
+      val: isLetter ? v : parseInt(v, 10),
+      start: m.index + m[1].length,
+      end: m.index + m[0].length
+    });
+  }
+  if(markers.length < 4) return null;
+  /* Сортируем по позиции (на случай если regex выдал в порядке матчей,
+     но в тексте они стоят по-другому — крайне редкий случай) */
+  markers.sort((a, b) => a.start - b.start);
   const letters = [];
   const terms = [];
-  for(const seg of segments){
-    /* Соответствие фрагменту А-Д */
-    const lm = seg.match(/^([А-Д])\)\s*(.+)$/);
-    if(lm){
-      letters.push({ letter: lm[1], text: lm[2].trim() });
-      continue;
-    }
-    /* Соответствие термину 1-9 */
-    const nm = seg.match(/^([1-9])\)\s*(.+)$/);
-    if(nm){
-      terms.push({ num: parseInt(nm[1], 10), text: nm[2].trim() });
+  for(let i = 0; i < markers.length; i++){
+    const mk = markers[i];
+    const nextStart = i + 1 < markers.length ? markers[i+1].start : stripped.length;
+    const text = stripped.slice(mk.end, nextStart).trim();
+    if(!text) continue;
+    if(mk.type === 'letter'){
+      letters.push({ letter: mk.val, text });
+    } else {
+      terms.push({ num: mk.val, text });
     }
   }
   if(letters.length < 2 || terms.length < 2) return null;
