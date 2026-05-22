@@ -20214,6 +20214,33 @@ async function loadVariantsList(){
       '/test_variants?select=id,title,questions_count,total_max_score,created_at,source,is_published,day_id&order=created_at.desc');
     STATE.variantsList = Array.isArray(list) ? list : [];
     STATE.variantsListLoaded = true;
+    /* === Подсчёт попыток по каждому варианту ===
+       Делаем ОДИН запрос за всеми attempts (только id+variant_id+finished_at),
+       группируем локально. Учителю в списке нужно сразу видеть: какой
+       вариант кто-то уже прорешал, какой свежий — туда стоит зайти посмотреть.
+       Заодно собираем «решают сейчас» (started_at без finished_at) — это
+       подсветится 🔴, чтобы во время урока было видно активность. */
+    try {
+      const attRows = await restRequest('GET',
+        '/test_variant_attempts?select=id,variant_id,profile_id,otp_full_name,started_at,finished_at&order=started_at.desc');
+      const counts = {};   // variant_id -> { finished:N, live:N, students:Set }
+      (attRows || []).forEach(a => {
+        const vid = a.variant_id;
+        if(!counts[vid]) counts[vid] = { finished: 0, live: 0, students: new Set() };
+        const who = a.profile_id || a.otp_full_name || a.id;
+        counts[vid].students.add(who);
+        if(a.finished_at) counts[vid].finished++;
+        else if(a.started_at) counts[vid].live++;
+      });
+      STATE.variantsListStats = {};
+      Object.keys(counts).forEach(vid => {
+        STATE.variantsListStats[vid] = {
+          finished: counts[vid].finished,
+          live: counts[vid].live,
+          uniqueStudents: counts[vid].students.size
+        };
+      });
+    } catch(e){ console.warn('[variants] stats load error:', e.message); }
   } catch(e){
     console.warn('[variants] load list error:', e.message);
     STATE.variantsListLoaded = true;
@@ -22186,7 +22213,31 @@ function viewTeacherVariants(){
           (v.questions_count || 27) + ' заданий · ' +
           (v.total_max_score ? 'макс ' + v.total_max_score + ' б · ' : '') +
           'загружен ' + new Date(v.created_at).toLocaleDateString('ru-RU') +
-          (isPdf ? (isPub ? ' · 👁 виден ученикам' : ' · 🙈 скрыт') : ''))),
+          (isPdf ? (isPub ? ' · 👁 виден ученикам' : ' · 🙈 скрыт') : '')),
+        /* === Статистика попыток ===
+           Сразу видно сколько детей УЖЕ прошли вариант и есть ли активные
+           прямо сейчас — учителю удобно во время урока. */
+        (() => {
+          const stats = (STATE.variantsListStats || {})[v.id];
+          if(!stats || (!stats.finished && !stats.live)) return null;
+          const parts = [];
+          if(stats.finished) parts.push(
+            el('span', { style:{ display:'inline-flex', alignItems:'center', gap:'4px',
+              padding:'2px 8px', borderRadius:'999px', background:'#D1FAE5',
+              color:'#065F46', fontWeight:'700', fontSize:'11px' }},
+              '✓ решили: ' + stats.finished));
+          if(stats.live) parts.push(
+            el('span', { style:{ display:'inline-flex', alignItems:'center', gap:'4px',
+              padding:'2px 8px', borderRadius:'999px', background:'#FEE2E2',
+              color:'#991B1B', fontWeight:'700', fontSize:'11px',
+              animation:'pulse 1.6s infinite' }},
+              '🔴 решают: ' + stats.live));
+          if(stats.uniqueStudents && stats.uniqueStudents !== stats.finished + stats.live) parts.push(
+            el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }},
+              '· уникальных: ' + stats.uniqueStudents));
+          return el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap',
+            marginTop:'6px' }}, ...parts);
+        })()),
       el('div', { style:{ display:'flex', gap:'6px', alignItems:'center' }},
         pubBtn,
         delBtn,
