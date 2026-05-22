@@ -11562,7 +11562,77 @@ function renderStructuredAnswer(num, q, structured){
     return wrap;
   }
 
-  /* === Прочее (13-14, 21, 8, 22): просто JSON под спойлером === */
+  /* === №13/14: слитно/раздельно/через дефис по каждому слову ===
+     В формулировке есть слова (НЕ)ТОРОПЛИВЫ, КАК(БЫ) и т.п. Для каждого
+     ученик выбирает форму. Показываем подсвеченные плашки рядом со
+     словом, плюс целевую форму из формулировки и в каких предложениях
+     все слова получили нужную форму. */
+  if((num === 13 || num === 14) && structured.words13_14
+       && typeof parseTask21Sentences === 'function'
+       && typeof parseParensWords === 'function'){
+    const sentences = parseTask21Sentences(txt);
+    if(sentences.length){
+      const picks = structured.words13_14;
+      const FORM = (typeof FORM_COLORS_13_14 !== 'undefined') ? FORM_COLORS_13_14 : {
+        s:{bg:'#D1FAE5',fg:'#065F46',label:'слитно'},
+        r:{bg:'#FEE2E2',fg:'#991B1B',label:'раздельно'},
+        d:{bg:'#DBEAFE',fg:'#1E40AF',label:'через дефис'}
+      };
+      const formLow = txt.toLowerCase();
+      let targetCode = null;
+      if(/слитно/.test(formLow)) targetCode = 's';
+      else if(/раздельно/.test(formLow)) targetCode = 'r';
+      else if(/через\s+дефис/.test(formLow)) targetCode = 'd';
+      const wrap = el('div', { style:{ padding:'10px 12px', background:'#F0F9FF',
+        border:'1px solid #93C5FD', borderRadius:'10px', marginBottom:'14px' }},
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
+                            marginBottom:'8px' }},
+          '📋 Что ученик выбрал по словам' +
+          (targetCode ? ' (целевая форма: «' + FORM[targetCode].label + '»)' : '')));
+      sentences.forEach(sent => {
+        const tokens = parseParensWords(sent.text);
+        const wordIdxs = tokens.map((t, i) => t.type === 'word' ? i : -1).filter(i => i >= 0);
+        const allTarget = wordIdxs.length > 0 &&
+          wordIdxs.every(i => picks[sent.num + '-' + i] === targetCode);
+        const row = el('div', { style:{ display:'flex', alignItems:'baseline', gap:'6px',
+          flexWrap:'wrap', padding:'6px 4px', borderTop:'1px dashed #BFDBFE',
+          fontSize:'13px', lineHeight:'1.6' }});
+        row.append(el('b', { style:{ color:'#1E40AF', flexShrink:'0' }}, sent.num + ')'));
+        tokens.forEach((t, i) => {
+          if(t.type === 'text'){
+            row.append(document.createTextNode(t.value));
+          } else {
+            const wordText = t.parensPos === 'after'
+              ? (t.root + '(' + t.prefix + ')')
+              : ('(' + t.prefix + ')' + t.root);
+            const code = picks[sent.num + '-' + i];
+            const f = code ? FORM[code] : null;
+            if(f){
+              row.append(el('span', {
+                style:{ display:'inline-flex', alignItems:'center', gap:'4px',
+                        padding:'1px 6px', background:f.bg, color:f.fg,
+                        borderRadius:'4px', fontWeight:'700', margin:'0 1px' }
+              }, wordText + ' · ' + f.label));
+            } else {
+              row.append(el('span', {
+                style:{ color:'var(--ink-3)', fontStyle:'italic', margin:'0 1px' }
+              }, wordText + ' · ?'));
+            }
+          }
+        });
+        if(targetCode && wordIdxs.length){
+          row.append(el('span', {
+            style:{ marginLeft:'auto', fontSize:'11px', fontWeight:'700',
+                    color: allTarget ? '#065F46' : 'var(--ink-3)' }
+          }, allTarget ? '✓ всё «' + FORM[targetCode].label + '»' : ''));
+        }
+        wrap.append(row);
+      });
+      return wrap;
+    }
+  }
+
+  /* === Прочее (21, 8, 22, и неизвестные): просто JSON под спойлером === */
   const dump = el('details', { style:{ padding:'8px 12px', background:'#F9FAFB',
     border:'1px solid var(--border-2)', borderRadius:'8px', marginBottom:'14px',
     fontSize:'12px' }});
@@ -23208,59 +23278,72 @@ function collectStructuredForNum(num){
 /* Снэпшоты последних сохранённых состояний — чтобы не слать PATCH впустую */
 const _structuredSnapshots = {};
 let _structuredSyncTimer = null;
+/* Хелпер — что у ученика введено в plain-текстовое поле «Ваш ответ»
+   для тестовых заданий 1-7, 23-26 (без структурированного UI). */
+function liveUserAnswerForNum(num){
+  if(num >= 27) return '';   // 27 — сочинение, не сюда
+  const v = STATE.solverAnswers && STATE.solverAnswers[num];
+  return (v || '').toString().trim();
+}
 function scheduleStructuredSync(){
   if(_structuredSyncTimer) clearTimeout(_structuredSyncTimer);
   _structuredSyncTimer = setTimeout(async () => {
     if(!STATE.solverData) return;
     /* Учитель в режиме просмотра/правки эталона — НЕ сохраняет ответы ученика */
     if(STATE.solverTeacherEdit || STATE.solverPreview) return;
-    /* Если live-попытки ещё нет, но есть что сохранять (ученик нарисовал что-то
-       до первой «Проверить») — создаём попытку. Без этого карандашные пометки
-       и буквы пропадают при закрытии браузера до первого instant-check. */
+    /* Если live-попытки ещё нет, но есть что сохранять (ученик написал/нарисовал
+       что-то до первой «Проверить») — создаём попытку. */
     let attId = STATE.liveAttemptId;
     if(!attId){
-      /* Сначала проверим, есть ли вообще что сохранять — иначе плодим
-         пустые попытки при любом скролле решалки */
-      const hasAny = STATE.solverData.questions.some(q => !!collectStructuredForNum(q.num));
+      const hasAny = STATE.solverData.questions.some(q => {
+        if(q.num >= 27) return false;
+        return !!collectStructuredForNum(q.num) || !!liveUserAnswerForNum(q.num);
+      });
       if(!hasAny) return;
       attId = await ensureLiveAttempt();
       if(!attId) return;
     }
     for(const q of STATE.solverData.questions){
+      if(q.num >= 27) continue;   // 27 — сочинение, отдельный path
       const data = collectStructuredForNum(q.num);
-      const json = data ? JSON.stringify(data) : null;
+      const userAns = liveUserAnswerForNum(q.num);
+      /* Снэпшот ОБЪЕДИНЁННЫЙ — структура + текстовое поле «Ваш ответ».
+         Любая правка любого из двух — PATCH/INSERT строки. Так у учителя
+         в сводной даже №1-7 и №23-26 (где нет структурного UI, ученик
+         просто печатает) показывают синюю «?» при появлении ввода. */
+      const json = JSON.stringify({ d: data || null, a: userAns || null });
       const key = attId + ':' + q.num;
       if(json === _structuredSnapshots[key]) continue;
       _structuredSnapshots[key] = json;
-      /* Если данных нет — НЕ создаём пустую строку в БД (иначе у учителя
-         в сводной появятся «нулёвки-фантомы» по всем 27 заданиям сразу,
-         как только ученик тронул первое задание). Сохраняем только если
-         реально есть что сохранять. */
-      if(!data) continue;
+      if(!data && !userAns) continue;   // нечего сохранять
       try {
-        await saveLiveStructured(q.num, data);
+        await saveLiveStructured(q.num, data, userAns);
       } catch(e){ console.warn('[live structured] num=' + q.num, e.message); }
     }
   }, 1000);
 }
 
-async function saveLiveStructured(num, data){
+async function saveLiveStructured(num, data, userAnswer){
   const attId = STATE.liveAttemptId;
   if(!attId) return;
+  const ua = (userAnswer || '').toString().trim();
+  /* Пишем оба поля сразу одним PATCH/INSERT: structured_state (jsonb) и
+     user_answer (text). points/max_points НЕ трогаем, чтобы кнопка «Проверить»
+     (которая идёт через saveLiveAnswer и ставит баллы) не конфликтовала. */
+  const payload = {
+    structured_state: data || null,
+    user_answer: ua || null
+  };
   const resp = await restRequest('PATCH',
     '/test_variant_answers?attempt_id=eq.' + attId + '&question_num=eq.' + num,
-    { structured_state: data || null },
+    payload,
     { prefer: 'return=representation' });
   if(Array.isArray(resp) && resp.length > 0) return;
-  /* Если данных нет — не плодим пустую строку (иначе в БД будут «фантомы»
-     с дефолтами points=0/max_points=1, и учитель увидит красную «0»). */
-  if(!data) return;
-  /* Явно ставим points/max_points в null, чтобы DEFAULT в БД (если ещё остался
-     до миграции) не подставил 0/1. После миграции 2026-05-22_kill_phantom_zeros
-     это уже не нужно, но оставляем как защиту. */
+  /* Если данных совсем нет — не плодим пустую строку. */
+  if(!data && !ua) return;
   await restRequest('POST', '/test_variant_answers', {
     attempt_id: attId, question_num: num,
-    structured_state: data,
+    ...payload,
     points: null, max_points: null
   }, { prefer: 'return=minimal' });
 }
