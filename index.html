@@ -23472,26 +23472,50 @@ function makeEditableQuestionText(q){
     eraserBtnRef.style.background = eraserActive ? '#FEE2E2' : '#fff';
     eraserBtnRef.style.borderColor = eraserActive ? '#DC2626' : 'var(--border-2)';
     if(!svgLayer) return;
-    /* Режим SVG-слоя */
-    if(drawingActive || eraserActive){
+    /* Режим SVG-слоя.
+       Для карандаша touch-action:none — нужен непрерывный drag.
+       Для ластика touch-action:auto — палец должен скролить страницу,
+       а удаление линии срабатывает по тапу (не блокирует scroll). */
+    if(drawingActive){
       svgLayer.style.pointerEvents = 'auto';
       svgLayer.style.touchAction = 'none';
-      svgLayer.style.cursor = drawingActive ? 'crosshair' : 'pointer';
-      ed.style.cursor = drawingActive ? 'crosshair' : '';
+      svgLayer.style.cursor = 'crosshair';
+      ed.style.cursor = 'crosshair';
+    } else if(eraserActive){
+      /* Ластик: pointer-events нужны только для путей, а не для пустого
+         фона — иначе ластик «съест» туч и не даст скролить страницу.
+         Поэтому svgLayer.pointerEvents = 'none', а внутри каждый path
+         получит pointer-events: stroke (см. ниже forEach). */
+      svgLayer.style.pointerEvents = 'none';
+      svgLayer.style.touchAction = 'auto';
+      svgLayer.style.cursor = 'default';
+      ed.style.cursor = '';
     } else {
       svgLayer.style.pointerEvents = 'none';
       svgLayer.style.touchAction = 'auto';
       svgLayer.style.cursor = 'default';
       ed.style.cursor = '';
     }
-    /* В режиме ластика — пути ловят клики и подсвечиваются при hover */
+    /* В режиме ластика — пути ловят клики и видимо «утолщаются» (для точного
+       попадания пальцем). Подсветка при hover не работает на тач-девайсах,
+       поэтому ориентируемся на толстую линию. */
     [...svgLayer.children].forEach(p => {
       if(eraserActive){
         p.style.pointerEvents = 'stroke';
         p.style.cursor = 'pointer';
+        /* Запоминаем исходную толщину один раз */
+        if(!p.dataset.origStroke){
+          p.dataset.origStroke = p.getAttribute('stroke-width') || '2.5';
+        }
+        p.setAttribute('stroke-width', '10');
+        p.style.opacity = '0.7';
       } else {
         p.style.pointerEvents = '';
         p.style.cursor = '';
+        if(p.dataset.origStroke){
+          p.setAttribute('stroke-width', p.dataset.origStroke);
+        }
+        p.style.opacity = '';
       }
     });
   }
