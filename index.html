@@ -22198,6 +22198,8 @@ async function startSolvingVariant(variantId, opts){
         if(d.checks16) STATE.solverChecks16 = d.checks16;
         if(d.gaps) STATE.solverGaps = d.gaps;
         if(d.choice13_14) STATE.solverChoice13_14 = d.choice13_14;
+        if(d.letters) STATE.solverLetters = d.letters;
+        if(d.checks9_12) STATE.solverChecks9_12 = d.checks9_12;
         if(d.liveAttemptId) STATE.liveAttemptId = d.liveAttemptId;
         if(d.startedAt && !opts.parentAttemptId) STATE.solverStartedAt = d.startedAt;
       }
@@ -22254,6 +22256,8 @@ function saveSolverDraft(){
       checks16: STATE.solverChecks16 || {},
       gaps: STATE.solverGaps || {},
       choice13_14: STATE.solverChoice13_14 || {},
+      letters: STATE.solverLetters || {},
+      checks9_12: STATE.solverChecks9_12 || {},
       liveAttemptId: STATE.liveAttemptId || null,
       startedAt: STATE.solverStartedAt
     }));
@@ -22868,6 +22872,142 @@ function makeTasks17_20Field(q){
   return wrap;
 }
 
+/* === Задания 9-12: вставка пропущенной буквы в слова с .. ===
+   Формат: 5 рядов, в каждом 2-4 слова с двумя точками (или __) — место
+   пропуска. Ученик вписывает букву в каждый пропуск; статус строки
+   «✓ одна буква» если во всех словах строки введена одна и та же буква;
+   чекбокс рядом — добавить эту строку в ответ. */
+function makeTasks9_12Field(q){
+  const sentences = parseTask21Sentences(q.question_text);
+  if(!sentences.length) return null;
+  const num = q.num;
+
+  if(!STATE.solverLetters) STATE.solverLetters = {};
+  if(!STATE.solverLetters[num]) STATE.solverLetters[num] = {};
+  if(!STATE.solverChecks9_12) STATE.solverChecks9_12 = {};
+  if(!STATE.solverChecks9_12[num]) STATE.solverChecks9_12[num] = {};
+  const letters = STATE.solverLetters[num];      // { 'rowN-gapM': 'letter' }
+  const picks   = STATE.solverChecks9_12[num];   // { rowN: true/false }
+
+  const wrap = el('div', { style:{ marginTop:'10px',
+    padding:'10px 12px', background:'#F9FAFB',
+    border:'1px solid var(--border)', borderRadius:'10px' }},
+    el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
+                        marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }},
+      '📌 Вставь пропущенную букву в каждый пропуск'),
+    el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
+      'Под строкой увидишь подсказку «✓ одна буква». Отметь галочкой строки, где должна быть одна и та же буква.'));
+
+  /* Регулярка для поиска пропусков: «..», «..» (две точки), «__» */
+  const gapRe = /\.{2,}|_{2,}/g;
+
+  sentences.forEach(sent => {
+    /* Разбиваем текст строки на чередующиеся фрагменты текста и input'ов */
+    const txt = sent.text;
+    const parts = [];
+    let lastIdx = 0;
+    let m;
+    const reSafe = /\.{2,}|_{2,}/g;
+    let gapIdx = 0;
+    while((m = reSafe.exec(txt)) !== null){
+      if(m.index > lastIdx) parts.push({ type:'text', value: txt.slice(lastIdx, m.index) });
+      parts.push({ type:'gap', idx: gapIdx++ });
+      lastIdx = m.index + m[0].length;
+    }
+    if(lastIdx < txt.length) parts.push({ type:'text', value: txt.slice(lastIdx) });
+    const totalGaps = gapIdx;
+
+    /* Если в строке нет пропусков — рендерим без input'ов */
+    const lineWrap = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'4px',
+      alignItems:'center', fontSize:'14px', lineHeight:'1.5' }});
+
+    /* Состояние для отслеживания «одна ли буква во всех пропусках» */
+    const updateRowStatus = () => {
+      const vals = [];
+      for(let i = 0; i < totalGaps; i++){
+        const key = sent.num + '-' + i;
+        vals.push((letters[key] || '').toLowerCase().trim());
+      }
+      const allFilled = vals.every(v => v.length > 0);
+      const allSame = allFilled && vals.every(v => v === vals[0]);
+      if(allSame) statusEl.innerHTML = '<span style="color:#065F46;font-weight:700;">✓ одна буква: ' + vals[0] + '</span>';
+      else if(allFilled) statusEl.innerHTML = '<span style="color:#92400E;font-weight:700;">⚠ разные буквы</span>';
+      else statusEl.innerHTML = '<span style="color:var(--ink-3);">заполни все пропуски</span>';
+    };
+
+    parts.forEach(p => {
+      if(p.type === 'text'){
+        lineWrap.append(document.createTextNode(p.value));
+      } else {
+        const key = sent.num + '-' + p.idx;
+        const inp = el('input', {
+          type:'text', maxlength:'2',
+          value: letters[key] || '',
+          style:{ width:'34px', padding:'2px 4px', fontSize:'14px',
+                  textAlign:'center', borderRadius:'4px',
+                  border:'2px solid #FACC15', background:'#FFFDF7',
+                  fontFamily:'inherit', fontWeight:'700',
+                  margin:'0 2px' },
+          oninput: (ev) => {
+            letters[key] = ev.target.value;
+            updateRowStatus();
+            saveSolverDraft();
+          }
+        });
+        lineWrap.append(inp);
+      }
+    });
+
+    const statusEl = el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }});
+
+    const cb = el('input', {
+      type:'checkbox',
+      checked: !!picks[sent.num],
+      style:{ width:'18px', height:'18px', cursor:'pointer', flexShrink:0 },
+      onchange: (ev) => {
+        if(ev.target.checked) picks[sent.num] = true;
+        else delete picks[sent.num];
+        saveSolverDraft();
+      }
+    });
+
+    const row = el('label', {
+      style:{ display:'flex', flexWrap:'wrap', gap:'8px', alignItems:'flex-start',
+              padding:'10px 0', borderTop:'1px dashed var(--border)', cursor:'pointer' }
+    },
+      cb,
+      el('div', { style:{ minWidth:'24px', fontWeight:'700', color:'var(--p-deep)', fontSize:'13px' }},
+        sent.num + ')'),
+      el('div', { style:{ flex:'1 1 200px', minWidth:'200px' }},
+        lineWrap,
+        statusEl));
+    wrap.append(row);
+    updateRowStatus();
+  });
+
+  const genBtn = el('button', {
+    type:'button',
+    class:'btn btn-p btn-sm',
+    style:{ marginTop:'12px', fontSize:'13px', fontWeight:'700' },
+    onclick: () => {
+      const result = Object.keys(picks)
+        .map(Number)
+        .filter(n => picks[n])
+        .sort((a,b) => a-b)
+        .join('');
+      STATE.solverAnswers[num] = result;
+      saveSolverDraft();
+      render();
+      showToast(result
+        ? '✓ Ответ сгенерирован: ' + result
+        : '⚠ Не отмечено ни одного ряда');
+    }
+  }, '📝 Сформировать ответ');
+  wrap.append(genBtn);
+
+  return wrap;
+}
+
 /* === Задания 13 и 14: слитно/раздельно (/дефис) ===
    Задание 13: «НЕ со словом пишется слитно/раздельно» — radio с двумя вариантами.
    Задание 14: «Оба слова пишутся слитно/раздельно/через дефис» — radio с тремя.
@@ -23466,10 +23606,21 @@ function viewSolverVariant(){
       const t22 = makeTask22Field(q);
       if(t22) card.append(t22);
     }
+    /* Задания 9-12 — вставка пропущенной буквы в 5 рядов слов */
+    if(q.num >= 9 && q.num <= 12){
+      const t9_12 = makeTasks9_12Field(q);
+      if(t9_12) card.append(t9_12);
+    }
     /* Задания 13 и 14 — слитно/раздельно (для 13) или + через дефис (для 14) */
     if(q.num === 13 || q.num === 14){
       const t13_14 = makeTask13_14Field(q);
       if(t13_14) card.append(t13_14);
+    }
+    /* Задание 15 (Н/НН) — те же кнопки-цифры что и в 17-20:
+       клик по цифре в тексте — отметить, что там пишется НН */
+    if(q.num === 15){
+      const t15 = makeTasks17_20Field(q);
+      if(t15) card.append(t15);
     }
     /* Задание 16 — чекбоксы «одна запятая» рядом с каждым из 5 предложений */
     if(q.num === 16){
