@@ -11193,9 +11193,13 @@ function makeTeacherMarksEditor(opts){
     ? initialScratch
     : sanitizeQuestionHtml(questionText || '');
 
-  /* Не блокируем ввод — учитель имеет право допечатать пояснение */
+  /* Не блокируем ввод — учитель имеет право допечатать пояснение.
+     При каждом oninput сразу пишем актуальный HTML в STATE.examineQuestion,
+     чтобы если polling сводной триггернёт re-render, новый редактор
+     прочитал initialScratch из свежего значения, а не из старого. */
   let saveTimer = null;
   function scheduleScratchSave(){
+    if(STATE.examineQuestion) STATE.examineQuestion.teacherScratch = ed.innerHTML;
     if(saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(async () => {
       try {
@@ -11231,12 +11235,19 @@ function makeTeacherMarksEditor(opts){
 
   let drawTimer = null;
   function scheduleDrawingSave(){
+    /* Мгновенно фиксируем актуальный SVG в STATE.examineQuestion. Это нужно
+       чтобы если polling сводной триггернёт re-render модалки, новый
+       редактор подгрузил initialDrawing из свежего значения — иначе
+       нарисованные штрихи откатятся к тому, что было на момент открытия. */
+    const wrappedNow = wrapDrawing(svgLayer.innerHTML, editorContainer);
+    if(STATE.examineQuestion) STATE.examineQuestion.teacherDrawing = wrappedNow;
     if(drawTimer) clearTimeout(drawTimer);
     drawTimer = setTimeout(async () => {
       try {
         /* Обёртка — JSON со снимком ширины/высоты, чтобы у ученика на
            телефоне рисунок масштабировался viewBox-ом, а не обрезался. */
         const wrapped = wrapDrawing(svgLayer.innerHTML, editorContainer);
+        if(STATE.examineQuestion) STATE.examineQuestion.teacherDrawing = wrapped;
         await saveAnswerField(attemptId, num, 'teacher_drawing', wrapped);
         statusEl.textContent = '✓ рисунок сохранён';
         setTimeout(() => { statusEl.textContent = ''; }, 1500);
@@ -11295,6 +11306,10 @@ function makeTeacherMarksEditor(opts){
     }
     if(!drawingActive) return;
     e.preventDefault();
+    /* Флаг для polling — пока учитель рисует, render() из любого
+       polling-цикла должен пропускать тик, иначе незаконченный штрих
+       уничтожится при пересборке DOM редактора. */
+    STATE._teacherDrawingInProgress = true;
     const xy = getXY(e);
     activeStroke = mkSvg('path', {
       stroke: pencilColor, 'stroke-width':'2.5', fill:'none',
@@ -11313,6 +11328,9 @@ function makeTeacherMarksEditor(opts){
     activeStroke.setAttribute('d', activePoints.join(' '));
   });
   const finishStroke = e => {
+    /* Сбрасываем флаг ВСЕГДА, даже если штриха не было — иначе
+       зависнем в state «учитель рисует» и polling никогда не обновит модалку. */
+    STATE._teacherDrawingInProgress = false;
     if(!activeStroke) return;
     activeStroke = null; activePoints = null;
     try { svgLayer.releasePointerCapture(e.pointerId); } catch(_){}
@@ -11540,6 +11558,29 @@ function renderStructuredAnswer(num, q, structured){
 
 function modalExamineQuestion(){
   if(!STATE.examineQuestion) return null;
+  /* === Live-обновление модалки из свежих данных polling ===
+     Если открыто разбор-окно учителя и в фоне отработал polling сводной,
+     STATE.currentVariantData содержит свежие user_answer/points/scratch/
+     student_drawing/structured_state ученика. Подсасываем их в открытую
+     модалку, чтобы учителю не нужно было закрывать/открывать — на следующем
+     рендере увидит новые буквы и рисунки ученика.
+     ВАЖНО: teacher_scratch / teacher_drawing — НЕ обновляем здесь, потому
+     что учитель сам в них пишет. Их актуальное значение хранится в DOM
+     редактора и в STATE через finishStroke / scheduleScratchSave. */
+  if(STATE.currentVariantData && STATE.examineQuestion.attemptId){
+    const ba = STATE.currentVariantData.answersByAttempt || {};
+    const fresh = ba[STATE.examineQuestion.attemptId] && ba[STATE.examineQuestion.attemptId][STATE.examineQuestion.num];
+    if(fresh){
+      const eq = STATE.examineQuestion;
+      if(fresh.user_answer != null)     eq.userAnswer = fresh.user_answer;
+      if(fresh.points != null)          eq.points = fresh.points;
+      if(fresh.max_points != null)      eq.max = fresh.max_points;
+      eq.scratch = fresh.scratch || null;
+      eq.studentDrawing = fresh.student_drawing || null;
+      eq.structuredState = fresh.structured_state || null;
+      eq.studentNote = fresh.student_note || eq.studentNote || null;
+    }
+  }
   const { variantId, num, userAnswer, points, max, studentNote, teacherComment, scratch, studentDrawing, teacherScratch, teacherDrawing, structuredState, attemptId, isStudent } = STATE.examineQuestion;
   const close = () => {
     STATE.examineQuestion = null;
@@ -22177,6 +22218,10 @@ function startVariantSummaryPolling(){
       const hash = JSON.stringify(summary);
       if(hash === _variantSummaryHash) return;
       _variantSummaryHash = hash;
+      /* Не дёргаем render() пока учитель в активном штрихе карандашом —
+         иначе DOM редактора пересоберётся и незаконченный штрих пропадёт.
+         После pointerup флаг сбросится и следующий тик отрисует. */
+      if(STATE._teacherDrawingInProgress) return;
       render();
     } catch(e){
       console.warn('[variant summary poll]', e.message);
