@@ -803,6 +803,13 @@ const STATE = {
   solverResultAttemptId: null,   // id сохранённой попытки после завершения
   solverParentAttemptId: null,   // если это работа над ошибками — id первой попытки
   solverFilteredNums: null,      // если работа над ошибками — массив номеров
+  /* Автозапись цифр в поле ответа для №15/17-20.
+     Восстанавливается из localStorage при старте. Если выкл (false),
+     ученик САМ выписывает цифры в поле — мы только показываем эталон-подсказку.
+     Учитель/ольга использует выкл-режим для тренировки внимательности перед ЕГЭ. */
+  solverAutoFillDigits: (typeof localStorage !== 'undefined' &&
+                        localStorage.getItem('zebrus_solver_autofill') === 'off')
+    ? false : true,
   contentEditTaskN: null,  // открыта модалка редактирования теории по номеру
   chatOpen: false,
   chatChannel: 'group',
@@ -23007,10 +23014,11 @@ function makeTasks17_20Field(q){
     .filter(mm => mm.start >= 0);
 
   const headLabel = isNN
-    ? '📌 Тапни цифру — там пишется НН'
+    ? '📌 Тапни цифру — выбери Н / НН'
     : '📌 Тапни цифру — на её месте появится запятая';
   const headHint = isNN
-    ? 'Цифра отмечается зелёным, если на этом месте пишется НН (две буквы). Повторный тап — убрать отметку.'
+    ? 'Каждый тап циклит: пусто → Н (синий) → НН (зелёный) → пусто. ' +
+      'В ответ пойдут только цифры со статусом НН.'
     : 'Каждая цифра — потенциальное место запятой. Тап включает запятую, повторный тап — убирает.';
   const wrap = el('div', { style:{ marginTop:'10px',
     padding:'10px 12px', background:'#F9FAFB',
@@ -23032,18 +23040,56 @@ function makeTasks17_20Field(q){
     borderRadius:'8px', border:'1px solid var(--border)' }});
 
   const updateAnswer = () => {
-    const result = Object.keys(picks).map(Number).filter(n => picks[n])
-      .sort((a,b) => a-b).join('');
-    STATE.solverAnswers[num] = result;
+    /* Для 15 — собираем только позиции 'НН'.
+       Для 17-20 — любое truthy значение (запятая выбрана). */
+    const result = isNN
+      ? Object.keys(picks).map(Number)
+          .filter(n => picks[n] === 'НН' || picks[n] === true)
+          .sort((a,b) => a-b).join('')
+      : Object.keys(picks).map(Number).filter(n => picks[n])
+          .sort((a,b) => a-b).join('');
+    /* Автозапись цифр в поле ответа — глобальный флаг.
+       Если ВЫКЛ — ученик САМ выписывает цифры в обычный input ниже.
+       Мы при этом показываем только подсказку «эталон: …» (можно
+       свернуть/спрятать кнопкой). */
+    const autoFill = STATE.solverAutoFillDigits !== false;
+    if(autoFill){
+      STATE.solverAnswers[num] = result;
+    }
     statusEl.innerHTML = '';
-    statusEl.append(
-      el('span', { style:{ color:'var(--ink-3)' }}, 'Ответ: '),
-      el('span', { style:{ color:'var(--p-deep)', fontSize:'15px', letterSpacing:'.1em' }},
-        result || '—')
-    );
+    if(autoFill){
+      statusEl.append(
+        el('span', { style:{ color:'var(--ink-3)' }}, 'Ответ: '),
+        el('span', { style:{ color:'var(--p-deep)', fontSize:'15px', letterSpacing:'.1em' }},
+          result || '—'),
+        el('span', { style:{ color:'var(--ink-3)', marginLeft:'8px', fontWeight:'500',
+          fontSize:'11px' }}, '· авто-запись включена'));
+    } else {
+      /* Эталон скрыт под кнопкой — иначе слишком велик соблазн просто скопировать.
+         Ученик может раскрыть для самопроверки после того как сам выпишет в input. */
+      const reveal = el('details', { style:{ display:'inline' }},
+        el('summary', { style:{ cursor:'pointer', color:'var(--ink-3)',
+          fontWeight:'500', fontSize:'11px', display:'inline' }},
+          'показать эталон для самопроверки'),
+        el('span', { style:{ marginLeft:'8px', color:'var(--p-deep)',
+          fontSize:'15px', letterSpacing:'.1em' }}, result || '—'));
+      statusEl.append(
+        el('span', { style:{ color:'#92400E', fontWeight:'700' }},
+          '✍️ Выпиши свой ответ в поле ниже сам '),
+        reveal);
+    }
     saveSolverDraft();
   };
 
+  /* Для 15 — три состояния: undefined → 'Н' → 'НН' → undefined.
+     Backward-compat: если в стейте было picks[n]=true (старый формат),
+     трактуем как 'НН'. В ответ идут только позиции со значением 'НН'. */
+  const cycleNN = (v) => {
+    if(v === true) v = 'НН';     // legacy
+    if(v == null)  return 'Н';
+    if(v === 'Н')  return 'НН';
+    return undefined;            // 'НН' → пусто
+  };
   const renderText = () => {
     textBox.innerHTML = '';
     let lastEnd = 0;
@@ -23051,12 +23097,25 @@ function makeTasks17_20Field(q){
       if(mm.start > lastEnd){
         textBox.append(document.createTextNode(sentText.slice(lastEnd, mm.start)));
       }
-      const active = !!picks[mm.n];
-      /* Цвета: для 15 (Н/НН) — зелёная подсветка «НН тут», для 17-20 —
-         красная подсветка с запятой. */
-      const activeBg     = isNN ? '#D1FAE5' : '#FEE2E2';
-      const activeBorder = isNN ? '#86EFAC' : '#FCA5A5';
-      const activeColor  = isNN ? '#065F46' : '#DC2626';
+      const raw = picks[mm.n];
+      const nnState = (raw === true) ? 'НН' : raw;   // legacy
+      const active = isNN ? !!nnState : !!raw;
+      /* Цвета: 15 — голубая «Н» (выбрано, но не в ответе), зелёная «НН» (в ответе);
+                17-20 — красная подсветка с запятой. */
+      let activeBg, activeBorder, activeColor;
+      let label;
+      if(isNN){
+        if(nnState === 'Н'){
+          activeBg = '#DBEAFE'; activeBorder = '#93C5FD'; activeColor = '#1E40AF';
+          label = 'Н';
+        } else { /* 'НН' */
+          activeBg = '#D1FAE5'; activeBorder = '#86EFAC'; activeColor = '#065F46';
+          label = 'НН';
+        }
+      } else {
+        activeBg = '#FEE2E2'; activeBorder = '#FCA5A5'; activeColor = '#DC2626';
+        label = ',';
+      }
       const tap = el('span', {
         style:{ display:'inline-block', cursor:'pointer',
                 padding: active ? '2px 8px' : '2px 7px',
@@ -23072,14 +23131,18 @@ function makeTasks17_20Field(q){
                 lineHeight:'1',
                 transition:'all .12s' },
         onclick: () => {
-          if(picks[mm.n]) delete picks[mm.n];
-          else picks[mm.n] = true;
+          if(isNN){
+            const next = cycleNN(picks[mm.n]);
+            if(next == null) delete picks[mm.n];
+            else picks[mm.n] = next;
+          } else {
+            if(picks[mm.n]) delete picks[mm.n];
+            else picks[mm.n] = true;
+          }
           renderText();
           updateAnswer();
         }
-      }, active
-        ? (isNN ? (mm.n + ' НН') : ',')
-        : String(mm.n));
+      }, active ? label : String(mm.n));
       textBox.append(tap);
       lastEnd = mm.end;
     });
@@ -23506,8 +23569,17 @@ function computeAnswerFromStructured(q){
     });
     return matched.sort((a,b) => a-b).join('');
   }
-  /* №15, 17-20: кнопки-цифры */
-  if(num === 15 || (num >= 17 && num <= 20)){
+  /* №15 (Н/НН) — в ответ идут только позиции со значением 'НН'.
+     Старый формат picks[n]=true трактуем как 'НН' для обратной совместимости. */
+  if(num === 15){
+    const g = (STATE.solverGaps || {})[num] || {};
+    return Object.keys(g).map(Number).filter(n => {
+      const v = g[n];
+      return v === 'НН' || v === true;
+    }).sort((a,b) => a-b).join('');
+  }
+  /* 17-20: кнопки-цифры (любое truthy значение = выбрано) */
+  if(num >= 17 && num <= 20){
     const g = (STATE.solverGaps || {})[num] || {};
     return Object.keys(g).map(Number).filter(n => g[n]).sort((a,b) => a-b).join('');
   }
@@ -24003,7 +24075,14 @@ function makeEditableQuestionText(q){
             minHeight:'40px', userSelect:'text' }
   });
   const savedScratch = STATE.solverScratch && STATE.solverScratch[num];
-  ed.innerHTML = savedScratch || sanitizeQuestionHtml(q.question_text || '');
+  /* Для №15 и №17-20 — `(N)` маркеры дублируются в интерактивной панели
+     ниже (как цветные плашки). В редактируемом тексте их не показываем,
+     чтобы скобки не мозолили глаз. q.question_text в БД не трогаем. */
+  let initialText = q.question_text || '';
+  if((num === 15 || (num >= 17 && num <= 20)) && initialText){
+    initialText = initialText.replace(/\((\d{1,2})\)/g, '');
+  }
+  ed.innerHTML = savedScratch || sanitizeQuestionHtml(initialText);
   let saveTimer = null;
   function scheduleSave(){
     if(!STATE.solverScratch) STATE.solverScratch = {};
@@ -24279,12 +24358,38 @@ function viewSolverVariant(){
   wrap.append(header);
 
   /* Инструкция */
+  const autoFillCb = el('input', {
+    type:'checkbox', id:'solver-autofill-cb',
+    style:{ width:'18px', height:'18px', cursor:'pointer', verticalAlign:'middle' }
+  });
+  autoFillCb.checked = (STATE.solverAutoFillDigits !== false);
+  autoFillCb.onchange = () => {
+    STATE.solverAutoFillDigits = autoFillCb.checked;
+    try { localStorage.setItem('zebrus_solver_autofill', autoFillCb.checked ? 'on' : 'off'); } catch(_){}
+    render();   // перерисуем — все панели подхватят флаг
+  };
   wrap.append(el('div', { class:'card', style:{ background:'#FFFDF7', borderColor:'#FACC15', marginBottom:'14px' }},
     el('div', { style:{ fontSize:'13px', lineHeight:'1.5' }},
       el('b', null, 'Правила ответа: '),
       'пиши ', el('b', null, 'один ответ'), ' для каждого задания. ',
       'Регистр (большие/маленькие буквы) не учитывается. Пробелы и запятые игнорируются. ',
-      'Если у задания есть несколько правильных вариантов — подойдёт любой из них.')));
+      'Если у задания есть несколько правильных вариантов — подойдёт любой из них.'),
+    /* Тоггл «авто-запись цифр в поле ответа» — для №15/17-20.
+       На начальном этапе ВКЛ (по умолчанию): тапы в интерактивных
+       панелях автоматически записывают цифры. На продвинутом этапе
+       ученик выключает и тренирует внимательность — выписывает цифры
+       сам, эталон скрыт под спойлером для самопроверки. */
+    el('label', { for:'solver-autofill-cb',
+      style:{ display:'flex', alignItems:'center', gap:'8px',
+              marginTop:'10px', padding:'8px 10px',
+              background:'#FFFFFF', borderRadius:'8px',
+              border:'1px solid #FACC15', cursor:'pointer',
+              fontSize:'12px', color:'var(--ink-2)' }},
+      autoFillCb,
+      el('span', null,
+        el('b', null, '🪄 Авто-запись цифр в поле ответа '),
+        el('span', { style:{ color:'var(--ink-3)' }},
+          '— для №15, 17-20. Когда выкл: эталон скрыт, ученик выписывает цифры сам, чтобы натренировать внимательность перед ЕГЭ.')))));
 
   /* Главная сетка: левая — задания, правая (sticky) — текст */
   const grid = el('div', { style:{ display:'grid', gridTemplateColumns:'minmax(0, 1fr) minmax(0, 360px)', gap:'14px', alignItems:'flex-start' }});
