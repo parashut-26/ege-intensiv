@@ -22172,6 +22172,13 @@ async function startSolvingVariant(variantId, opts){
   STATE.solverChecked = {};   // { num: { points, max, correct, ts } } — мгновенная проверка
   STATE.solverScratch = {};   // { num: html } — черновик с разметкой текста задания
   STATE.solverDropdowns21 = {};
+  STATE.solverMatching22 = {};
+  STATE.solverChecks16 = {};
+  STATE.solverGaps = {};
+  STATE.solverChoice13_14 = {};
+  STATE.solverLetters = {};
+  STATE.solverChecks9_12 = {};
+  STATE.solverEditedQuestions = {};
   STATE.solverResult = null;
   STATE.solverResultAttemptId = null;
   STATE.solverFinishedAt = null;
@@ -22920,6 +22927,8 @@ function makeTasks9_12Field(q){
     /* Если в строке нет пропусков — рендерим без input'ов */
     const lineWrap = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'4px',
       alignItems:'center', fontSize:'14px', lineHeight:'1.5' }});
+    /* statusEl создаём ЗАРАНЕЕ, чтобы closure updateRowStatus имел его в области видимости */
+    const statusEl = el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }});
 
     /* Состояние для отслеживания «одна ли буква во всех пропусках» */
     const updateRowStatus = () => {
@@ -22928,11 +22937,11 @@ function makeTasks9_12Field(q){
         const key = sent.num + '-' + i;
         vals.push((letters[key] || '').toLowerCase().trim());
       }
-      const allFilled = vals.every(v => v.length > 0);
+      const allFilled = totalGaps > 0 && vals.every(v => v.length > 0);
       const allSame = allFilled && vals.every(v => v === vals[0]);
       if(allSame) statusEl.innerHTML = '<span style="color:#065F46;font-weight:700;">✓ одна буква: ' + vals[0] + '</span>';
       else if(allFilled) statusEl.innerHTML = '<span style="color:#92400E;font-weight:700;">⚠ разные буквы</span>';
-      else statusEl.innerHTML = '<span style="color:var(--ink-3);">заполни все пропуски</span>';
+      else statusEl.innerHTML = totalGaps > 0 ? '<span style="color:var(--ink-3);">заполни все пропуски</span>' : '';
     };
 
     parts.forEach(p => {
@@ -22957,8 +22966,6 @@ function makeTasks9_12Field(q){
         lineWrap.append(inp);
       }
     });
-
-    const statusEl = el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }});
 
     const cb = el('input', {
       type:'checkbox',
@@ -26163,6 +26170,15 @@ function _renderNow(){
   }
 
   if(STATE.view === 'curator'){
+    /* Если открыт режим решалки варианта — рисуем его без табов куратора. */
+    if(STATE.solverVariantId){
+      root.append(
+        shellHeader('curator'),
+        el('main', { class:'main' }, viewSolverVariant()),
+        legalFooter()
+      );
+      return;
+    }
     const perms = myCuratorPerms();
     const tabs = [
       { key:'students', label:'Ученики', ic:'👥' },
@@ -26215,6 +26231,17 @@ function _renderNow(){
   }
 
   if(STATE.view === 'teacher'){
+    /* Если открыт режим решалки варианта (preview / teacherEdit) — рисуем его
+       без учительских табов, как для ученика. После закрытия пользователь
+       возвращается в обычный учительский интерфейс. */
+    if(STATE.solverVariantId){
+      root.append(
+        shellHeader('teacher'),
+        el('main', { class:'main' }, viewSolverVariant()),
+        legalFooter()
+      );
+      return;
+    }
     /* Бейджи на табах считаем только когда реальные данные пришли,
        чтобы при перезагрузке цифры не «прыгали» с мок-значений на 0. */
     const pendingCount = STUDENTS_LOADED ? STUDENTS.filter(s => s.status === 'pending').length : 0;
