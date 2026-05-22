@@ -23479,9 +23479,14 @@ function makeTask13_14Field(q){
         btn.style.color = FORM_COLORS_13_14[code].fg;
         btn.style.borderColor = FORM_COLORS_13_14[code].fg;
       } else {
-        /* Не выбрано — показываем как в исходнике */
+        /* Не выбрано — показываем как в исходнике.
+           Напомню формат токена для after (КОРЕНЬ(окончание)):
+             prefix = «то что в скобках» (БЫ)
+             root   = «главное слово»   (ЧТО)
+           Поэтому для after исходник: root + '(' + prefix + ')'
+           Для before:                 '(' + prefix + ')' + root */
         btn.textContent = token.parensPos === 'after'
-          ? (token.prefix + '(' + token.root + ')')
+          ? (token.root + '(' + token.prefix + ')')
           : ('(' + token.prefix + ')' + token.root);
         btn.style.background = '#fff';
         btn.style.color = 'var(--ink)';
@@ -24129,11 +24134,13 @@ function makeEditableQuestionText(q){
             minHeight:'40px', userSelect:'text' }
   });
   const savedScratch = STATE.solverScratch && STATE.solverScratch[num];
-  /* Для №15 и №17-20 — `(N)` маркеры дублируются в интерактивной панели
-     ниже (как цветные плашки). В редактируемом тексте их не показываем,
-     чтобы скобки не мозолили глаз. q.question_text в БД не трогаем. */
+  /* Для №17-20 — `(N)` маркеры дублируются в интерактивной панели ниже
+     (как цветные плашки) И стоят между словами в плоском тексте → можно
+     безопасно срезать, предложение читается как обычное. Для №15 — НЕ
+     трогаем: там маркер стоит ВНУТРИ слова, и если его срезать, слово
+     превратится в «деревяый» (пропадёт «н»), выглядит как опечатка. */
   let initialText = q.question_text || '';
-  if((num === 15 || (num >= 17 && num <= 20)) && initialText){
+  if((num >= 17 && num <= 20) && initialText){
     initialText = initialText.replace(/\((\d{1,2})\)/g, '');
   }
   ed.innerHTML = savedScratch || sanitizeQuestionHtml(initialText);
