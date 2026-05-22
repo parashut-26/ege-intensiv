@@ -11018,9 +11018,437 @@ async function saveAnswerField(attemptId, num, column, value){
   return { ok: true, affected: 1, via: 'insert' };
 }
 
+/* === Тулбар учителя для разметки работы ученика ===
+   В модалке «Разбор задания» учитель получает редактируемую копию формулировки
+   + 4 цвета карандаша. Сохраняется в teacher_scratch (HTML) и teacher_drawing
+   (SVG). Ученик в своём разборе видит это в read-only режиме. */
+function makeTeacherMarksEditor(opts){
+  const { attemptId, num, questionText, initialScratch, initialDrawing } = opts;
+  if(!attemptId) return null;
+  /* ---- SVG namespace helper (дублируем чтобы не зависеть от глобальной svgEl) */
+  const mkSvg = (name, attrs) => {
+    const e = document.createElementNS('http://www.w3.org/2000/svg', name);
+    if(attrs) for(const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  };
+  let svgLayer, ed;
+  let drawingActive = false;
+  let eraserActive = false;
+  let pencilColor = '#DC2626';
+  let allowExec = false;
+  const COLORS = [
+    { hex:'#DC2626', label:'красный' },
+    { hex:'#2563EB', label:'синий' },
+    { hex:'#16A34A', label:'зелёный' },
+    { hex:'#000000', label:'чёрный' }
+  ];
+  const exec = (cmd, val) => {
+    allowExec = true;
+    document.execCommand(cmd, false, val || null);
+    allowExec = false;
+    ed.focus();
+    scheduleScratchSave();
+  };
+  const mkBtn = (label, title, fn, extra) => el('button', {
+    type:'button', title,
+    style: Object.assign({
+      padding:'4px 8px', minWidth:'28px', fontSize:'12px', cursor:'pointer',
+      background:'#fff', border:'1px solid var(--border-2)', borderRadius:'4px',
+      fontFamily:'inherit', fontWeight:'700', lineHeight:'1.2'
+    }, extra || {}),
+    onmousedown: ev => ev.preventDefault(),
+    onclick: ev => { ev.preventDefault(); fn(); }
+  }, label);
+  const toolbar = el('div', {
+    style:{ display:'flex', gap:'3px', flexWrap:'wrap', padding:'5px 6px',
+            background:'#FEF3C7', border:'1px solid #FCD34D',
+            borderRadius:'6px 6px 0 0', borderBottom:'none' }
+  },
+    mkBtn(el('b', null, 'Ж'), 'Жирный', () => exec('bold')),
+    mkBtn(el('i', null, 'К'), 'Курсив', () => exec('italic')),
+    mkBtn(el('u', null, 'П'), 'Подчёркнутый', () => exec('underline')),
+    mkBtn(el('span', { style:{ background:'#FEF08A', padding:'0 4px', borderRadius:'2px' }}, 'A'),
+      'Жёлтый маркер', () => exec('hiliteColor', '#FEF08A')),
+    mkBtn(el('span', { style:{ background:'#86EFAC', padding:'0 4px', borderRadius:'2px' }}, 'A'),
+      'Зелёный маркер', () => exec('hiliteColor', '#86EFAC')),
+    mkBtn(el('span', { style:{ color:'#DC2626' }}, 'A'), 'Красный текст', () => exec('foreColor', '#DC2626')),
+    mkBtn(el('span', { style:{ color:'#2563EB' }}, 'A'), 'Синий текст', () => exec('foreColor', '#2563EB')),
+    mkBtn('A', 'Сбросить формат', () => exec('removeFormat'), { fontWeight:'400' }),
+    mkBtn('✏️', 'Карандаш', () => {
+      drawingActive = !drawingActive;
+      if(drawingActive) eraserActive = false;
+      applyDrawingMode();
+    }, { fontWeight:'400' }),
+    mkBtn('🧽', 'Ластик', () => {
+      eraserActive = !eraserActive;
+      if(eraserActive) drawingActive = false;
+      applyDrawingMode();
+    }, { fontWeight:'400' })
+  );
+  const colorBtnRefs = [];
+  COLORS.forEach(c => {
+    const b = mkBtn(
+      el('span', { style:{ display:'inline-block', width:'14px', height:'14px',
+        background:c.hex, borderRadius:'50%' }}),
+      'Цвет: ' + c.label,
+      () => {
+        pencilColor = c.hex;
+        colorBtnRefs.forEach((bb, i) => {
+          bb.style.borderColor = COLORS[i].hex === c.hex ? '#000' : 'var(--border-2)';
+          bb.style.borderWidth = COLORS[i].hex === c.hex ? '2px' : '1px';
+        });
+      },
+      { fontWeight:'400', padding:'4px 6px' });
+    colorBtnRefs.push(b);
+    toolbar.appendChild(b);
+  });
+  colorBtnRefs[0].style.borderColor = '#000';
+  colorBtnRefs[0].style.borderWidth = '2px';
+  toolbar.appendChild(mkBtn('🧹', 'Стереть весь карандаш', () => {
+    if(!svgLayer || !svgLayer.children.length) return;
+    if(!confirm('Стереть всю карандашную разметку?')) return;
+    svgLayer.innerHTML = '';
+    scheduleDrawingSave();
+  }, { fontWeight:'400' }));
+  toolbar.appendChild(mkBtn('↺', 'Сбросить разметку', () => {
+    if(!confirm('Сбросить всю учительскую разметку?')) return;
+    ed.innerHTML = sanitizeQuestionHtml(questionText);
+    if(svgLayer) svgLayer.innerHTML = '';
+    scheduleScratchSave();
+    scheduleDrawingSave();
+  }, { fontWeight:'400', color:'var(--red)' }));
+
+  ed = el('div', {
+    contenteditable:'true',
+    style:{ padding:'10px 12px', background:'#FFFEF7',
+            border:'1px solid #FCD34D', borderRadius:'0 0 6px 6px',
+            fontSize:'14px', lineHeight:'1.55', outline:'none',
+            fontFamily:'inherit', whiteSpace:'pre-wrap',
+            minHeight:'40px', userSelect:'text' }
+  });
+  ed.innerHTML = (initialScratch && initialScratch.trim())
+    ? initialScratch
+    : sanitizeQuestionHtml(questionText || '');
+
+  /* Не блокируем ввод — учитель имеет право допечатать пояснение */
+  let saveTimer = null;
+  function scheduleScratchSave(){
+    if(saveTimer) clearTimeout(saveTimer);
+    saveTimer = setTimeout(async () => {
+      try {
+        await saveAnswerField(attemptId, num, 'teacher_scratch', ed.innerHTML);
+        statusEl.textContent = '✓ сохранено';
+        setTimeout(() => { statusEl.textContent = ''; }, 1500);
+      } catch(e){
+        statusEl.textContent = '⚠ ' + e.message;
+      }
+    }, 800);
+  }
+  ed.oninput = scheduleScratchSave;
+
+  const editorContainer = el('div', { style:{ position:'relative' }});
+  editorContainer.append(ed);
+  svgLayer = mkSvg('svg', {
+    style:'position:absolute;top:0;left:0;width:100%;height:100%;' +
+          'pointer-events:none;overflow:visible;'
+  });
+  if(initialDrawing) svgLayer.innerHTML = initialDrawing;
+  editorContainer.append(svgLayer);
+
+  let drawTimer = null;
+  function scheduleDrawingSave(){
+    if(drawTimer) clearTimeout(drawTimer);
+    drawTimer = setTimeout(async () => {
+      try {
+        await saveAnswerField(attemptId, num, 'teacher_drawing', svgLayer.innerHTML);
+        statusEl.textContent = '✓ рисунок сохранён';
+        setTimeout(() => { statusEl.textContent = ''; }, 1500);
+      } catch(e){
+        statusEl.textContent = '⚠ ' + e.message;
+      }
+    }, 800);
+  }
+
+  function applyDrawingMode(){
+    toolbar.children[8].style.background = drawingActive ? '#FEE2E2' : '#fff';
+    toolbar.children[9].style.background = eraserActive ? '#FEE2E2' : '#fff';
+    if(!svgLayer) return;
+    if(drawingActive){
+      svgLayer.style.pointerEvents = 'auto';
+      svgLayer.style.touchAction = 'none';
+      svgLayer.style.cursor = 'crosshair';
+    } else if(eraserActive){
+      svgLayer.style.pointerEvents = 'visiblePainted';
+      svgLayer.style.touchAction = 'auto';
+      svgLayer.style.cursor = 'pointer';
+    } else {
+      svgLayer.style.pointerEvents = 'none';
+      svgLayer.style.touchAction = 'auto';
+      svgLayer.style.cursor = 'default';
+    }
+    [...svgLayer.children].forEach(p => {
+      if(eraserActive){
+        p.style.pointerEvents = 'stroke';
+        p.style.cursor = 'pointer';
+        if(!p.dataset.origStroke) p.dataset.origStroke = p.getAttribute('stroke-width') || '2.5';
+        p.setAttribute('stroke-width', '10');
+        p.style.opacity = '0.7';
+      } else {
+        p.style.pointerEvents = '';
+        p.style.cursor = '';
+        if(p.dataset.origStroke) p.setAttribute('stroke-width', p.dataset.origStroke);
+        p.style.opacity = '';
+      }
+    });
+  }
+
+  let activeStroke = null, activePoints = null;
+  const getXY = e => {
+    const r = editorContainer.getBoundingClientRect();
+    return [(e.clientX - r.left).toFixed(1), (e.clientY - r.top).toFixed(1)];
+  };
+  svgLayer.addEventListener('pointerdown', e => {
+    if(eraserActive){
+      if(e.target && e.target.tagName && e.target.tagName.toLowerCase() === 'path'){
+        e.preventDefault();
+        e.target.remove();
+        scheduleDrawingSave();
+      }
+      return;
+    }
+    if(!drawingActive) return;
+    e.preventDefault();
+    const xy = getXY(e);
+    activeStroke = mkSvg('path', {
+      stroke: pencilColor, 'stroke-width':'2.5', fill:'none',
+      'stroke-linecap':'round', 'stroke-linejoin':'round'
+    });
+    activePoints = ['M', xy[0], xy[1]];
+    activeStroke.setAttribute('d', activePoints.join(' '));
+    svgLayer.appendChild(activeStroke);
+    try { svgLayer.setPointerCapture(e.pointerId); } catch(_){}
+  });
+  svgLayer.addEventListener('pointermove', e => {
+    if(!drawingActive || !activeStroke) return;
+    e.preventDefault();
+    const xy = getXY(e);
+    activePoints.push('L', xy[0], xy[1]);
+    activeStroke.setAttribute('d', activePoints.join(' '));
+  });
+  const finishStroke = e => {
+    if(!activeStroke) return;
+    activeStroke = null; activePoints = null;
+    try { svgLayer.releasePointerCapture(e.pointerId); } catch(_){}
+    scheduleDrawingSave();
+  };
+  svgLayer.addEventListener('pointerup', finishStroke);
+  svgLayer.addEventListener('pointercancel', finishStroke);
+  svgLayer.addEventListener('pointerleave', finishStroke);
+
+  const statusEl = el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'8px' }}, '');
+
+  return el('div', { style:{ marginBottom:'14px' }},
+    el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between',
+                        gap:'6px', marginBottom:'6px', flexWrap:'wrap' }},
+      el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E' }},
+        '✏️ Мои пометки (увидит ученик)'),
+      statusEl),
+    toolbar,
+    editorContainer);
+}
+
+/* === Read-only рендер пометок учителя для ученика === */
+function renderTeacherMarksReadOnly(opts){
+  const { questionText, teacherScratch, teacherDrawing } = opts;
+  const sc = (teacherScratch || '').trim();
+  const dr = (teacherDrawing || '').trim();
+  if(!sc && !dr) return null;
+  const wrap = el('div', { style:{ position:'relative',
+    padding:'12px 14px', background:'#FFFEF7', borderLeft:'4px solid #F59E0B',
+    borderRadius:'8px', marginBottom:'14px', fontSize:'14px',
+    lineHeight:'1.6', whiteSpace:'pre-wrap', overflow:'visible' }});
+  const inner = el('div', { style:{ position:'relative', zIndex:'1' }});
+  inner.innerHTML = sc || sanitizeQuestionHtml(questionText || '');
+  wrap.append(inner);
+  if(dr){
+    const tmp = document.createElement('div');
+    tmp.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" ' +
+      'style="position:absolute;top:0;left:0;width:100%;height:100%;' +
+      'pointer-events:none;overflow:visible;z-index:2;">' + dr + '</svg>';
+    wrap.append(tmp.firstChild);
+  }
+  return el('div', null,
+    el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E',
+                        marginBottom:'6px' }},
+      '✏️ Пометки учителя'),
+    wrap);
+}
+
+/* === Рендер структурированного ответа ученика для модалки учителя/ученика ===
+   Принимает: num задания, объект q (с question_text), structured (JSON из БД).
+   Возвращает DOM-элемент или null если показывать нечего.
+   Поддерживает 9-12 (буквы в боксах + чекбоксы), 15 (Н/НН по позициям),
+   16 (запятые между словами), 17-20 (цифры по позициям), 13-14 (формы слов). */
+function renderStructuredAnswer(num, q, structured){
+  if(!structured) return null;
+  const txt = q && q.question_text || '';
+
+  /* === №9-12: буквы по рядам + чекбоксы какие ряды отмечены === */
+  if(num >= 9 && num <= 12 && (structured.letters || structured.checks9_12)){
+    const sentences = (typeof parseTask21Sentences === 'function') ? parseTask21Sentences(txt) : [];
+    if(!sentences.length) return null;
+    const letters = structured.letters || {};
+    const picks = structured.checks9_12 || {};
+    const wrap = el('div', { style:{ padding:'10px 12px', background:'#F0F9FF',
+      border:'1px solid #93C5FD', borderRadius:'10px', marginBottom:'14px' }},
+      el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
+                          marginBottom:'8px' }},
+        '📋 Что ученик расставил по рядам'));
+    sentences.forEach(sent => {
+      const t = sent.text || '';
+      const re = /\.{2,}|_{2,}/g;
+      const parts = [];
+      let last = 0, m, gapIdx = 0;
+      while((m = re.exec(t)) !== null){
+        if(m.index > last) parts.push({ type:'text', value: t.slice(last, m.index) });
+        parts.push({ type:'gap', idx: gapIdx++ });
+        last = m.index + m[0].length;
+      }
+      if(last < t.length) parts.push({ type:'text', value: t.slice(last) });
+      const vals = [];
+      for(let i = 0; i < gapIdx; i++){
+        vals.push(((letters[sent.num + '-' + i] || '') + '').toLowerCase().trim());
+      }
+      const allFilled = vals.length > 0 && vals.every(v => v.length > 0);
+      const allSame = allFilled && vals.every(v => v === vals[0]);
+      const row = el('div', { style:{ display:'flex', alignItems:'center', gap:'6px',
+        flexWrap:'wrap', padding:'6px 4px', borderTop:'1px dashed #BFDBFE',
+        fontSize:'13px', lineHeight:'1.5' }});
+      /* Чекбокс — отмечал ли ученик ряд */
+      row.append(el('span', {
+        style:{ display:'inline-flex', alignItems:'center', justifyContent:'center',
+                width:'20px', height:'20px', borderRadius:'4px',
+                background: picks[sent.num] ? '#2563EB' : '#fff',
+                border:'2px solid #2563EB', color:'#fff', fontSize:'13px',
+                fontWeight:'700', flexShrink:'0' }
+      }, picks[sent.num] ? '✓' : ''));
+      row.append(el('b', { style:{ color:'#1E40AF', flexShrink:'0' }}, sent.num + ')'));
+      parts.forEach(p => {
+        if(p.type === 'text'){
+          row.append(document.createTextNode(p.value));
+        } else {
+          const v = (letters[sent.num + '-' + p.idx] || '').trim();
+          row.append(el('span', {
+            style:{ display:'inline-block', minWidth:'28px', padding:'1px 6px',
+                    border:'2px solid ' + (v ? '#F59E0B' : '#E5E7EB'),
+                    borderRadius:'4px', background: v ? '#FFFBEB' : '#F9FAFB',
+                    color:'#92400E', fontWeight:'700', textAlign:'center',
+                    margin:'0 2px', fontSize:'14px' }
+          }, v || '·'));
+        }
+      });
+      /* Статус «одна буква / разные / пусто» */
+      const statusTxt = allSame ? '✓ одна буква: ' + vals[0]
+                      : allFilled ? '⚠ разные буквы'
+                      : gapIdx > 0 ? '— не заполнено'
+                      : '';
+      if(statusTxt){
+        row.append(el('span', {
+          style:{ fontSize:'11px', color: allSame ? '#065F46' : (allFilled ? '#92400E' : 'var(--ink-3)'),
+                  fontWeight:'600', marginLeft:'auto' }
+        }, statusTxt));
+      }
+      wrap.append(row);
+    });
+    return wrap;
+  }
+
+  /* === №15: Н / НН по позициям === */
+  if(num === 15 && structured.gaps){
+    const g = structured.gaps;
+    const positions = Object.keys(g).map(Number).sort((a,b) => a-b);
+    if(!positions.length) return null;
+    const wrap = el('div', { style:{ padding:'10px 12px', background:'#F0F9FF',
+      border:'1px solid #93C5FD', borderRadius:'10px', marginBottom:'14px' }},
+      el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
+                          marginBottom:'8px' }},
+        '📋 Н или НН в каждой позиции'));
+    const grid = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'6px' }});
+    positions.forEach(pos => {
+      const v = g[pos];
+      const label = v === 'НН' || v === true ? 'НН' : (v === 'Н' ? 'Н' : '—');
+      const bg = label === 'НН' ? '#86EFAC' : label === 'Н' ? '#BFDBFE' : '#F3F4F6';
+      const col = label === 'НН' ? '#065F46' : label === 'Н' ? '#1E40AF' : '#9CA3AF';
+      grid.append(el('span', {
+        style:{ display:'inline-flex', alignItems:'center', gap:'4px',
+                padding:'3px 8px', borderRadius:'12px', background:bg, color:col,
+                fontSize:'13px', fontWeight:'700' }
+      }, '(' + pos + ') ' + label));
+    });
+    wrap.append(grid);
+    return wrap;
+  }
+
+  /* === №17-20: цифры в выбранных позициях === */
+  if(num >= 17 && num <= 20 && structured.gaps){
+    const g = structured.gaps;
+    const picked = Object.keys(g).map(Number).filter(n => g[n]).sort((a,b) => a-b);
+    if(!picked.length) return null;
+    const wrap = el('div', { style:{ padding:'10px 12px', background:'#F0F9FF',
+      border:'1px solid #93C5FD', borderRadius:'10px', marginBottom:'14px' }},
+      el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
+                          marginBottom:'8px' }},
+        '📋 Позиции, отмеченные учеником'),
+      el('div', { style:{ fontSize:'14px', color:'#1E40AF', fontWeight:'700' }},
+        picked.map(p => '(' + p + ')').join('  ')));
+    return wrap;
+  }
+
+  /* === №16: запятые между словами по предложениям === */
+  if(num === 16 && structured.checks16){
+    const ch = structured.checks16;
+    const sentNums = Object.keys(ch).map(Number).sort((a,b) => a-b);
+    if(!sentNums.length) return null;
+    const wrap = el('div', { style:{ padding:'10px 12px', background:'#F0F9FF',
+      border:'1px solid #93C5FD', borderRadius:'10px', marginBottom:'14px' }},
+      el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
+                          marginBottom:'8px' }},
+        '📋 Запятые в каждом предложении'));
+    sentNums.forEach(sn => {
+      const gaps = ch[sn] || {};
+      const picked = !!gaps._picked;
+      const cnt = Object.keys(gaps).filter(k => k !== '_picked' && gaps[k]).length;
+      wrap.append(el('div', { style:{ display:'flex', alignItems:'center', gap:'8px',
+        padding:'5px 4px', borderTop:'1px dashed #BFDBFE', fontSize:'13px' }},
+        el('span', {
+          style:{ display:'inline-flex', alignItems:'center', justifyContent:'center',
+                  width:'20px', height:'20px', borderRadius:'4px',
+                  background: picked ? '#2563EB' : '#fff', border:'2px solid #2563EB',
+                  color:'#fff', fontSize:'13px', fontWeight:'700' }
+        }, picked ? '✓' : ''),
+        el('b', { style:{ color:'#1E40AF' }}, sn + ')'),
+        el('span', { style:{ color:'var(--ink-2)' }},
+          'поставлено запятых: ' + cnt + (cnt === 1 ? ' (засчитано)' : ' (нужно ровно 1)'))));
+    });
+    return wrap;
+  }
+
+  /* === Прочее (13-14, 21, 8, 22): просто JSON под спойлером === */
+  const dump = el('details', { style:{ padding:'8px 12px', background:'#F9FAFB',
+    border:'1px solid var(--border-2)', borderRadius:'8px', marginBottom:'14px',
+    fontSize:'12px' }});
+  dump.append(
+    el('summary', { style:{ cursor:'pointer', fontWeight:'700', color:'var(--ink-2)' }},
+      '📋 Структура ответа ученика (raw)'),
+    el('pre', { style:{ marginTop:'6px', whiteSpace:'pre-wrap', wordBreak:'break-all',
+                        fontSize:'11px', color:'var(--ink)' }},
+      JSON.stringify(structured, null, 2)));
+  return dump;
+}
+
 function modalExamineQuestion(){
   if(!STATE.examineQuestion) return null;
-  const { variantId, num, userAnswer, points, max, studentNote, teacherComment, scratch, studentDrawing, attemptId, isStudent } = STATE.examineQuestion;
+  const { variantId, num, userAnswer, points, max, studentNote, teacherComment, scratch, studentDrawing, teacherScratch, teacherDrawing, structuredState, attemptId, isStudent } = STATE.examineQuestion;
   const close = () => {
     STATE.examineQuestion = null;
     STATE.examineQuestionData = null;
@@ -11179,6 +11607,12 @@ function modalExamineQuestion(){
           el('span', { style:{ float:'right', fontSize:'12px' }}, 'Балл: ' + points + ' / ' + max)));
     }
 
+    /* === Детализация ответа: что именно ученик расставлял по рядам/позициям === */
+    if(structuredState){
+      const structBlock = renderStructuredAnswer(num, q, structuredState);
+      if(structBlock) body.append(structBlock);
+    }
+
     /* Правильный ответ */
     if(q.correct_answer){
       body.append(
@@ -11189,6 +11623,28 @@ function modalExamineQuestion(){
             ? el('div', { style:{ fontSize:'11px', fontWeight:'400', marginTop:'4px', color:'var(--ink-2)' }},
                 'Принимается любой из вариантов через /')
             : null));
+    }
+
+    /* === Пометки учителя (teacher_drawing + teacher_scratch) ===
+       Учителю показываем редактируемый холст с тулбаром (как у ученика
+       в решалке): можно подчеркнуть/обвести/нарисовать карандашом поверх
+       формулировки + написать комментарий ниже. Ученику в его разборе
+       рендерим то же самое в read-only режиме. */
+    if(!isStudent && attemptId){
+      const teacherMarksCard = makeTeacherMarksEditor({
+        attemptId, num,
+        questionText: q.question_text || '',
+        initialScratch: teacherScratch || '',
+        initialDrawing: teacherDrawing || ''
+      });
+      if(teacherMarksCard) body.append(teacherMarksCard);
+    } else if(isStudent && (teacherScratch || teacherDrawing)){
+      const teacherReadOnly = renderTeacherMarksReadOnly({
+        questionText: q.question_text || '',
+        teacherScratch: teacherScratch || '',
+        teacherDrawing: teacherDrawing || ''
+      });
+      if(teacherReadOnly) body.append(teacherReadOnly);
     }
 
     const expl = (q.explanation || '').trim();
@@ -11414,7 +11870,7 @@ function studentVariantsCard(){
         if(attIds.length){
           const answers = await restRequest('GET',
             '/test_variant_answers?attempt_id=in.(' + attIds.join(',') + ')' +
-            '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch,student_drawing,teacher_drawing');
+            '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch,student_drawing,teacher_drawing,teacher_scratch,structured_state');
           const byA = {};
           (answers || []).forEach(an => {
             if(!byA[an.attempt_id]) byA[an.attempt_id] = {};
@@ -11618,6 +12074,9 @@ function studentVariantsCard(){
               teacherComment: ans ? (ans.teacher_comment || null) : null,
               scratch: ans ? (ans.scratch || null) : null,
               studentDrawing: ans ? (ans.student_drawing || null) : null,
+              teacherScratch: ans ? (ans.teacher_scratch || null) : null,
+              teacherDrawing: ans ? (ans.teacher_drawing || null) : null,
+              structuredState: ans ? (ans.structured_state || null) : null,
               isStudent: true  /* открыто учеником из «Мои пробники» — даём редактировать РНО */
             };
             render();
@@ -19627,7 +20086,7 @@ async function loadVariantFull(variantId){
   if(attemptIds.length){
     answers = await restRequest('GET',
       '/test_variant_answers?attempt_id=in.(' + attemptIds.join(',') + ')' +
-      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch,student_drawing,teacher_drawing');
+      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch,student_drawing,teacher_drawing,teacher_scratch,structured_state');
   }
   const byAttempt = {};
   (answers || []).forEach(a => {
@@ -21834,6 +22293,9 @@ function variantCell(ans, opts){
         teacherComment: ans.teacher_comment || null,
         scratch: ans.scratch || null,
         studentDrawing: ans.student_drawing || null,
+        teacherScratch: ans.teacher_scratch || null,
+        teacherDrawing: ans.teacher_drawing || null,
+        structuredState: ans.structured_state || null,
         isStudent: false   // учительский путь — может редактировать teacher_comment
       };
       render();
@@ -22368,6 +22830,66 @@ function saveSolverDraft(){
       }
     });
   }
+  /* === Сохранение структурированного состояния в БД ===
+     Раз в секунду сравниваем снэпшоты STATE.solver* по каждому num
+     и если что-то поменялось — шлём PATCH в test_variant_answers.structured_state.
+     Это нужно учителю чтобы в разборе видеть, какие буквы/чекбоксы/запятые
+     ученик расставил, а не только итоговую цифру в user_answer. */
+  if(typeof scheduleStructuredSync === 'function'){
+    scheduleStructuredSync();
+  }
+}
+
+/* === Собрать всё структурированное состояние для одного задания ===
+   Возвращает plain-object для JSONB, либо null если ничего не выбрано. */
+function collectStructuredForNum(num){
+  const out = {};
+  const has = (obj) => obj && Object.keys(obj).length > 0;
+  if(STATE.solverLetters && has(STATE.solverLetters[num]))      out.letters = STATE.solverLetters[num];
+  if(STATE.solverChecks9_12 && has(STATE.solverChecks9_12[num])) out.checks9_12 = STATE.solverChecks9_12[num];
+  if(STATE.solverWords13_14 && has(STATE.solverWords13_14[num])) out.words13_14 = STATE.solverWords13_14[num];
+  if(STATE.solverChoice13_14 && STATE.solverChoice13_14[num])    out.choice13_14 = STATE.solverChoice13_14[num];
+  if(STATE.solverGaps && has(STATE.solverGaps[num]))             out.gaps = STATE.solverGaps[num];
+  if(STATE.solverChecks16 && has(STATE.solverChecks16[num]))     out.checks16 = STATE.solverChecks16[num];
+  if(STATE.solverDropdowns21 && has(STATE.solverDropdowns21[num])) out.dropdowns21 = STATE.solverDropdowns21[num];
+  if(STATE.solverMatching22 && has(STATE.solverMatching22[num])) out.matching22 = STATE.solverMatching22[num];
+  return Object.keys(out).length ? out : null;
+}
+
+/* Снэпшоты последних сохранённых состояний — чтобы не слать PATCH впустую */
+const _structuredSnapshots = {};
+let _structuredSyncTimer = null;
+function scheduleStructuredSync(){
+  if(_structuredSyncTimer) clearTimeout(_structuredSyncTimer);
+  _structuredSyncTimer = setTimeout(async () => {
+    if(!STATE.liveAttemptId) return;
+    if(!STATE.solverData) return;
+    /* Учитель в режиме просмотра/правки эталона — НЕ сохраняет ответы ученика */
+    if(STATE.solverTeacherEdit || STATE.solverPreview) return;
+    for(const q of STATE.solverData.questions){
+      const data = collectStructuredForNum(q.num);
+      const json = data ? JSON.stringify(data) : null;
+      const key = STATE.liveAttemptId + ':' + q.num;
+      if(json === _structuredSnapshots[key]) continue;
+      _structuredSnapshots[key] = json;
+      try {
+        await saveLiveStructured(q.num, data);
+      } catch(e){ console.warn('[live structured] num=' + q.num, e.message); }
+    }
+  }, 1000);
+}
+
+async function saveLiveStructured(num, data){
+  const attId = STATE.liveAttemptId;
+  if(!attId) return;
+  const resp = await restRequest('PATCH',
+    '/test_variant_answers?attempt_id=eq.' + attId + '&question_num=eq.' + num,
+    { structured_state: data || null },
+    { prefer: 'return=representation' });
+  if(Array.isArray(resp) && resp.length > 0) return;
+  await restRequest('POST', '/test_variant_answers', {
+    attempt_id: attId, question_num: num, structured_state: data || null
+  }, { prefer: 'return=minimal' });
 }
 
 /* === LIVE-режим решалки ===
@@ -25652,7 +26174,7 @@ async function loadVariantsByStudent(studentId){
   if(attIds.length){
     answers = await restRequest('GET',
       '/test_variant_answers?attempt_id=in.(' + attIds.join(',') + ')' +
-      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch,student_drawing,teacher_drawing');
+      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch,student_drawing,teacher_drawing,teacher_scratch,structured_state');
   }
   const byAttempt = {};
   (answers || []).forEach(a => {
@@ -25780,7 +26302,10 @@ function viewVariantsByStudent(){
             studentNote: ans27 && ans27.student_note || null,
             teacherComment: ans27 && ans27.teacher_comment || null,
             scratch: ans27 && ans27.scratch || null,
-            studentDrawing: ans27 && ans27.student_drawing || null
+            studentDrawing: ans27 && ans27.student_drawing || null,
+            teacherScratch: ans27 && ans27.teacher_scratch || null,
+            teacherDrawing: ans27 && ans27.teacher_drawing || null,
+            structuredState: ans27 && ans27.structured_state || null
           };
           render();
         }
