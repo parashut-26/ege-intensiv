@@ -23362,6 +23362,10 @@ function makeEditableQuestionText(q){
   let eraserActive = false;
   let svgLayer;        // forward-ref на SVG-слой
   let pencilColor = '#DC2626';  // текущий цвет карандаша
+  /* allowExec — флаг, разрешающий программный execCommand из тулбара.
+     Без него все попытки редактирования (печать, удаление) блокируются —
+     ученик может только форматировать выделенные слова, не меняя текст. */
+  let allowExec = false;
   const PENCIL_COLORS = [
     { hex:'#DC2626', label:'красный' },
     { hex:'#2563EB', label:'синий' },
@@ -23369,7 +23373,10 @@ function makeEditableQuestionText(q){
     { hex:'#000000', label:'чёрный' }
   ];
   const exec = (cmd, val) => {
+    /* Ставим флаг — это разрешает beforeinput пропустить программное действие */
+    allowExec = true;
     document.execCommand(cmd, false, val || null);
+    allowExec = false;
     ed.focus();
     scheduleSave();
   };
@@ -23482,13 +23489,13 @@ function makeEditableQuestionText(q){
       svgLayer.style.cursor = 'crosshair';
       ed.style.cursor = 'crosshair';
     } else if(eraserActive){
-      /* Ластик: pointer-events нужны только для путей, а не для пустого
-         фона — иначе ластик «съест» туч и не даст скролить страницу.
-         Поэтому svgLayer.pointerEvents = 'none', а внутри каждый path
-         получит pointer-events: stroke (см. ниже forEach). */
-      svgLayer.style.pointerEvents = 'none';
+      /* Ластик: visiblePainted — SVG ловит события ТОЛЬКО на нарисованных
+         линиях (paths). Пустые места прозрачны для событий — палец проходит
+         сквозь SVG к тексту (но текст уже non-editable, так что не страшно)
+         и скроллит страницу нормально. touch-action auto для скролла. */
+      svgLayer.style.pointerEvents = 'visiblePainted';
       svgLayer.style.touchAction = 'auto';
-      svgLayer.style.cursor = 'default';
+      svgLayer.style.cursor = 'pointer';
       ed.style.cursor = '';
     } else {
       svgLayer.style.pointerEvents = 'none';
@@ -23543,13 +23550,20 @@ function makeEditableQuestionText(q){
     }, 600);
   }
   ed.oninput = scheduleSave;
-  /* Чтобы случайная вставка из буфера обмена не приносила «грязный» html
-     с шрифтами Word — переносим только plain-текст */
-  ed.addEventListener('paste', (e) => {
+  /* Блокируем ЛЮБОЙ ввод текста или удаление — формулировка задания неприкосновенна.
+     Разрешены только программные команды форматирования через тулбар (выставляем
+     флаг allowExec на время exec()). Это превращает текст в «можно выделять и
+     красить, но нельзя изменять». */
+  ed.addEventListener('beforeinput', (e) => {
+    if(allowExec) return;
+    /* Формат-команды от системы (например, Ctrl+B в браузере) — пропускаем тоже */
+    if(e.inputType && /^format/i.test(e.inputType)) return;
     e.preventDefault();
-    const txt = (e.clipboardData || window.clipboardData).getData('text/plain');
-    document.execCommand('insertText', false, txt);
   });
+  /* Блокируем вставку из буфера обмена — нельзя добавить чужой текст в формулировку */
+  ed.addEventListener('paste', (e) => { e.preventDefault(); });
+  /* Drag-and-drop текста тоже блокируем */
+  ed.addEventListener('drop', (e) => { e.preventDefault(); });
   /* === SVG-слой для карандаша поверх текста ===
      Лежит абсолютно поверх ed, прозрачно ловит pointer events когда
      активен карандаш. Координаты в пикселях относительно контейнера —
