@@ -11387,7 +11387,7 @@ function studentVariantsCard(){
         if(attIds.length){
           const answers = await restRequest('GET',
             '/test_variant_answers?attempt_id=in.(' + attIds.join(',') + ')' +
-            '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch');
+            '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch,student_drawing,teacher_drawing');
           const byA = {};
           (answers || []).forEach(an => {
             if(!byA[an.attempt_id]) byA[an.attempt_id] = {};
@@ -19546,7 +19546,7 @@ async function loadVariantFull(variantId){
   if(attemptIds.length){
     answers = await restRequest('GET',
       '/test_variant_answers?attempt_id=in.(' + attemptIds.join(',') + ')' +
-      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch');
+      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch,student_drawing,teacher_drawing');
   }
   const byAttempt = {};
   (answers || []).forEach(a => {
@@ -23359,7 +23359,15 @@ function makeEditableQuestionText(q){
   /* Панель форматирования сверху — компактная, всегда видна */
   let ed; // forward-ref
   let drawingActive = false;
+  let eraserActive = false;
   let svgLayer;        // forward-ref на SVG-слой
+  let pencilColor = '#DC2626';  // текущий цвет карандаша
+  const PENCIL_COLORS = [
+    { hex:'#DC2626', label:'красный' },
+    { hex:'#2563EB', label:'синий' },
+    { hex:'#16A34A', label:'зелёный' },
+    { hex:'#000000', label:'чёрный' }
+  ];
   const exec = (cmd, val) => {
     document.execCommand(cmd, false, val || null);
     ed.focus();
@@ -23401,21 +23409,32 @@ function makeEditableQuestionText(q){
     /* ✏️ Карандаш — переключает режим рисования поверх текста */
     mkBtn('✏️', 'Карандаш — рисовать галочки, обводить, выделять', () => {
       drawingActive = !drawingActive;
-      if(svgLayer){
-        svgLayer.style.pointerEvents = drawingActive ? 'auto' : 'none';
-        svgLayer.style.cursor = drawingActive ? 'crosshair' : 'default';
-        svgLayer.style.touchAction = drawingActive ? 'none' : 'auto';
-      }
-      /* Подсветим саму кнопку, чтобы было понятно режим */
-      pencilBtnRef.style.background = drawingActive ? '#FEE2E2' : '#fff';
-      pencilBtnRef.style.borderColor = drawingActive ? '#DC2626' : 'var(--border-2)';
-      if(drawingActive){
-        ed.style.cursor = 'crosshair';
-      } else {
-        ed.style.cursor = '';
-      }
+      if(drawingActive) eraserActive = false;
+      applyDrawingMode();
     }, { fontWeight:'400' }),
-    /* 🧹 Стереть рисунок — очищает SVG */
+    /* 🧽 Ластик — клик по линии удаляет только её */
+    mkBtn('🧽', 'Ластик — клик/тап по линии стирает её одну', () => {
+      eraserActive = !eraserActive;
+      if(eraserActive) drawingActive = false;
+      applyDrawingMode();
+    }, { fontWeight:'400' }),
+    /* Палитра — четыре цвета карандаша. Клик меняет pencilColor.
+       Активный цвет подсвечен жирной рамкой. */
+    ...PENCIL_COLORS.map(c => mkBtn(
+      el('span', { style:{ display:'inline-block', width:'14px', height:'14px',
+                            background: c.hex, borderRadius:'50%' }}),
+      'Цвет карандаша: ' + c.label,
+      () => {
+        pencilColor = c.hex;
+        /* Подсветить выбранный, остальные — сбросить */
+        colorBtnRefs.forEach((b, i) => {
+          b.style.borderColor = PENCIL_COLORS[i].hex === c.hex ? '#000' : 'var(--border-2)';
+          b.style.borderWidth = PENCIL_COLORS[i].hex === c.hex ? '2px' : '1px';
+        });
+      },
+      { fontWeight:'400', padding:'4px 6px' }
+    )),
+    /* 🧹 Стереть рисунок целиком */
     mkBtn('🧹', 'Стереть весь рисунок карандаша', () => {
       if(!svgLayer || !svgLayer.children.length) return;
       if(!confirm('Стереть всё, что нарисовано карандашом?')) return;
@@ -23429,8 +23448,53 @@ function makeEditableQuestionText(q){
       scheduleSave();
       scheduleDrawingSave();
     }, { fontWeight:'400', color:'var(--red)' }));
-  /* Ссылку на кнопку карандаша создаём отдельно — она нужна для подсветки в exec */
-  const pencilBtnRef = toolbar.children[toolbar.children.length - 3];
+  /* Ссылки на кнопки рисования в тулбаре. Порядок добавления:
+     ... Ж К П H Y G R B () A → ✏️ 🧽 [4 цвета] 🧹 ↺
+     Считая с конца: ↺(-1), 🧹(-2), цвета(-3..-6), 🧽(-7), ✏️(-8). */
+  const totalChildren = toolbar.children.length;
+  const pencilBtnRef = toolbar.children[totalChildren - 8];
+  const eraserBtnRef = toolbar.children[totalChildren - 7];
+  const colorBtnRefs = [
+    toolbar.children[totalChildren - 6],
+    toolbar.children[totalChildren - 5],
+    toolbar.children[totalChildren - 4],
+    toolbar.children[totalChildren - 3]
+  ];
+  /* Подсветить дефолтный (красный) цвет */
+  colorBtnRefs[0].style.borderColor = '#000';
+  colorBtnRefs[0].style.borderWidth = '2px';
+  /* Применяет визуальное состояние режима ко всем элементам — pointer-events,
+     cursor, подсветку кнопок и интерактивность путей в SVG */
+  function applyDrawingMode(){
+    /* Подсветка кнопок */
+    pencilBtnRef.style.background = drawingActive ? '#FEE2E2' : '#fff';
+    pencilBtnRef.style.borderColor = drawingActive ? '#DC2626' : 'var(--border-2)';
+    eraserBtnRef.style.background = eraserActive ? '#FEE2E2' : '#fff';
+    eraserBtnRef.style.borderColor = eraserActive ? '#DC2626' : 'var(--border-2)';
+    if(!svgLayer) return;
+    /* Режим SVG-слоя */
+    if(drawingActive || eraserActive){
+      svgLayer.style.pointerEvents = 'auto';
+      svgLayer.style.touchAction = 'none';
+      svgLayer.style.cursor = drawingActive ? 'crosshair' : 'pointer';
+      ed.style.cursor = drawingActive ? 'crosshair' : '';
+    } else {
+      svgLayer.style.pointerEvents = 'none';
+      svgLayer.style.touchAction = 'auto';
+      svgLayer.style.cursor = 'default';
+      ed.style.cursor = '';
+    }
+    /* В режиме ластика — пути ловят клики и подсвечиваются при hover */
+    [...svgLayer.children].forEach(p => {
+      if(eraserActive){
+        p.style.pointerEvents = 'stroke';
+        p.style.cursor = 'pointer';
+      } else {
+        p.style.pointerEvents = '';
+        p.style.cursor = '';
+      }
+    });
+  }
   /* Сам текст — contenteditable. Восстанавливаем разметку если была. */
   ed = el('div', {
     contenteditable: 'true',
@@ -23478,13 +23542,20 @@ function makeEditableQuestionText(q){
   }
   editorContainer.append(svgLayer);
 
-  /* Сохранение рисунка с дебаунсом — отдельно от текстового scratch */
+  /* Сохранение рисунка с дебаунсом — отдельно от текстового scratch.
+     Пишем в localStorage и (если есть live-попытка) — в БД,
+     чтобы учитель потом увидел рисунок ученика в разборе. */
   let drawingSaveTimer = null;
   function scheduleDrawingSave(){
     if(!STATE.solverDrawings) STATE.solverDrawings = {};
     STATE.solverDrawings[num] = svgLayer.innerHTML;
     if(drawingSaveTimer) clearTimeout(drawingSaveTimer);
-    drawingSaveTimer = setTimeout(() => { saveSolverDraft(); }, 400);
+    drawingSaveTimer = setTimeout(() => {
+      saveSolverDraft();
+      if(STATE.liveAttemptId){
+        saveLiveDrawing(num, svgLayer.innerHTML);
+      }
+    }, 600);
   }
 
   /* === Логика рисования ===
@@ -23500,16 +23571,28 @@ function makeEditableQuestionText(q){
     ];
   };
   svgLayer.addEventListener('pointerdown', (e) => {
+    /* В режиме ластика — клик по линии её удаляет */
+    if(eraserActive){
+      const target = e.target;
+      if(target && target !== svgLayer && target.tagName && target.tagName.toLowerCase() === 'path'){
+        e.preventDefault();
+        target.remove();
+        scheduleDrawingSave();
+      }
+      return;
+    }
     if(!drawingActive) return;
     e.preventDefault();
     const xy = getXY(e);
     activeStroke = svgEl('path', {
-      stroke: '#DC2626',
+      stroke: pencilColor,
       'stroke-width': '2.5',
       fill: 'none',
       'stroke-linecap': 'round',
       'stroke-linejoin': 'round'
     });
+    /* Делаем сразу кликабельным — на случай если ластик включат позже */
+    activeStroke.style.pointerEvents = '';
     activePoints = ['M', xy[0], xy[1]];
     activeStroke.setAttribute('d', activePoints.join(' '));
     svgLayer.appendChild(activeStroke);
@@ -23555,6 +23638,25 @@ async function saveLiveScratch(num, html){
     }, { prefer: 'return=minimal' });
   } catch(e){
     console.warn('[live scratch] fail num=' + num + ':', e.message);
+  }
+}
+
+/* Сохранение рисунка ученика карандашом — отдельно от текстовой разметки */
+async function saveLiveDrawing(num, svgHtml){
+  const attId = await ensureLiveAttempt();
+  if(!attId) return;
+  try {
+    const resp = await restRequest('PATCH',
+      '/test_variant_answers?attempt_id=eq.' + attId +
+      '&question_num=eq.' + num,
+      { student_drawing: svgHtml || null },
+      { prefer: 'return=representation' });
+    if(Array.isArray(resp) && resp.length > 0) return;
+    await restRequest('POST', '/test_variant_answers', {
+      attempt_id: attId, question_num: num, student_drawing: svgHtml || null
+    }, { prefer: 'return=minimal' });
+  } catch(e){
+    console.warn('[live drawing] fail num=' + num + ':', e.message);
   }
 }
 
@@ -24726,7 +24828,7 @@ async function loadVariantsByStudent(studentId){
   if(attIds.length){
     answers = await restRequest('GET',
       '/test_variant_answers?attempt_id=in.(' + attIds.join(',') + ')' +
-      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch');
+      '&select=attempt_id,question_num,user_answer,points,max_points,is_correct,student_note,teacher_comment,scratch,student_drawing,teacher_drawing');
   }
   const byAttempt = {};
   (answers || []).forEach(a => {
