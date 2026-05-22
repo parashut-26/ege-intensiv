@@ -11528,31 +11528,68 @@ function renderStructuredAnswer(num, q, structured){
     return wrap;
   }
 
-  /* === №16: запятые между словами по предложениям === */
-  if(num === 16 && structured.checks16){
+  /* === №16: запятые между словами по предложениям ===
+     Рендерим текст каждого предложения, в местах где ученик поставил запятую —
+     красная запятая прямо в строке. ☑ слева — отметка «это предложение в ответ». */
+  if(num === 16 && structured.checks16
+       && typeof parseTask21Sentences === 'function'){
+    const sentences = parseTask21Sentences(txt);
+    if(!sentences.length) return null;
     const ch = structured.checks16;
-    const sentNums = Object.keys(ch).map(Number).sort((a,b) => a-b);
-    if(!sentNums.length) return null;
     const wrap = el('div', { style:{ padding:'10px 12px', background:'#F0F9FF',
       border:'1px solid #93C5FD', borderRadius:'10px', marginBottom:'14px' }},
       el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
                           marginBottom:'8px' }},
-        '📋 Запятые в каждом предложении'));
-    sentNums.forEach(sn => {
-      const gaps = ch[sn] || {};
-      const picked = !!gaps._picked;
+        '📋 Где ученик поставил запятые'));
+    sentences.forEach(sent => {
+      const gaps = ch[sent.num] || {};
+      const picked = gaps._picked === true;
+      const words = sent.text.split(/\s+/).filter(w => w.length);
       const cnt = Object.keys(gaps).filter(k => k !== '_picked' && gaps[k]).length;
-      wrap.append(el('div', { style:{ display:'flex', alignItems:'center', gap:'8px',
-        padding:'5px 4px', borderTop:'1px dashed #BFDBFE', fontSize:'13px' }},
-        el('span', {
-          style:{ display:'inline-flex', alignItems:'center', justifyContent:'center',
-                  width:'20px', height:'20px', borderRadius:'4px',
-                  background: picked ? '#2563EB' : '#fff', border:'2px solid #2563EB',
-                  color:'#fff', fontSize:'13px', fontWeight:'700' }
-        }, picked ? '✓' : ''),
-        el('b', { style:{ color:'#1E40AF' }}, sn + ')'),
-        el('span', { style:{ color:'var(--ink-2)' }},
-          'поставлено запятых: ' + cnt + (cnt === 1 ? ' (засчитано)' : ' (нужно ровно 1)'))));
+      const row = el('div', { style:{ display:'flex', gap:'8px',
+        alignItems:'flex-start', padding:'8px 4px',
+        borderTop:'1px dashed #BFDBFE', fontSize:'13px',
+        lineHeight:'1.7' }});
+      row.append(el('span', {
+        style:{ display:'inline-flex', alignItems:'center', justifyContent:'center',
+                width:'22px', height:'22px', borderRadius:'4px', flexShrink:'0',
+                background: picked ? '#2563EB' : '#fff', border:'2px solid #2563EB',
+                color:'#fff', fontSize:'14px', fontWeight:'700' }
+      }, picked ? '✓' : ''));
+      const txtBox = el('div', { style:{ flex:1, minWidth:0 }});
+      txtBox.append(el('b', { style:{ color:'#1E40AF', marginRight:'4px' }},
+        sent.num + ')'));
+      /* Слова с подсветкой запятых от ученика в местах wi (между словами).
+         Если запятая стоит — красный пробел-точка → активный «,». Если нет —
+         показываем точку «·» бледно-серым (для контекста где могла быть). */
+      words.forEach((w, wi) => {
+        if(wi > 0){
+          const active = !!gaps[wi];
+          txtBox.append(el('span', {
+            style:{ display:'inline-block', padding:'0 2px',
+                    color: active ? '#DC2626' : 'var(--ink-3)',
+                    fontWeight: active ? '700' : '400',
+                    fontSize: active ? '15px' : '11px',
+                    opacity: active ? 1 : 0.4 }
+          }, active ? ',' : '·'));
+          txtBox.append(document.createTextNode(' '));
+        }
+        txtBox.append(document.createTextNode(w));
+        if(wi < words.length - 1) txtBox.append(document.createTextNode(' '));
+      });
+      /* Чип-счётчик справа */
+      const chipBg = cnt === 1 ? '#D1FAE5' : cnt > 1 ? '#FEF3C7' : '#F3F4F6';
+      const chipFg = cnt === 1 ? '#065F46' : cnt > 1 ? '#92400E' : '#9CA3AF';
+      txtBox.append(el('span', {
+        style:{ marginLeft:'8px', padding:'1px 6px', fontSize:'10px',
+                fontWeight:'700', borderRadius:'6px',
+                background:chipBg, color:chipFg, whiteSpace:'nowrap',
+                display:'inline-block' }
+      }, cnt === 0 ? 'без запятых'
+         : cnt === 1 ? '✓ 1 запятая (засчитано)'
+         : cnt + ' запятых (нужно ровно 1)'));
+      row.append(txtBox);
+      wrap.append(row);
     });
     return wrap;
   }
