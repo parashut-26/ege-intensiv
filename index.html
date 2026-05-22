@@ -4186,7 +4186,9 @@ let _PRESENCE_REFRESH_TIMER = null;
 async function refreshStudentsPresence(){
   if(!sb || !STUDENTS_LOADED) return;
   try {
-    const arr = await restRequest('GET', '/profiles?role=eq.student&select=id,last_seen_at', { noRetry: true });
+    /* Передаём null как body (3-й арг) — без этого { noRetry } прилетал в body,
+       и fetch ругался «GET cannot have body». Это блокировало весь polling. */
+    const arr = await restRequest('GET', '/profiles?role=eq.student&select=id,last_seen_at', null, { noRetry: true });
     if(!Array.isArray(arr)) return;
     const map = {};
     arr.forEach(p => { map[p.id] = p.last_seen_at; });
