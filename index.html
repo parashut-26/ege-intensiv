@@ -25687,12 +25687,46 @@ function viewSolverVariant(){
   /* Универсальный поток «Завершить» — используется и в верхней панели, и в
      дублирующей кнопке внизу списка заданий. Спрашивает подтверждение и
      (в учительском режиме просмотра) сразу сохраняет. */
+  /* Кастомное async-подтверждение (не native confirm) — на iOS Safari в PWA
+     native confirm() иногда не возвращает true при OK и кнопка зависает.
+     Своя модалка через DOM работает везде. */
+  const customConfirm = (message) => new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.55);z-index:99999;' +
+      'display:flex;align-items:center;justify-content:center;padding:20px;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:14px;padding:20px;max-width:420px;' +
+      'width:100%;box-shadow:0 10px 40px rgba(0,0,0,0.25);font-family:inherit;';
+    const msg = document.createElement('div');
+    msg.style.cssText = 'font-size:14px;margin-bottom:18px;line-height:1.5;color:var(--ink);white-space:pre-wrap;';
+    msg.textContent = message;
+    const btns = document.createElement('div');
+    btns.style.cssText = 'display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;';
+    const finish = (ok) => { document.body.removeChild(overlay); resolve(ok); };
+    const no = document.createElement('button');
+    no.textContent = 'Отмена';
+    no.style.cssText = 'padding:9px 18px;border-radius:8px;background:#F3F4F6;color:#374151;' +
+      'border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;';
+    no.onclick = () => finish(false);
+    const yes = document.createElement('button');
+    yes.textContent = 'OK';
+    yes.style.cssText = 'padding:9px 22px;border-radius:8px;background:var(--p);color:#fff;' +
+      'border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;';
+    yes.onclick = () => finish(true);
+    btns.append(no, yes);
+    box.append(msg, btns);
+    overlay.append(box);
+    overlay.onclick = (e) => { if(e.target === overlay) finish(false); };
+    document.body.append(overlay);
+  });
   const finishSolverFlow = async (qList) => {
     if(STATE.solverPreview){ await finishSolvingAndSave(); return; }
     const unanswered = qList.filter(q => !(STATE.solverAnswers[q.num] || '').trim());
-    if(unanswered.length){
-      if(!confirm('Не отвечено заданий: ' + unanswered.length + '. Всё равно завершить?')) return;
-    } else if(!confirm('Завершить пробник? Ответы будут проверены автоматически.')) return;
+    const msg = unanswered.length
+      ? ('Не отвечено заданий: ' + unanswered.length + '. Всё равно завершить?')
+      : 'Завершить пробник? Ответы будут проверены автоматически.';
+    const ok = await customConfirm(msg);
+    if(!ok) return;
     await finishSolvingAndSave();
   };
   const headBg = isTeacherEdit ? '#EFF6FF' : isPreview ? '#FFFBEB' : 'var(--surface)';
@@ -25725,9 +25759,14 @@ function viewSolverVariant(){
             render();
             return;
           }
-          if(!confirm('Выйти и не сохранять? Черновик ответов останется — сможешь продолжить позже.')) return;
+          /* Без confirm — на iOS Safari в PWA-режиме native confirm()
+             иногда возвращает undefined даже при OK, и кнопка «висла».
+             Выход безопасный: черновик уже автосохранён, ничего не теряем.
+             Перед выходом — финальный сейв на всякий случай и тост. */
+          try { saveSolverDraft(); } catch(_){}
           STATE.solverVariantId = null;
           STATE.solverData = null;
+          showToast('💾 Прогресс сохранён · вернёшься, продолжишь');
           render();
         }
       }, isTeacherMode ? '✕ Закрыть' : '✕ Выйти'),
@@ -25793,12 +25832,15 @@ function viewSolverVariant(){
       }
     }, String(n));
   };
+  /* Без sticky/backdrop-filter — на iOS Safari они в редких случаях
+     перекрывают шапку с кнопкой «Выйти». Полоса скроллится вместе с
+     содержимым, для прокрутки к задаче этого достаточно. */
   const navRow = el('div', { style:{
     display:'flex', gap:'4px', overflowX:'auto', overflowY:'hidden',
     padding:'8px 4px', WebkitOverflowScrolling:'touch',
-    position:'sticky', top:'56px', zIndex:9,
-    background:'rgba(255,255,255,0.95)', backdropFilter:'blur(6px)',
-    borderBottom:'1px solid var(--border)', marginBottom:'10px' }});
+    background:'var(--surface)',
+    border:'1px solid var(--border)', borderRadius:'10px',
+    marginBottom:'10px' }});
   /* Какие задания вообще есть в варианте — 1-26 минимум, плюс 27 если он есть */
   const navNums = [];
   for(let i = 1; i <= 26; i++) navNums.push(i);
