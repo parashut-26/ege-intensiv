@@ -22998,6 +22998,45 @@ async function startSolvingVariant(variantId, opts){
         if(d.startedAt && !opts.parentAttemptId) STATE.solverStartedAt = d.startedAt;
       }
     } catch(_){}
+    /* === Защита от «висящей» попытки ===
+       Если в localStorage лежит liveAttemptId, но в БД эта попытка УЖЕ
+       удалена (учитель грохнул из таблицы) — черновик ученика на устройстве
+       устарел. Проверяем существование, если нет — сбрасываем всё и
+       начинаем заново. Это история «удалила, а у ученика всё ещё висит». */
+    if(STATE.liveAttemptId){
+      try {
+        const checkArr = await restRequest('GET',
+          '/test_variant_attempts?id=eq.' + STATE.liveAttemptId + '&select=id');
+        if(!Array.isArray(checkArr) || !checkArr.length){
+          console.log('[solver] live-попытка', STATE.liveAttemptId,
+            'удалена учителем — сбрасываю черновик');
+          try { localStorage.removeItem(draftKey); } catch(_){}
+          STATE.solverAnswers = {};
+          STATE.solverChecked = {};
+          STATE.solverScratch = {};
+          STATE.solverDropdowns21 = {};
+          STATE.solverMatching22 = {};
+          STATE.solverChecks16 = {};
+          STATE.solverGaps = {};
+          STATE.solverChoice13_14 = {};
+          STATE.solverWords13_14 = {};
+          STATE.solverLetters = {};
+          STATE.solverChecks9_12 = {};
+          STATE.solverDrawings = {};
+          STATE.liveAttemptId = null;
+          STATE.solverStartedAt = Date.now();
+          /* Обнуляем хэш-снэпшоты, чтобы при следующем save_live точно
+             отправился новый payload в новую попытку (которая создастся
+             через ensureLiveAttempt) */
+          if(typeof _structuredSnapshots === 'object'){
+            for(const k in _structuredSnapshots) delete _structuredSnapshots[k];
+          }
+          showToast('🔄 Учитель сбросил твою прошлую попытку. Начинай заново.');
+        }
+      } catch(e){
+        console.warn('[solver] не смог проверить liveAttemptId:', e.message);
+      }
+    }
     /* Если черновика нет, но в БД есть незавершённая попытка для этого варианта —
        подцепляемся к ней (например, ученик чистил кеш или сменил устройство).
        Подгружаем уже проверенные ответы из БД, чтобы восстановить состояние. */
