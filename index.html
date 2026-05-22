@@ -23230,6 +23230,11 @@ function scheduleStructuredSync(){
       const key = attId + ':' + q.num;
       if(json === _structuredSnapshots[key]) continue;
       _structuredSnapshots[key] = json;
+      /* Если данных нет — НЕ создаём пустую строку в БД (иначе у учителя
+         в сводной появятся «нулёвки-фантомы» по всем 27 заданиям сразу,
+         как только ученик тронул первое задание). Сохраняем только если
+         реально есть что сохранять. */
+      if(!data) continue;
       try {
         await saveLiveStructured(q.num, data);
       } catch(e){ console.warn('[live structured] num=' + q.num, e.message); }
@@ -23245,8 +23250,16 @@ async function saveLiveStructured(num, data){
     { structured_state: data || null },
     { prefer: 'return=representation' });
   if(Array.isArray(resp) && resp.length > 0) return;
+  /* Если данных нет — не плодим пустую строку (иначе в БД будут «фантомы»
+     с дефолтами points=0/max_points=1, и учитель увидит красную «0»). */
+  if(!data) return;
+  /* Явно ставим points/max_points в null, чтобы DEFAULT в БД (если ещё остался
+     до миграции) не подставил 0/1. После миграции 2026-05-22_kill_phantom_zeros
+     это уже не нужно, но оставляем как защиту. */
   await restRequest('POST', '/test_variant_answers', {
-    attempt_id: attId, question_num: num, structured_state: data || null
+    attempt_id: attId, question_num: num,
+    structured_state: data,
+    points: null, max_points: null
   }, { prefer: 'return=minimal' });
 }
 
@@ -25209,16 +25222,23 @@ function makeEditableQuestionText(q){
 async function saveLiveScratch(num, html){
   const attId = await ensureLiveAttempt();
   if(!attId) return;
+  const clean = (html || '').trim();
+  /* Если scratch пустой — НЕ создаём новую строку (фантом с points=0/max=1).
+     Существующую — PATCH-им до null, чтобы стереть. */
   try {
     const resp = await restRequest('PATCH',
       '/test_variant_answers?attempt_id=eq.' + attId +
       '&question_num=eq.' + num,
-      { scratch: html || null },
+      { scratch: clean || null },
       { prefer: 'return=representation' });
     if(Array.isArray(resp) && resp.length > 0) return;
-    /* PATCH не нашёл строку — INSERT */
+    if(!clean) return;
+    /* PATCH не нашёл строку — INSERT, явно ставим points/max_points в null
+       чтобы не сработали DEFAULT-ы в БД. */
     await restRequest('POST', '/test_variant_answers', {
-      attempt_id: attId, question_num: num, scratch: html || null
+      attempt_id: attId, question_num: num,
+      scratch: clean,
+      points: null, max_points: null
     }, { prefer: 'return=minimal' });
   } catch(e){
     console.warn('[live scratch] fail num=' + num + ':', e.message);
@@ -25229,15 +25249,20 @@ async function saveLiveScratch(num, html){
 async function saveLiveDrawing(num, svgHtml){
   const attId = await ensureLiveAttempt();
   if(!attId) return;
+  const clean = (svgHtml || '').trim();
   try {
     const resp = await restRequest('PATCH',
       '/test_variant_answers?attempt_id=eq.' + attId +
       '&question_num=eq.' + num,
-      { student_drawing: svgHtml || null },
+      { student_drawing: clean || null },
       { prefer: 'return=representation' });
     if(Array.isArray(resp) && resp.length > 0) return;
+    /* Пустой рисунок — не создаём новую строку, чтобы не плодить фантомы. */
+    if(!clean) return;
     await restRequest('POST', '/test_variant_answers', {
-      attempt_id: attId, question_num: num, student_drawing: svgHtml || null
+      attempt_id: attId, question_num: num,
+      student_drawing: clean,
+      points: null, max_points: null
     }, { prefer: 'return=minimal' });
   } catch(e){
     console.warn('[live drawing] fail num=' + num + ':', e.message);
