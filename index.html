@@ -11020,7 +11020,7 @@ async function saveAnswerField(attemptId, num, column, value){
 
 function modalExamineQuestion(){
   if(!STATE.examineQuestion) return null;
-  const { variantId, num, userAnswer, points, max, studentNote, teacherComment, scratch, attemptId, isStudent } = STATE.examineQuestion;
+  const { variantId, num, userAnswer, points, max, studentNote, teacherComment, scratch, studentDrawing, attemptId, isStudent } = STATE.examineQuestion;
   const close = () => {
     STATE.examineQuestion = null;
     STATE.examineQuestionData = null;
@@ -11103,34 +11103,54 @@ function modalExamineQuestion(){
         el('div', { style:{ marginTop:'8px', whiteSpace:'pre-wrap' } }, sourceBody));
       body.append(srcBox);
     }
-    /* Текст задания (HTML с форматированием) */
+    /* Текст задания (HTML с форматированием).
+       Если есть пометки ученика — карандашом (student_drawing) или маркером
+       (scratch) — собираем их в один контейнер с SVG-оверлеем над текстом,
+       чтобы координаты рисунка совпадали с текстом, как у ученика. */
+    const sc = (scratch || '').trim();
+    const drawing = (studentDrawing || '').trim();
+    const hasMarks = !!(sc || drawing);
+    if(hasMarks){
+      /* Версия С ПОМЕТКАМИ — текст из scratch (если есть) или формулировка,
+         а сверху абсолютный SVG-слой с карандашом. Лежит первым, чтобы
+         учитель сразу увидел, как ребёнок размечал. */
+      const markedWrap = el('div', { style:{ position:'relative',
+        padding:'12px 14px', background:'#FFFBEB', borderLeft:'4px solid #FACC15',
+        borderRadius:'8px', marginBottom:'14px', fontSize:'14px',
+        lineHeight:'1.6', whiteSpace:'pre-wrap', overflow:'visible' }});
+      const txtInner = el('div', { style:{ position:'relative', zIndex:'1' }});
+      txtInner.innerHTML = sc || sanitizeQuestionHtml(q.question_text || '(пусто)');
+      markedWrap.append(txtInner);
+      if(drawing){
+        /* SVG с карандашной разметкой. pointer-events:none — учитель не
+           рисует, только смотрит. overflow:visible — штрихи могут выходить
+           за края (например, обвели поле снаружи) */
+        const svgWrap = document.createElement('div');
+        svgWrap.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" ' +
+          'style="position:absolute;top:0;left:0;width:100%;height:100%;' +
+          'pointer-events:none;overflow:visible;z-index:2;">' + drawing + '</svg>';
+        markedWrap.append(svgWrap.firstChild);
+      }
+      const labelParts = [];
+      if(drawing) labelParts.push('карандаш');
+      if(sc) labelParts.push('маркер/цвет');
+      body.append(
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E', marginBottom:'6px',
+                            display:'flex', justifyContent:'space-between', alignItems:'center', flexWrap:'wrap', gap:'6px' }},
+          el('span', null, '🖌 Пометки ученика'),
+          el('span', { style:{ fontSize:'10px', fontWeight:'400', color:'var(--ink-3)' }},
+            'То, что ребёнок отметил во время решения (' + labelParts.join(' + ') + ').')),
+        markedWrap);
+    }
+    /* Чистая формулировка — всегда показываем после пометок, чтобы можно
+       было сверить, что именно ученик размечал. Если пометок нет — это
+       единственная версия. */
     const textBlock = el('div', { style:{ padding:'12px 14px', background:'#F9FAFB', borderRadius:'10px', marginBottom:'14px', fontSize:'14px', lineHeight:'1.6', whiteSpace:'pre-wrap' }});
     textBlock.innerHTML = sanitizeQuestionHtml(q.question_text || '(пусто)');
     body.append(
-      el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }}, '📝 Формулировка'),
+      el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }},
+        hasMarks ? '📝 Формулировка (оригинал)' : '📝 Формулировка'),
       textBlock);
-
-    /* === Разметка ученика (scratch) ===
-       Если ученик во время решения красил/подчёркивал текст задания,
-       показываем его версию здесь. Это нужно учителю чтобы увидеть, что
-       ребёнок думал во время решения (грам.основу, границы придаточных).
-       Сохраняем все цвета и стили — innerHTML без санитайзера. */
-    const sc = (scratch || '').trim();
-    if(sc){
-      const scratchBlock = el('div', {
-        style:{ padding:'12px 14px', background:'#FFFBEB', borderLeft:'4px solid #FACC15',
-                borderRadius:'8px', marginBottom:'14px', fontSize:'14px',
-                lineHeight:'1.6', whiteSpace:'pre-wrap' }
-      });
-      scratchBlock.innerHTML = sc;
-      body.append(
-        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E', marginBottom:'6px',
-                            display:'flex', justifyContent:'space-between', alignItems:'center' }},
-          el('span', null, '🖌 Разметка ученика'),
-          el('span', { style:{ fontSize:'10px', fontWeight:'400', color:'var(--ink-3)' }},
-            'Цвета, подчёркивания и скобки, которые ученик отметил в тексте.')),
-        scratchBlock);
-    }
 
     /* Твой ответ / Позиция автора (для задания 27) */
     const isCorrect = points >= max && max > 0;
@@ -11597,6 +11617,7 @@ function studentVariantsCard(){
               studentNote: ans ? (ans.student_note || null) : null,
               teacherComment: ans ? (ans.teacher_comment || null) : null,
               scratch: ans ? (ans.scratch || null) : null,
+              studentDrawing: ans ? (ans.student_drawing || null) : null,
               isStudent: true  /* открыто учеником из «Мои пробники» — даём редактировать РНО */
             };
             render();
@@ -21812,6 +21833,7 @@ function variantCell(ans, opts){
         studentNote: ans.student_note || null,
         teacherComment: ans.teacher_comment || null,
         scratch: ans.scratch || null,
+        studentDrawing: ans.student_drawing || null,
         isStudent: false   // учительский путь — может редактировать teacher_comment
       };
       render();
@@ -25757,7 +25779,8 @@ function viewVariantsByStudent(){
             attemptId: a.id,
             studentNote: ans27 && ans27.student_note || null,
             teacherComment: ans27 && ans27.teacher_comment || null,
-            scratch: ans27 && ans27.scratch || null
+            scratch: ans27 && ans27.scratch || null,
+            studentDrawing: ans27 && ans27.student_drawing || null
           };
           render();
         }
