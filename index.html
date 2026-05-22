@@ -22179,6 +22179,7 @@ async function startSolvingVariant(variantId, opts){
   STATE.solverLetters = {};
   STATE.solverChecks9_12 = {};
   STATE.solverEditedQuestions = {};
+  STATE.solverDrawings = {};
   STATE.solverResult = null;
   STATE.solverResultAttemptId = null;
   STATE.solverFinishedAt = null;
@@ -22207,6 +22208,7 @@ async function startSolvingVariant(variantId, opts){
         if(d.choice13_14) STATE.solverChoice13_14 = d.choice13_14;
         if(d.letters) STATE.solverLetters = d.letters;
         if(d.checks9_12) STATE.solverChecks9_12 = d.checks9_12;
+        if(d.drawings) STATE.solverDrawings = d.drawings;
         if(d.liveAttemptId) STATE.liveAttemptId = d.liveAttemptId;
         if(d.startedAt && !opts.parentAttemptId) STATE.solverStartedAt = d.startedAt;
       }
@@ -22265,6 +22267,7 @@ function saveSolverDraft(){
       choice13_14: STATE.solverChoice13_14 || {},
       letters: STATE.solverLetters || {},
       checks9_12: STATE.solverChecks9_12 || {},
+      drawings: STATE.solverDrawings || {},
       liveAttemptId: STATE.liveAttemptId || null,
       startedAt: STATE.solverStartedAt
     }));
@@ -23335,17 +23338,28 @@ function sourceTextForNum(sourceTexts, num){
   return null;
 }
 
-/* === Editable формулировка задания с панелью форматирования ===
-   Текст задания сам по себе — contenteditable: ученик выделяет фрагмент
-   и красит/подчёркивает/обводит скобками прямо в тексте. Никаких
-   разворачиваемых блоков-черновиков — всё сразу видно.
-   Сохранение: STATE.solverScratch[num] (html) → localStorage + БД
-   (test_variant_answers.scratch через live-attempt). */
+/* Хелпер: создаёт SVG-элемент через правильный namespace */
+function svgEl(name, attrs){
+  const el = document.createElementNS('http://www.w3.org/2000/svg', name);
+  if(attrs){
+    for(const k in attrs){ el.setAttribute(k, attrs[k]); }
+  }
+  return el;
+}
+
+/* === Editable формулировка задания с панелью форматирования + карандаш ===
+   Текст задания — contenteditable: ученик выделяет фрагмент и
+   красит/подчёркивает/обводит скобками. Сверху — SVG-слой для рисования
+   карандашом (галочки, выделение суффикса, стрелки и т.д.).
+   Сохранение: STATE.solverScratch[num] (html) + STATE.solverDrawings[num] (svg)
+   → localStorage + БД (test_variant_answers.scratch через live-attempt). */
 function makeEditableQuestionText(q){
   const num = q.num;
   const wrap = el('div', { style:{ marginTop:'4px' }});
   /* Панель форматирования сверху — компактная, всегда видна */
   let ed; // forward-ref
+  let drawingActive = false;
+  let svgLayer;        // forward-ref на SVG-слой
   const exec = (cmd, val) => {
     document.execCommand(cmd, false, val || null);
     ed.focus();
@@ -23384,11 +23398,39 @@ function makeEditableQuestionText(q){
       exec('insertHTML', '(' + sel.toString() + ')');
     }, { fontWeight:'400' }),
     mkBtn('A', 'Сбросить форматирование выделенного', () => exec('removeFormat'), { fontWeight:'400' }),
+    /* ✏️ Карандаш — переключает режим рисования поверх текста */
+    mkBtn('✏️', 'Карандаш — рисовать галочки, обводить, выделять', () => {
+      drawingActive = !drawingActive;
+      if(svgLayer){
+        svgLayer.style.pointerEvents = drawingActive ? 'auto' : 'none';
+        svgLayer.style.cursor = drawingActive ? 'crosshair' : 'default';
+        svgLayer.style.touchAction = drawingActive ? 'none' : 'auto';
+      }
+      /* Подсветим саму кнопку, чтобы было понятно режим */
+      pencilBtnRef.style.background = drawingActive ? '#FEE2E2' : '#fff';
+      pencilBtnRef.style.borderColor = drawingActive ? '#DC2626' : 'var(--border-2)';
+      if(drawingActive){
+        ed.style.cursor = 'crosshair';
+      } else {
+        ed.style.cursor = '';
+      }
+    }, { fontWeight:'400' }),
+    /* 🧹 Стереть рисунок — очищает SVG */
+    mkBtn('🧹', 'Стереть весь рисунок карандаша', () => {
+      if(!svgLayer || !svgLayer.children.length) return;
+      if(!confirm('Стереть всё, что нарисовано карандашом?')) return;
+      svgLayer.innerHTML = '';
+      scheduleDrawingSave();
+    }, { fontWeight:'400' }),
     mkBtn('↺', 'Откатить всю разметку к оригиналу', () => {
       if(!confirm('Сбросить всю разметку и вернуть исходный текст задания?')) return;
       ed.innerHTML = sanitizeQuestionHtml(q.question_text || '');
+      if(svgLayer) svgLayer.innerHTML = '';
       scheduleSave();
+      scheduleDrawingSave();
     }, { fontWeight:'400', color:'var(--red)' }));
+  /* Ссылку на кнопку карандаша создаём отдельно — она нужна для подсветки в exec */
+  const pencilBtnRef = toolbar.children[toolbar.children.length - 3];
   /* Сам текст — contenteditable. Восстанавливаем разметку если была. */
   ed = el('div', {
     contenteditable: 'true',
@@ -23420,7 +23462,78 @@ function makeEditableQuestionText(q){
     const txt = (e.clipboardData || window.clipboardData).getData('text/plain');
     document.execCommand('insertText', false, txt);
   });
-  wrap.append(toolbar, ed);
+  /* === SVG-слой для карандаша поверх текста ===
+     Лежит абсолютно поверх ed, прозрачно ловит pointer events когда
+     активен карандаш. Координаты в пикселях относительно контейнера —
+     рисунок «прилипает» к тексту, не скролится отдельно. */
+  const editorContainer = el('div', { style:{ position:'relative' }});
+  editorContainer.append(ed);
+  svgLayer = svgEl('svg', {
+    style: 'position:absolute;top:0;left:0;width:100%;height:100%;' +
+           'pointer-events:none;overflow:visible;'
+  });
+  /* Восстанавливаем сохранённый рисунок */
+  if(STATE.solverDrawings && STATE.solverDrawings[num]){
+    svgLayer.innerHTML = STATE.solverDrawings[num];
+  }
+  editorContainer.append(svgLayer);
+
+  /* Сохранение рисунка с дебаунсом — отдельно от текстового scratch */
+  let drawingSaveTimer = null;
+  function scheduleDrawingSave(){
+    if(!STATE.solverDrawings) STATE.solverDrawings = {};
+    STATE.solverDrawings[num] = svgLayer.innerHTML;
+    if(drawingSaveTimer) clearTimeout(drawingSaveTimer);
+    drawingSaveTimer = setTimeout(() => { saveSolverDraft(); }, 400);
+  }
+
+  /* === Логика рисования ===
+     На pointerdown создаём <path>, на move дописываем точки в d атрибут,
+     на up закрепляем штрих. Pointer-events работают для мыши, тача, Apple Pencil. */
+  let activeStroke = null;
+  let activePoints = null;
+  const getXY = (e) => {
+    const rect = editorContainer.getBoundingClientRect();
+    return [
+      (e.clientX - rect.left).toFixed(1),
+      (e.clientY - rect.top).toFixed(1)
+    ];
+  };
+  svgLayer.addEventListener('pointerdown', (e) => {
+    if(!drawingActive) return;
+    e.preventDefault();
+    const xy = getXY(e);
+    activeStroke = svgEl('path', {
+      stroke: '#DC2626',
+      'stroke-width': '2.5',
+      fill: 'none',
+      'stroke-linecap': 'round',
+      'stroke-linejoin': 'round'
+    });
+    activePoints = ['M', xy[0], xy[1]];
+    activeStroke.setAttribute('d', activePoints.join(' '));
+    svgLayer.appendChild(activeStroke);
+    try { svgLayer.setPointerCapture(e.pointerId); } catch(_){}
+  });
+  svgLayer.addEventListener('pointermove', (e) => {
+    if(!drawingActive || !activeStroke) return;
+    e.preventDefault();
+    const xy = getXY(e);
+    activePoints.push('L', xy[0], xy[1]);
+    activeStroke.setAttribute('d', activePoints.join(' '));
+  });
+  const finishStroke = (e) => {
+    if(!activeStroke) return;
+    activeStroke = null;
+    activePoints = null;
+    try { svgLayer.releasePointerCapture(e.pointerId); } catch(_){}
+    scheduleDrawingSave();
+  };
+  svgLayer.addEventListener('pointerup', finishStroke);
+  svgLayer.addEventListener('pointercancel', finishStroke);
+  svgLayer.addEventListener('pointerleave', finishStroke);
+
+  wrap.append(toolbar, editorContainer);
   return wrap;
 }
 
