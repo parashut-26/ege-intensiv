@@ -25349,15 +25349,11 @@ function makeEditableQuestionText(q){
             minHeight:'40px', userSelect:'text' }
   });
   const savedScratch = STATE.solverScratch && STATE.solverScratch[num];
-  /* Для №17-20 — `(N)` маркеры дублируются в интерактивной панели ниже
-     (как цветные плашки) И стоят между словами в плоском тексте → можно
-     безопасно срезать, предложение читается как обычное. Для №15 — НЕ
-     трогаем: там маркер стоит ВНУТРИ слова, и если его срезать, слово
-     превратится в «деревяый» (пропадёт «н»), выглядит как опечатка. */
-  let initialText = q.question_text || '';
-  if((num >= 17 && num <= 20) && initialText){
-    initialText = initialText.replace(/\((\d{1,2})\)/g, '');
-  }
+  /* `(N)` маркеры в формулировке оставляем как есть — это формат ЕГЭ,
+     цифры пронумерованы прямо в тексте. Ниже у заданий 17-20 (как и 15)
+     показывается интерактивная панель «ТАПНИ ЦИФРУ» с тем же текстом —
+     это нормально, ученик видит цифры в обоих местах и знает что выбирать. */
+  const initialText = q.question_text || '';
   ed.innerHTML = savedScratch || sanitizeQuestionHtml(initialText);
   let saveTimer = null;
   function scheduleSave(){
