@@ -22176,6 +22176,7 @@ async function startSolvingVariant(variantId, opts){
   STATE.solverChecks16 = {};
   STATE.solverGaps = {};
   STATE.solverChoice13_14 = {};
+  STATE.solverWords13_14 = {};
   STATE.solverLetters = {};
   STATE.solverChecks9_12 = {};
   STATE.solverEditedQuestions = {};
@@ -22206,6 +22207,7 @@ async function startSolvingVariant(variantId, opts){
         if(d.checks16) STATE.solverChecks16 = d.checks16;
         if(d.gaps) STATE.solverGaps = d.gaps;
         if(d.choice13_14) STATE.solverChoice13_14 = d.choice13_14;
+        if(d.words13_14) STATE.solverWords13_14 = d.words13_14;
         if(d.letters) STATE.solverLetters = d.letters;
         if(d.checks9_12) STATE.solverChecks9_12 = d.checks9_12;
         if(d.drawings) STATE.solverDrawings = d.drawings;
@@ -22265,6 +22267,7 @@ function saveSolverDraft(){
       checks16: STATE.solverChecks16 || {},
       gaps: STATE.solverGaps || {},
       choice13_14: STATE.solverChoice13_14 || {},
+      words13_14: STATE.solverWords13_14 || {},
       letters: STATE.solverLetters || {},
       checks9_12: STATE.solverChecks9_12 || {},
       drawings: STATE.solverDrawings || {},
@@ -22272,6 +22275,17 @@ function saveSolverDraft(){
       startedAt: STATE.solverStartedAt
     }));
   } catch(_){}
+  /* === Автосинхрон правильного ответа в режиме teacherEdit ===
+     После каждого изменения учительских структурных полей пересчитываем
+     ответ и шлём PATCH. Дебаунс внутри scheduleTeacherAutoSync. */
+  if(STATE.solverTeacherEdit && STATE.solverData && typeof scheduleTeacherAutoSync === 'function'){
+    STATE.solverData.questions.forEach(q => {
+      const computed = computeAnswerFromStructured(q);
+      if(computed != null && computed !== '' && computed !== q.correct_answer){
+        scheduleTeacherAutoSync(q.num);
+      }
+    });
+  }
 }
 
 /* === LIVE-режим решалки ===
@@ -23036,67 +23050,294 @@ function makeTasks9_12Field(q){
   return wrap;
 }
 
-/* === Задания 13 и 14: слитно/раздельно (/дефис) ===
-   Задание 13: «НЕ со словом пишется слитно/раздельно» — radio с двумя вариантами.
-   Задание 14: «Оба слова пишутся слитно/раздельно/через дефис» — radio с тремя.
-   В формулировке — 5 нумерованных предложений с (НЕ)словом или (словом-словом).
-   Ученик для каждого выбирает форму. Ответ всё равно пишется руками — этим
-   правилам формат ответа = одно/два слова, не цифры. */
+/* === Задания 13 и 14: inline-выбор формы каждого (слова) ===
+   В формулировке выделенные слова с приставкой обозначены как «(В)ТЕЧЕНИЕ»,
+   «(НЕ)ЗНАКОМО». Каждое такое слово рендерится отдельной кнопкой. Тап
+   циклически меняет форму: слитно → раздельно → (для №14) через дефис →
+   не выбрано → слитно... Цвет фона отражает выбор.
+   Когда ВСЕ слова в предложении имеют одинаковую целевую форму, строка
+   считается «попадает в ответ». Целевая форма определяется по формулировке
+   («пишутся СЛИТНО»/«РАЗДЕЛЬНО»/«ЧЕРЕЗ ДЕФИС»). */
+function parseParensWords(text){
+  /* Находим все шаблоны «(приставка)корень» и возвращаем токены:
+     [{type:'text',value:'Отец '}, {type:'word', prefix:'В', root:'ТЕЧЕНИЕ'}, ...] */
+  const tokens = [];
+  const re = /\(([А-ЯЁа-яё]+)\)([А-ЯЁ]+)/g;
+  let lastEnd = 0;
+  let m;
+  while((m = re.exec(text)) !== null){
+    if(m.index > lastEnd){
+      tokens.push({ type:'text', value: text.slice(lastEnd, m.index) });
+    }
+    tokens.push({ type:'word', prefix: m[1], root: m[2] });
+    lastEnd = m.index + m[0].length;
+  }
+  if(lastEnd < text.length){
+    tokens.push({ type:'text', value: text.slice(lastEnd) });
+  }
+  return tokens;
+}
+
+const FORM_COLORS_13_14 = {
+  s: { bg:'#D1FAE5', fg:'#065F46', label:'слитно' },
+  r: { bg:'#FEE2E2', fg:'#991B1B', label:'раздельно' },
+  d: { bg:'#DBEAFE', fg:'#1E40AF', label:'через дефис' }
+};
+
 function makeTask13_14Field(q){
   const num = q.num;
   if(num !== 13 && num !== 14) return null;
   const sentences = parseTask21Sentences(q.question_text);
   if(!sentences.length) return null;
-  const options = num === 14
-    ? ['— не выбрано', 'слитно', 'раздельно', 'через дефис']
-    : ['— не выбрано', 'слитно', 'раздельно'];
 
-  if(!STATE.solverChoice13_14) STATE.solverChoice13_14 = {};
-  if(!STATE.solverChoice13_14[num]) STATE.solverChoice13_14[num] = {};
-  const picks = STATE.solverChoice13_14[num];
+  /* Какие формы доступны для цикла */
+  const cycle = num === 14 ? ['s','r','d'] : ['s','r'];
+
+  /* Определяем целевую форму из формулировки */
+  const formText = (q.question_text || '').toLowerCase();
+  let targetCode = null;
+  if(/слитно/i.test(formText)) targetCode = 's';
+  else if(/раздельно/i.test(formText)) targetCode = 'r';
+  else if(/через\s+дефис/i.test(formText)) targetCode = 'd';
+
+  if(!STATE.solverWords13_14) STATE.solverWords13_14 = {};
+  if(!STATE.solverWords13_14[num]) STATE.solverWords13_14[num] = {};
+  const picks = STATE.solverWords13_14[num];   // { 'sentNum-tokenIdx': 's'|'r'|'d' }
 
   const wrap = el('div', { style:{ marginTop:'10px',
     padding:'10px 12px', background:'#F9FAFB',
     border:'1px solid var(--border)', borderRadius:'10px' }});
-
-  /* Заголовок зависит от задания */
-  const label = num === 14
-    ? '📌 Для каждого предложения определи форму: слитно, раздельно или через дефис'
-    : '📌 Для каждого предложения определи: НЕ пишется слитно или раздельно';
   wrap.append(
     el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
-                        marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }}, label),
+                        marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }},
+      '📌 Тапни на каждое (слово) и выбери форму'),
     el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
-      'Когда определишь форму для каждого, в поле ответа выпиши слово(а) из нужного предложения в правильной форме.'));
+      targetCode
+        ? ('Цель: предложения, где ВСЕ выделенные слова пишутся «' + FORM_COLORS_13_14[targetCode].label + '».')
+        : 'Тап циклически меняет форму. Зелёный = слитно, красный = раздельно, синий = через дефис.'));
 
-  /* Радио-группы для каждого предложения */
+  /* Сохраняем токены каждого предложения и status-узлы для динамики */
+  const sentenceTokens = {};
+  const statusEls = {};
+
+  function updateRowStatus(sentNum){
+    const tokens = sentenceTokens[sentNum];
+    const wordIdxs = tokens.map((t, i) => t.type === 'word' ? i : -1).filter(i => i >= 0);
+    const codes = wordIdxs.map(i => picks[sentNum + '-' + i]);
+    const filled = codes.every(c => c);
+    const allSame = filled && codes.every(c => c === codes[0]);
+    const stEl = statusEls[sentNum];
+    if(!stEl) return;
+    if(!wordIdxs.length){
+      stEl.innerHTML = '<span style="color:var(--ink-3);">в этом предложении нет (слов)</span>';
+    } else if(!filled){
+      stEl.innerHTML = '<span style="color:var(--ink-3);">выбери форму для каждого (слова)</span>';
+    } else if(allSame){
+      const c = codes[0];
+      const matches = targetCode && c === targetCode;
+      stEl.innerHTML = '<span style="color:' + FORM_COLORS_13_14[c].fg + ';font-weight:700;">'
+        + '✓ все «' + FORM_COLORS_13_14[c].label + '»'
+        + (matches ? ' — попадает в ответ' : '')
+        + '</span>';
+    } else {
+      stEl.innerHTML = '<span style="color:#92400E;font-weight:700;">разные формы</span>';
+    }
+  }
+
+  function makeWordButton(sent, tokens, idx){
+    const token = tokens[idx];
+    const key = sent.num + '-' + idx;
+    const btn = el('button', {
+      type:'button',
+      style:{ padding:'3px 8px', fontSize:'13px', fontWeight:'700', cursor:'pointer',
+              borderRadius:'4px', border:'1.5px solid var(--border-2)',
+              background:'#fff', color:'var(--ink)', fontFamily:'inherit',
+              display:'inline-block', margin:'0 2px', verticalAlign:'middle' }
+    });
+    function paint(){
+      const code = picks[key];
+      if(code && FORM_COLORS_13_14[code]){
+        const display = code === 's' ? (token.prefix + token.root).toLowerCase()
+                      : code === 'r' ? (token.prefix.toLowerCase() + ' ' + token.root.toLowerCase())
+                      : (token.prefix.toLowerCase() + '-' + token.root.toLowerCase());
+        btn.textContent = display;
+        btn.style.background = FORM_COLORS_13_14[code].bg;
+        btn.style.color = FORM_COLORS_13_14[code].fg;
+        btn.style.borderColor = FORM_COLORS_13_14[code].fg;
+      } else {
+        btn.textContent = '(' + token.prefix + ')' + token.root;
+        btn.style.background = '#fff';
+        btn.style.color = 'var(--ink)';
+        btn.style.borderColor = 'var(--border-2)';
+      }
+    }
+    btn.onclick = () => {
+      const cur = picks[key];
+      const i = cur ? cycle.indexOf(cur) : -1;
+      const next = i + 1 < cycle.length ? cycle[i + 1] : null;
+      if(next === null) delete picks[key];
+      else picks[key] = next;
+      paint();
+      updateRowStatus(sent.num);
+      saveSolverDraft();
+    };
+    paint();
+    return btn;
+  }
+
   sentences.forEach(sent => {
-    const sel = el('select', {
-      style:{ padding:'4px 8px', fontSize:'12px', borderRadius:'6px',
-              border:'1px solid var(--border-2)', minWidth:'180px',
-              fontFamily:'inherit', background:'#fff', cursor:'pointer' },
-      onchange: (ev) => {
-        if(ev.target.value === '— не выбрано') delete picks[sent.num];
-        else picks[sent.num] = ev.target.value;
-        saveSolverDraft();
+    const tokens = parseParensWords(sent.text);
+    sentenceTokens[sent.num] = tokens;
+
+    const lineWrap = el('div', {
+      style:{ display:'flex', flexWrap:'wrap', gap:'2px', alignItems:'center',
+              lineHeight:'1.8', fontSize:'14px' }
+    });
+    tokens.forEach((token, idx) => {
+      if(token.type === 'text'){
+        lineWrap.append(document.createTextNode(token.value));
+      } else {
+        lineWrap.append(makeWordButton(sent, tokens, idx));
       }
     });
-    options.forEach(o => sel.append(el('option', { value: o }, o)));
-    sel.value = picks[sent.num] || '— не выбрано';
+
+    const stEl = el('div', { style:{ fontSize:'11px', marginTop:'2px' }});
+    statusEls[sent.num] = stEl;
 
     const row = el('div', {
       style:{ display:'flex', flexWrap:'wrap', gap:'8px', alignItems:'flex-start',
-              padding:'8px 0', borderTop:'1px dashed var(--border)' }
+              padding:'10px 0', borderTop:'1px dashed var(--border)' }
     },
       el('div', { style:{ minWidth:'24px', fontWeight:'700', color:'var(--p-deep)', fontSize:'13px' }},
         sent.num + ')'),
-      el('div', { style:{ flex:'1 1 200px', minWidth:'150px', fontSize:'13px',
-                          lineHeight:'1.4', color:'var(--ink)' }}, sent.text),
-      sel);
+      el('div', { style:{ flex:'1 1 200px', minWidth:'150px' }},
+        lineWrap, stEl));
     wrap.append(row);
+    updateRowStatus(sent.num);
   });
 
+  /* Кнопка сформировать ответ — собирает номера предложений, где ВСЕ
+     слова имеют целевую форму. */
+  const genBtn = el('button', {
+    type:'button',
+    class:'btn btn-p btn-sm',
+    style:{ marginTop:'12px', fontSize:'13px', fontWeight:'700' },
+    onclick: () => {
+      if(!targetCode){
+        showToast('⚠ Не удалось определить целевую форму из формулировки');
+        return;
+      }
+      const matched = [];
+      sentences.forEach(sent => {
+        const tokens = sentenceTokens[sent.num];
+        const wordIdxs = tokens.map((t, i) => t.type === 'word' ? i : -1).filter(i => i >= 0);
+        if(!wordIdxs.length) return;
+        const allTarget = wordIdxs.every(i => picks[sent.num + '-' + i] === targetCode);
+        if(allTarget) matched.push(sent.num);
+      });
+      const result = matched.sort((a,b) => a-b).join('');
+      STATE.solverAnswers[num] = result;
+      saveSolverDraft();
+      render();
+      showToast(result
+        ? '✓ Ответ сгенерирован: ' + result
+        : '⚠ Нет предложений, где все слова «' + FORM_COLORS_13_14[targetCode].label + '»');
+    }
+  }, '📝 Сформировать ответ');
+  wrap.append(genBtn);
+
   return wrap;
+}
+
+/* === Автосинхрон правильного ответа в teacherEdit-режиме ===
+   Когда учитель меняет dropdown/checkbox/букву в структурированном поле,
+   мы автоматически:
+   1) пересчитываем итоговый ответ из structured-состояния
+   2) кладём его в STATE.solverAnswers[num] (как если бы нажали «Сформировать»)
+   3) с дебаунсом отправляем PATCH в test_variant_questions.correct_answer
+   Это значит — учитель не должен жать «Сформировать ответ» + «Сохранить»,
+   достаточно отмечать клетки, и эталон автоматически синхронизируется в БД. */
+const _teacherAutoSyncTimers = {};
+function scheduleTeacherAutoSync(num){
+  if(!STATE.solverTeacherEdit) return;
+  if(!STATE.solverData) return;
+  const q = STATE.solverData.questions.find(qq => qq.num === num);
+  if(!q || !q.id) return;
+  if(_teacherAutoSyncTimers[num]) clearTimeout(_teacherAutoSyncTimers[num]);
+  _teacherAutoSyncTimers[num] = setTimeout(async () => {
+    /* На момент таймера могут быть свежие picks. Пересчитываем answer */
+    const computed = computeAnswerFromStructured(q);
+    if(computed == null) return;
+    STATE.solverAnswers[num] = computed;
+    saveSolverDraft();
+    try {
+      await restRequest('PATCH', '/test_variant_questions?id=eq.' + q.id,
+        { correct_answer: computed || null }, { prefer: 'return=minimal' });
+    } catch(e){ console.warn('[autosync correct_answer]', num, e.message); }
+  }, 600);
+}
+
+/* Пересчёт ответа из текущего structured-состояния для задания.
+   Возвращает строку-цифры или null если неизвестно как считать. */
+function computeAnswerFromStructured(q){
+  const num = q.num;
+  /* №9-12: чекбоксы выбранных рядов */
+  if(num >= 9 && num <= 12){
+    const ch = (STATE.solverChecks9_12 || {})[num] || {};
+    return Object.keys(ch).map(Number).filter(n => ch[n]).sort((a,b) => a-b).join('');
+  }
+  /* №13-14: предложения, где все слова имеют целевую форму */
+  if(num === 13 || num === 14){
+    const formText = (q.question_text || '').toLowerCase();
+    let targetCode = null;
+    if(/слитно/i.test(formText)) targetCode = 's';
+    else if(/раздельно/i.test(formText)) targetCode = 'r';
+    else if(/через\s+дефис/i.test(formText)) targetCode = 'd';
+    if(!targetCode) return null;
+    const sentences = parseTask21Sentences(q.question_text);
+    const picks = (STATE.solverWords13_14 || {})[num] || {};
+    const matched = [];
+    sentences.forEach(sent => {
+      const tokens = parseParensWords(sent.text);
+      const wordIdxs = tokens.map((t, i) => t.type === 'word' ? i : -1).filter(i => i >= 0);
+      if(!wordIdxs.length) return;
+      const allTarget = wordIdxs.every(i => picks[sent.num + '-' + i] === targetCode);
+      if(allTarget) matched.push(sent.num);
+    });
+    return matched.sort((a,b) => a-b).join('');
+  }
+  /* №15, 17-20: кнопки-цифры */
+  if(num === 15 || (num >= 17 && num <= 20)){
+    const g = (STATE.solverGaps || {})[num] || {};
+    return Object.keys(g).map(Number).filter(n => g[n]).sort((a,b) => a-b).join('');
+  }
+  /* №16: чекбоксы предложений */
+  if(num === 16){
+    const ch = (STATE.solverChecks16 || {})[num] || {};
+    return Object.keys(ch).map(Number).filter(n => ch[n]).sort((a,b) => a-b).join('');
+  }
+  /* №21: предложения с целевым правилом */
+  if(num === 21){
+    const picks = (STATE.solverDropdowns21 || {})[num];
+    if(!picks || !picks._target) return null;
+    const target = picks._target;
+    const sentences = parseTask21Sentences(q.question_text);
+    const matched = sentences
+      .filter(s => Array.isArray(picks[s.num]) && picks[s.num].includes(target))
+      .map(s => s.num).sort((a,b) => a-b);
+    return matched.join('');
+  }
+  /* №8, 22: соответствие А-Д */
+  if(num === 8 || num === 22){
+    const picks = (STATE.solverMatching22 || {})[num] || {};
+    const parsed = parseTask22Matching(q.question_text);
+    if(!parsed) return null;
+    const result = parsed.letters.map(l => picks[l.letter] != null ? String(picks[l.letter]) : '?').join('');
+    if(result.includes('?')) return null;
+    return result;
+  }
+  /* Остальные задания (1-7) — просто берём то что в текстовом поле */
+  return null;
 }
 
 /* === Панель учительского инлайн-редактирования под каждым заданием ===
