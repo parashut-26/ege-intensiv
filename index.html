@@ -11018,6 +11018,51 @@ async function saveAnswerField(attemptId, num, column, value){
   return { ok: true, affected: 1, via: 'insert' };
 }
 
+/* === Helpers для сохранения и рендера SVG-разметки с масштабированием ===
+   Раньше: в БД лежал просто `<path>...<path>...` с pixel-координатами,
+   которые работают только при той же ширине контейнера, что была при
+   рисовании. На телефоне модалка узкая — рисунок десктопного учителя
+   обрезался справа за пределами экрана.
+   Сейчас: оборачиваем `wrapDrawing(svgInner, container)` → JSON
+   {w, h, paths}, при рендере `parseDrawing(stored)` достаёт размеры и
+   мы рисуем SVG с viewBox="0 0 w h" preserveAspectRatio="xMinYMin meet"
+   — рисунок остаётся в пропорциях, но влезает по ширине.
+   Старые записи (просто HTML без JSON) рендерим как раньше, без viewBox. */
+function wrapDrawing(svgInnerHtml, container){
+  const html = (svgInnerHtml || '').trim();
+  if(!html) return null;
+  let w = 0, h = 0;
+  if(container && typeof container.getBoundingClientRect === 'function'){
+    const r = container.getBoundingClientRect();
+    w = Math.max(1, Math.round(r.width));
+    h = Math.max(1, Math.round(r.height));
+  }
+  return JSON.stringify({ v: 1, w, h, paths: html });
+}
+function parseDrawing(stored){
+  const s = (stored || '').trim();
+  if(!s) return null;
+  /* Новый JSON-формат */
+  if(s.charAt(0) === '{'){
+    try {
+      const obj = JSON.parse(s);
+      if(obj && obj.paths){
+        return { paths: obj.paths, w: Number(obj.w) || 0, h: Number(obj.h) || 0 };
+      }
+    } catch(_){}
+  }
+  /* Старый формат — просто paths без размеров */
+  return { paths: s, w: 0, h: 0 };
+}
+/* Сборка `<svg>` для встраивания в DOM — с viewBox если есть размеры. */
+function buildOverlaySvg(parsed){
+  if(!parsed) return '';
+  const vb = (parsed.w && parsed.h) ? (' viewBox="0 0 ' + parsed.w + ' ' + parsed.h + '" preserveAspectRatio="xMinYMin meet"') : '';
+  return '<svg xmlns="http://www.w3.org/2000/svg"' + vb +
+    ' style="position:absolute;top:0;left:0;width:100%;height:auto;' +
+    'pointer-events:none;overflow:visible;z-index:2;">' + parsed.paths + '</svg>';
+}
+
 /* === Тулбар учителя для разметки работы ученика ===
    В модалке «Разбор задания» учитель получает редактируемую копию формулировки
    + 4 цвета карандаша. Сохраняется в teacher_scratch (HTML) и teacher_drawing
@@ -11152,7 +11197,12 @@ function makeTeacherMarksEditor(opts){
     style:'position:absolute;top:0;left:0;width:100%;height:100%;' +
           'pointer-events:none;overflow:visible;'
   });
-  if(initialDrawing) svgLayer.innerHTML = initialDrawing;
+  if(initialDrawing){
+    /* В БД может лежать JSON-wrap или старая plain-строка — парсим и
+       подставляем только paths в живой SVG-слой. */
+    const parsedInit = parseDrawing(initialDrawing);
+    svgLayer.innerHTML = parsedInit ? parsedInit.paths : '';
+  }
   editorContainer.append(svgLayer);
 
   let drawTimer = null;
@@ -11160,7 +11210,10 @@ function makeTeacherMarksEditor(opts){
     if(drawTimer) clearTimeout(drawTimer);
     drawTimer = setTimeout(async () => {
       try {
-        await saveAnswerField(attemptId, num, 'teacher_drawing', svgLayer.innerHTML);
+        /* Обёртка — JSON со снимком ширины/высоты, чтобы у ученика на
+           телефоне рисунок масштабировался viewBox-ом, а не обрезался. */
+        const wrapped = wrapDrawing(svgLayer.innerHTML, editorContainer);
+        await saveAnswerField(attemptId, num, 'teacher_drawing', wrapped);
         statusEl.textContent = '✓ рисунок сохранён';
         setTimeout(() => { statusEl.textContent = ''; }, 1500);
       } catch(e){
@@ -11271,11 +11324,16 @@ function renderTeacherMarksReadOnly(opts){
   inner.innerHTML = sc || sanitizeQuestionHtml(questionText || '');
   wrap.append(inner);
   if(dr){
-    const tmp = document.createElement('div');
-    tmp.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" ' +
-      'style="position:absolute;top:0;left:0;width:100%;height:100%;' +
-      'pointer-events:none;overflow:visible;z-index:2;">' + dr + '</svg>';
-    wrap.append(tmp.firstChild);
+    /* parseDrawing вернёт {paths, w, h} (для нового JSON-формата) или
+       {paths, w:0, h:0} (для старых записей без размеров). buildOverlaySvg
+       соберёт SVG с viewBox если знаем размеры, иначе без — тогда у учителя
+       на десктопе вернётся старое поведение, но новые рисунки масштабируются. */
+    const parsed = parseDrawing(dr);
+    if(parsed){
+      const tmp = document.createElement('div');
+      tmp.innerHTML = buildOverlaySvg(parsed);
+      if(tmp.firstChild) wrap.append(tmp.firstChild);
+    }
   }
   return el('div', null,
     el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E',
@@ -11551,13 +11609,15 @@ function modalExamineQuestion(){
       markedWrap.append(txtInner);
       if(drawing){
         /* SVG с карандашной разметкой. pointer-events:none — учитель не
-           рисует, только смотрит. overflow:visible — штрихи могут выходить
-           за края (например, обвели поле снаружи) */
-        const svgWrap = document.createElement('div');
-        svgWrap.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" ' +
-          'style="position:absolute;top:0;left:0;width:100%;height:100%;' +
-          'pointer-events:none;overflow:visible;z-index:2;">' + drawing + '</svg>';
-        markedWrap.append(svgWrap.firstChild);
+           рисует, только смотрит. parseDrawing достаёт размеры контейнера
+           ученика на момент рисования, чтобы у учителя на десктопе рисунок
+           масштабировался через viewBox, а не «болтался» в углу. */
+        const parsed = parseDrawing(drawing);
+        if(parsed){
+          const svgWrap = document.createElement('div');
+          svgWrap.innerHTML = buildOverlaySvg(parsed);
+          if(svgWrap.firstChild) markedWrap.append(svgWrap.firstChild);
+        }
       }
       const labelParts = [];
       if(drawing) labelParts.push('карандаш');
@@ -22862,14 +22922,25 @@ let _structuredSyncTimer = null;
 function scheduleStructuredSync(){
   if(_structuredSyncTimer) clearTimeout(_structuredSyncTimer);
   _structuredSyncTimer = setTimeout(async () => {
-    if(!STATE.liveAttemptId) return;
     if(!STATE.solverData) return;
     /* Учитель в режиме просмотра/правки эталона — НЕ сохраняет ответы ученика */
     if(STATE.solverTeacherEdit || STATE.solverPreview) return;
+    /* Если live-попытки ещё нет, но есть что сохранять (ученик нарисовал что-то
+       до первой «Проверить») — создаём попытку. Без этого карандашные пометки
+       и буквы пропадают при закрытии браузера до первого instant-check. */
+    let attId = STATE.liveAttemptId;
+    if(!attId){
+      /* Сначала проверим, есть ли вообще что сохранять — иначе плодим
+         пустые попытки при любом скролле решалки */
+      const hasAny = STATE.solverData.questions.some(q => !!collectStructuredForNum(q.num));
+      if(!hasAny) return;
+      attId = await ensureLiveAttempt();
+      if(!attId) return;
+    }
     for(const q of STATE.solverData.questions){
       const data = collectStructuredForNum(q.num);
       const json = data ? JSON.stringify(data) : null;
-      const key = STATE.liveAttemptId + ':' + q.num;
+      const key = attId + ':' + q.num;
       if(json === _structuredSnapshots[key]) continue;
       _structuredSnapshots[key] = json;
       try {
@@ -24695,9 +24766,10 @@ function makeEditableQuestionText(q){
     if(saveTimer) clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       saveSolverDraft();
-      if(STATE.liveAttemptId){
-        saveLiveScratch(num, ed.innerHTML);
-      }
+      /* Без гарда на liveAttemptId — saveLiveScratch внутри сам вызывает
+         ensureLiveAttempt(). Иначе если ученик красил/рисовал ДО первой
+         «Проверить», live-попытка не создавалась и пометки терялись. */
+      saveLiveScratch(num, ed.innerHTML);
     }, 600);
   }
   ed.oninput = scheduleSave;
@@ -24741,9 +24813,12 @@ function makeEditableQuestionText(q){
     style: 'position:absolute;top:0;left:0;width:100%;height:100%;' +
            'pointer-events:none;overflow:visible;'
   });
-  /* Восстанавливаем сохранённый рисунок */
+  /* Восстанавливаем сохранённый рисунок. В localStorage могут лежать как
+     старые plain-path-strings, так и новый формат JSON-wrap — парсим
+     через parseDrawing и берём только paths. */
   if(STATE.solverDrawings && STATE.solverDrawings[num]){
-    svgLayer.innerHTML = STATE.solverDrawings[num];
+    const parsed = parseDrawing(STATE.solverDrawings[num]);
+    svgLayer.innerHTML = parsed ? parsed.paths : '';
   }
   editorContainer.append(svgLayer);
 
@@ -24757,9 +24832,13 @@ function makeEditableQuestionText(q){
     if(drawingSaveTimer) clearTimeout(drawingSaveTimer);
     drawingSaveTimer = setTimeout(() => {
       saveSolverDraft();
-      if(STATE.liveAttemptId){
-        saveLiveDrawing(num, svgLayer.innerHTML);
-      }
+      /* Без гарда — saveLiveDrawing внутри сам создаёт live-попытку через
+         ensureLiveAttempt(). Иначе рисунок до первой «Проверить» не уходил.
+         Оборачиваем в wrapDrawing — это сохраняет размеры контейнера на
+         момент рисования, чтобы потом у учителя на десктопе или у ученика
+         на телефоне рисунок масштабировался через viewBox, а не обрезался. */
+      const wrapped = wrapDrawing(svgLayer.innerHTML, editorContainer);
+      saveLiveDrawing(num, wrapped);
     }, 600);
   }
 
