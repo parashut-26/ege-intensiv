@@ -22831,10 +22831,14 @@ function makeTask16Field(q){
   if(!STATE.solverChecks16) STATE.solverChecks16 = {};
   if(!STATE.solverChecks16[num]) STATE.solverChecks16[num] = {};
   const data = STATE.solverChecks16[num];
-  /* Миграция со старого формата { sentNum: true } → { sentNum: {gapIdx:true} }
-     Старая отметка «было выбрано» теряется (она была без позиций), это ок. */
+  /* Формат: data[sentNum] = { _picked: bool, <gapIdx>: true, ... }
+     _picked — ученик ВРУЧНУЮ отметил это предложение как «здесь одна запятая»
+               (как в тренажёре — слева кнопка-чекбокс ☑/☐).
+     <gapIdx>: true — учебный черновик расстановки запятых между словами.
+               Не идёт в ответ, помогает ученику считать запятые самому. */
   for(const k of Object.keys(data)){
-    if(data[k] === true || typeof data[k] !== 'object') data[k] = {};
+    if(data[k] === true){ data[k] = { _picked: true }; }
+    else if(typeof data[k] !== 'object' || data[k] == null){ data[k] = {}; }
   }
 
   const wrap = el('div', { style:{ marginTop:'10px',
@@ -22842,113 +22846,153 @@ function makeTask16Field(q){
     border:'1px solid var(--border)', borderRadius:'10px' }},
     el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
                         marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }},
-      '📌 Расставь запятые между словами'),
+      '📌 Расставь запятые и отметь нужные предложения'),
     el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
-      'Тапни промежуток между словами — там появится запятая. ' +
-      'В ответ попадут предложения, где запятая ровно ОДНА (так требует задание 16).'));
+      'Сначала рисуй запятые точками (·) между словами — это твой черновик. ' +
+      'Потом нажми ☐ слева у тех предложений, где запятая ровно ОДНА — они пойдут в ответ.'));
 
   const statusEl = el('div', { style:{ fontSize:'12px', color:'var(--ink-2)',
     fontWeight:'700', marginTop:'10px', padding:'8px 10px', background:'#FFF',
     borderRadius:'8px', border:'1px solid var(--border)' }});
 
+  const autoFill = STATE.solverAutoFillDigits !== false;
+
   const updateAnswer = () => {
-    const matched = [];
-    sentences.forEach(s => {
-      const gaps = data[s.num] || {};
-      const cnt = Object.keys(gaps).filter(k => gaps[k]).length;
-      if(cnt === 1) matched.push(s.num);
-    });
-    matched.sort((a,b) => a-b);
-    STATE.solverAnswers[num] = matched.join('');
+    const matched = sentences
+      .filter(s => data[s.num] && data[s.num]._picked === true)
+      .map(s => s.num)
+      .sort((a,b) => a-b);
+    const result = matched.join('');
+    if(autoFill){
+      STATE.solverAnswers[num] = result;
+    }
     statusEl.innerHTML = '';
-    statusEl.append(
-      el('span', { style:{ color:'var(--ink-3)' }}, 'В ответе: '),
-      el('span', { style:{ color:'var(--p-deep)', fontSize:'15px', letterSpacing:'.1em' }},
-        STATE.solverAnswers[num] || '—'),
-      el('span', { style:{ color:'var(--ink-3)', fontWeight:'500', marginLeft:'8px',
-                            fontSize:'11px' }},
-        '(предложения, где ровно одна запятая)')
-    );
+    if(autoFill){
+      statusEl.append(
+        el('span', { style:{ color:'var(--ink-3)' }}, 'Ответ: '),
+        el('span', { style:{ color:'var(--p-deep)', fontSize:'15px', letterSpacing:'.1em' }},
+          result || '—'),
+        el('span', { style:{ color:'var(--ink-3)', marginLeft:'8px', fontWeight:'500',
+          fontSize:'11px' }}, '· отмечено ☑: ' + matched.length));
+    } else {
+      const reveal = el('details', { style:{ display:'inline' }},
+        el('summary', { style:{ cursor:'pointer', color:'var(--ink-3)',
+          fontWeight:'500', fontSize:'11px', display:'inline' }},
+          'показать твою отметку'),
+        el('span', { style:{ marginLeft:'8px', color:'var(--p-deep)',
+          fontSize:'15px', letterSpacing:'.1em' }}, result || '—'));
+      statusEl.append(
+        el('span', { style:{ color:'#92400E', fontWeight:'700' }},
+          '✍️ Выпиши свой ответ в поле ниже сам '),
+        reveal);
+    }
     saveSolverDraft();
   };
+
+  /* Список предложений — карточки как в тренажёре */
+  const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'8px',
+    marginTop:'8px' }});
 
   sentences.forEach(sent => {
     if(!data[sent.num]) data[sent.num] = {};
     const sentData = data[sent.num];
 
-    const sentBox = el('div', {
-      style:{ padding:'10px 4px', borderTop:'1px dashed var(--border)' }
+    /* Карточка предложения — внешний контейнер. Подсвечивается жёлтым
+       когда ученик отметил ☑ (предложение пойдёт в ответ). */
+    const card = el('div', {
+      style:{ padding:'10px 12px', borderRadius:'10px',
+              display:'flex', gap:'10px', alignItems:'flex-start',
+              background:'#FFF', border:'1px solid var(--border-2)',
+              transition:'background .15s, border-color .15s' }
     });
 
-    const header = el('div', {
-      style:{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'4px' }
-    });
-    const numLabel = el('div', {
-      style:{ fontWeight:'800', color:'var(--p-deep)', fontSize:'13px', minWidth:'24px' }
-    }, sent.num + ')');
-    const countChip = el('span', {
-      style:{ marginLeft:'auto', padding:'2px 8px', fontSize:'11px', fontWeight:'700',
-              borderRadius:'6px' }
-    });
-    header.append(numLabel, countChip);
-
-    const textBox = el('div', {
-      style:{ fontSize:'14px', lineHeight:'2', color:'var(--ink)',
-              userSelect:'none' }
+    /* Левая кнопка ☐/☑ — отмечает предложение для ответа.
+       Это и есть «выбор» в задании 16 (предложение с одной запятой). */
+    const toggle = el('button', {
+      type:'button',
+      style:{ width:'34px', height:'34px', borderRadius:'8px',
+              border:'1px solid var(--border-2)', background:'#fff',
+              fontSize:'18px', fontWeight:'700', cursor:'pointer',
+              flexShrink:0, color: 'var(--ink-3)',
+              fontFamily:'inherit', lineHeight:'1' }
     });
 
-    /* Разбиваем предложение на слова. Сохраняем пунктуацию вместе со словом
-       (точки/тире прицепляются к соседнему токену), чтобы тап-зоны вставлять
-       только между «настоящими» словами. */
+    const right = el('div', { style:{ flex:1, minWidth:0,
+      lineHeight:'1.7', fontSize:'14px' }});
+    right.append(el('span', { style:{ fontWeight:'800', color:'var(--p-deep)',
+      marginRight:'6px' }}, sent.num + ')'));
+
     const words = sent.text.split(/\s+/).filter(w => w.length);
 
+    /* Рендер текста с черновиком запятых */
     const renderSent = () => {
-      textBox.innerHTML = '';
+      /* Очистим всё после номера предложения */
+      while(right.children.length > 1) right.removeChild(right.lastChild);
       let commaCount = 0;
-      words.forEach((w, i) => {
-        textBox.append(document.createTextNode(w));
-        if(i < words.length - 1){
-          const active = !!sentData[i];
+      words.forEach((w, wi) => {
+        if(wi > 0){
+          const active = !!sentData[wi];
           if(active) commaCount++;
-          const gap = el('span', {
-            style:{ display:'inline-block', cursor:'pointer',
-                    padding: active ? '1px 8px' : '1px 6px',
-                    margin:'0 2px',
-                    color: active ? '#DC2626' : '#9CA3AF',
-                    fontSize: active ? '20px' : '13px',
-                    fontWeight: active ? '800' : '600',
-                    verticalAlign:'middle',
-                    minWidth:'16px', textAlign:'center',
-                    background: active ? '#FEE2E2' : 'transparent',
-                    border: active ? '2px solid #FCA5A5' : '2px dashed #E5E7EB',
-                    borderRadius:'6px',
-                    lineHeight:'1',
-                    transition:'all .12s' },
-            onclick: () => {
-              if(sentData[i]) delete sentData[i];
-              else sentData[i] = true;
+          const slot = el('span', {
+            style:{ display:'inline-block',
+                    minWidth: active ? 'auto' : '14px',
+                    padding: active ? '0 3px' : '0',
+                    textAlign:'center', cursor:'pointer',
+                    color: active ? '#DC2626' : 'var(--ink-3)',
+                    fontWeight: active ? '700' : '400',
+                    fontSize: active ? '16px' : '12px',
+                    opacity: active ? 1 : 0.45,
+                    userSelect:'none' },
+            onclick: (ev) => {
+              ev.stopPropagation();
+              if(sentData[wi]) delete sentData[wi];
+              else sentData[wi] = true;
               renderSent();
-              updateAnswer();
+              saveSolverDraft();
             }
           }, active ? ',' : '·');
-          textBox.append(gap);
+          right.append(slot);
+          right.append(document.createTextNode(' '));
         }
+        right.append(el('span', null, w));
+        if(wi < words.length - 1) right.append(document.createTextNode(' '));
       });
-      /* Обновляем чип-счётчик */
-      const c = commaCount;
-      let bg = '#F3F4F6', fg = '#6B7280';
-      if(c === 1){ bg = '#D1FAE5'; fg = '#065F46'; }
-      else if(c > 1){ bg = '#FEF3C7'; fg = '#92400E'; }
-      countChip.style.background = bg;
-      countChip.style.color = fg;
-      countChip.textContent = c === 0 ? '0 запятых' : c === 1 ? '✓ 1 запятая' : c + ' запятых';
+      /* Лёгкий чип-счётчик в конце строки */
+      if(commaCount > 0){
+        const chipBg = commaCount === 1 ? '#D1FAE5' : '#FEF3C7';
+        const chipFg = commaCount === 1 ? '#065F46' : '#92400E';
+        right.append(el('span', {
+          style:{ marginLeft:'8px', padding:'1px 6px', fontSize:'10px',
+                  fontWeight:'700', borderRadius:'6px',
+                  background:chipBg, color:chipFg, whiteSpace:'nowrap' }
+        }, commaCount === 1 ? '✓ 1 запятая' : commaCount + ' запятых'));
+      }
     };
+
+    /* Обновление карточки: галка + цвет фона */
+    const refreshCard = () => {
+      const picked = sentData._picked === true;
+      toggle.textContent = picked ? '☑' : '☐';
+      toggle.style.color = picked ? 'var(--p-deep)' : 'var(--ink-3)';
+      toggle.style.background = picked ? '#EEF2FF' : '#fff';
+      toggle.style.borderColor = picked ? 'var(--p)' : 'var(--border-2)';
+      card.style.background = picked ? '#EEF2FF' : '#FFF';
+      card.style.borderColor = picked ? 'var(--p)' : 'var(--border-2)';
+    };
+    toggle.onclick = () => {
+      sentData._picked = !(sentData._picked === true);
+      if(!sentData._picked) delete sentData._picked;
+      refreshCard();
+      updateAnswer();
+    };
+    refreshCard();
     renderSent();
 
-    sentBox.append(header, textBox);
-    wrap.append(sentBox);
+    card.append(toggle, right);
+    list.append(card);
   });
 
+  wrap.append(list);
   wrap.append(statusEl);
   updateAnswer();
 
@@ -23007,11 +23051,21 @@ function makeTasks17_20Field(q){
     const lastDot = Math.max(intro.lastIndexOf('. '), intro.lastIndexOf('.\n'));
     if(lastDot > 20) sentStart = lastDot + 1;
   }
-  const sentText = rawTxt.slice(sentStart).trim();
-  /* Пересчитаем индексы матчей в координаты sentText */
+  /* sentText = rawTxt[sentStart:] .trim(). Из-за .trim() начало сдвигается
+     на длину whitespace-префикса — это сбивало индексы матчей: «съедалась»
+     одна буква после каждого (N), а перед боксом вылезал лишний «(».
+     Считаем сдвиг явно и применяем при пересчёте координат. */
+  const slicedRaw = rawTxt.slice(sentStart);
+  const sentText = slicedRaw.trim();
+  const trimmedLeading = slicedRaw.length - slicedRaw.replace(/^\s+/, '').length;
+  /* Пересчитаем индексы матчей в координаты sentText (учитывая trim slice) */
   const sentMatches = matches
-    .map(mm => ({ n: mm.n, start: mm.start - sentStart, end: mm.end - sentStart }))
-    .filter(mm => mm.start >= 0);
+    .map(mm => ({
+      n: mm.n,
+      start: mm.start - sentStart - trimmedLeading,
+      end:   mm.end   - sentStart - trimmedLeading
+    }))
+    .filter(mm => mm.start >= 0 && mm.end <= sentText.length);
 
   const headLabel = isNN
     ? '📌 Тапни цифру — выбери Н / НН'
@@ -24353,8 +24407,17 @@ function viewSolverVariant(){
             onclick: () => saveSolverTeacherEdits()
           }, '💾 Сохранить вариант')
         : el('button', { class:'btn btn-teal',
-            onclick: () => finishSolverFlow(questions)
-          }, '✅ Завершить')));
+            onclick: () => {
+              /* Принудительный сейв черновика в localStorage. Все правки
+                 уже сохраняются автоматически (после каждого ввода и при
+                 visibilitychange), эта кнопка — для уверенности ученика:
+                 «нажала — сохранилось». В БД ничего не PATCH'им, чтобы
+                 не затереть уже проверенные баллы. «Завершить» вынесли
+                 вниз — кнопка жёлтая, под последним заданием. */
+              try { saveSolverDraft(); } catch(_){}
+              showToast('💾 Прогресс сохранён — можно закрыть и продолжить позже');
+            }
+          }, '💾 Сохранить')));
   wrap.append(header);
 
   /* Инструкция */
