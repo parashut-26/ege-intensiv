@@ -11675,6 +11675,11 @@ function modalExamineQuestion(){
     STATE.examineQuestion = null;
     STATE.examineQuestionData = null;
     STATE.examineSourceTexts = null;
+    /* Снимаем глобальный keydown-handler для стрелок ◀▶ */
+    if(STATE._examineKeyHandler){
+      document.removeEventListener('keydown', STATE._examineKeyHandler);
+      STATE._examineKeyHandler = null;
+    }
     render();
   };
 
@@ -11710,11 +11715,64 @@ function modalExamineQuestion(){
     })();
   }
 
+  /* === Стрелки ◀ ▶ для перелистывания заданий в рамках одной попытки ===
+     Учителю не надо закрывать модалку и кликать ячейку в таблице — достаточно
+     нажать стрелку. Кнопки рендерятся только если есть к чему перейти, то
+     есть в открытой попытке есть строки с другими question_num. */
+  const navTo = (newNum) => {
+    if(!attemptId || !STATE.currentVariantData) return;
+    const ba = STATE.currentVariantData.answersByAttempt || {};
+    const fresh = ba[attemptId] && ba[attemptId][newNum];
+    /* Если у нового задания НЕТ данных вообще — всё равно открываем
+       (учитель может хотеть посмотреть формулировку или оставить коммент).
+       Поля заполняем минимально, остальные пересоберутся при следующем
+       polling-тике или через examineQuestionData. */
+    STATE.examineQuestion = {
+      variantId, num: newNum,
+      userAnswer: fresh ? (fresh.user_answer || null) : null,
+      points:    fresh && fresh.points != null ? fresh.points : 0,
+      max:       fresh && fresh.max_points != null ? fresh.max_points : 0,
+      attemptId,
+      studentNote:     fresh ? (fresh.student_note || null) : null,
+      teacherComment:  fresh ? (fresh.teacher_comment || null) : null,
+      scratch:         fresh ? (fresh.scratch || null) : null,
+      studentDrawing:  fresh ? (fresh.student_drawing || null) : null,
+      teacherScratch:  fresh ? (fresh.teacher_scratch || null) : null,
+      teacherDrawing:  fresh ? (fresh.teacher_drawing || null) : null,
+      structuredState: fresh ? (fresh.structured_state || null) : null,
+      isStudent
+    };
+    /* Сбрасываем кэш загруженного задания — заново запросим question_text/correct_answer */
+    STATE.examineQuestionData = null;
+    render();
+  };
+  /* Сколько всего заданий в варианте — берём из variantData если есть,
+     иначе считаем 26 (тестовая часть) + 27 (сочинение). */
+  const totalNums = (STATE.currentVariantData && STATE.currentVariantData.variant
+    && STATE.currentVariantData.variant.questions_count) || 27;
+  const canPrev = num > 1;
+  const canNext = num < totalNums;
+  const navBtn = (label, dir, enabled) => el('button', {
+    class: enabled ? 'btn-icon' : 'btn-icon',
+    title: dir === -1 ? 'Предыдущее задание (←)' : 'Следующее задание (→)',
+    disabled: !enabled,
+    style:{ padding:'6px 10px', background: enabled ? '#F3F4F6' : '#F9FAFB',
+            border:'1px solid var(--border-2)', borderRadius:'6px',
+            cursor: enabled ? 'pointer' : 'not-allowed',
+            opacity: enabled ? 1 : 0.4, fontSize:'14px', fontWeight:'700',
+            color:'var(--ink-2)', fontFamily:'inherit' },
+    onclick: enabled ? () => navTo(num + dir) : null
+  }, label);
   const head = el('div', { class:'modal-head' },
     el('div', null,
       el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
         '🔍 Разбор задания'),
-      el('h2', { style:{ marginTop:'4px' }}, 'Задание №' + num)),
+      el('div', { style:{ display:'flex', alignItems:'center', gap:'8px', marginTop:'4px', flexWrap:'wrap' }},
+        navBtn('◀', -1, canPrev),
+        el('h2', { style:{ margin:0 }}, 'Задание №' + num),
+        navBtn('▶', +1, canNext),
+        el('span', { style:{ fontSize:'12px', color:'var(--ink-3)', marginLeft:'4px' }},
+          num + ' / ' + totalNums))),
     el('button', { class:'x', onclick: close }, '×'));
 
   const body = el('div', { class:'modal-body' });
@@ -12060,6 +12118,21 @@ function modalExamineQuestion(){
     }
   }
 
+  /* Горячие клавиши ← → — пролистывают задания. Навешиваем разово при
+     каждом рендере модалки (он происходит на каждый клик/тик). Старый
+     обработчик удаляем чтобы не накапливать дубли. */
+  if(STATE._examineKeyHandler) document.removeEventListener('keydown', STATE._examineKeyHandler);
+  STATE._examineKeyHandler = (ev) => {
+    if(!STATE.examineQuestion) return;
+    /* Если фокус внутри input/textarea/contenteditable — не перехватываем,
+       чтобы стрелки работали для перемещения курсора в комментарии. */
+    const t = ev.target;
+    const tag = t && t.tagName;
+    if(tag === 'INPUT' || tag === 'TEXTAREA' || (t && t.isContentEditable)) return;
+    if(ev.key === 'ArrowLeft' && canPrev){ ev.preventDefault(); navTo(num - 1); }
+    else if(ev.key === 'ArrowRight' && canNext){ ev.preventDefault(); navTo(num + 1); }
+  };
+  document.addEventListener('keydown', STATE._examineKeyHandler);
   return el('div', { class:'modal-bg',
     onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
   }, el('div', { class:'modal' }, head, body));
