@@ -22197,6 +22197,7 @@ async function startSolvingVariant(variantId, opts){
         if(d.matching22) STATE.solverMatching22 = d.matching22;
         if(d.checks16) STATE.solverChecks16 = d.checks16;
         if(d.gaps) STATE.solverGaps = d.gaps;
+        if(d.choice13_14) STATE.solverChoice13_14 = d.choice13_14;
         if(d.liveAttemptId) STATE.liveAttemptId = d.liveAttemptId;
         if(d.startedAt && !opts.parentAttemptId) STATE.solverStartedAt = d.startedAt;
       }
@@ -22252,6 +22253,7 @@ function saveSolverDraft(){
       matching22: STATE.solverMatching22 || {},
       checks16: STATE.solverChecks16 || {},
       gaps: STATE.solverGaps || {},
+      choice13_14: STATE.solverChoice13_14 || {},
       liveAttemptId: STATE.liveAttemptId || null,
       startedAt: STATE.solverStartedAt
     }));
@@ -22866,6 +22868,69 @@ function makeTasks17_20Field(q){
   return wrap;
 }
 
+/* === Задания 13 и 14: слитно/раздельно (/дефис) ===
+   Задание 13: «НЕ со словом пишется слитно/раздельно» — radio с двумя вариантами.
+   Задание 14: «Оба слова пишутся слитно/раздельно/через дефис» — radio с тремя.
+   В формулировке — 5 нумерованных предложений с (НЕ)словом или (словом-словом).
+   Ученик для каждого выбирает форму. Ответ всё равно пишется руками — этим
+   правилам формат ответа = одно/два слова, не цифры. */
+function makeTask13_14Field(q){
+  const num = q.num;
+  if(num !== 13 && num !== 14) return null;
+  const sentences = parseTask21Sentences(q.question_text);
+  if(!sentences.length) return null;
+  const options = num === 14
+    ? ['— не выбрано', 'слитно', 'раздельно', 'через дефис']
+    : ['— не выбрано', 'слитно', 'раздельно'];
+
+  if(!STATE.solverChoice13_14) STATE.solverChoice13_14 = {};
+  if(!STATE.solverChoice13_14[num]) STATE.solverChoice13_14[num] = {};
+  const picks = STATE.solverChoice13_14[num];
+
+  const wrap = el('div', { style:{ marginTop:'10px',
+    padding:'10px 12px', background:'#F9FAFB',
+    border:'1px solid var(--border)', borderRadius:'10px' }});
+
+  /* Заголовок зависит от задания */
+  const label = num === 14
+    ? '📌 Для каждого предложения определи форму: слитно, раздельно или через дефис'
+    : '📌 Для каждого предложения определи: НЕ пишется слитно или раздельно';
+  wrap.append(
+    el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
+                        marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }}, label),
+    el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
+      'Когда определишь форму для каждого, в поле ответа выпиши слово(а) из нужного предложения в правильной форме.'));
+
+  /* Радио-группы для каждого предложения */
+  sentences.forEach(sent => {
+    const sel = el('select', {
+      style:{ padding:'4px 8px', fontSize:'12px', borderRadius:'6px',
+              border:'1px solid var(--border-2)', minWidth:'180px',
+              fontFamily:'inherit', background:'#fff', cursor:'pointer' },
+      onchange: (ev) => {
+        if(ev.target.value === '— не выбрано') delete picks[sent.num];
+        else picks[sent.num] = ev.target.value;
+        saveSolverDraft();
+      }
+    });
+    options.forEach(o => sel.append(el('option', { value: o }, o)));
+    sel.value = picks[sent.num] || '— не выбрано';
+
+    const row = el('div', {
+      style:{ display:'flex', flexWrap:'wrap', gap:'8px', alignItems:'flex-start',
+              padding:'8px 0', borderTop:'1px dashed var(--border)' }
+    },
+      el('div', { style:{ minWidth:'24px', fontWeight:'700', color:'var(--p-deep)', fontSize:'13px' }},
+        sent.num + ')'),
+      el('div', { style:{ flex:'1 1 200px', minWidth:'150px', fontSize:'13px',
+                          lineHeight:'1.4', color:'var(--ink)' }}, sent.text),
+      sel);
+    wrap.append(row);
+  });
+
+  return wrap;
+}
+
 /* === Панель учительского инлайн-редактирования под каждым заданием ===
    Показывается в режиме solverTeacherEdit. Содержит:
    • Правильный ответ (для 1-26) — через «/» альтернативы
@@ -23400,6 +23465,11 @@ function viewSolverVariant(){
     if(q.num === 22){
       const t22 = makeTask22Field(q);
       if(t22) card.append(t22);
+    }
+    /* Задания 13 и 14 — слитно/раздельно (для 13) или + через дефис (для 14) */
+    if(q.num === 13 || q.num === 14){
+      const t13_14 = makeTask13_14Field(q);
+      if(t13_14) card.append(t13_14);
     }
     /* Задание 16 — чекбоксы «одна запятая» рядом с каждым из 5 предложений */
     if(q.num === 16){
