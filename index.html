@@ -22785,6 +22785,7 @@ async function startSolvingVariant(variantId, opts){
   STATE.solverChecks9_12 = {};
   STATE.solverEditedQuestions = {};
   STATE.solverDrawings = {};
+  STATE.solverTeacherMarks = {};   // { num: { teacher_scratch, teacher_drawing } } — подтягивает polling
   STATE.solverResult = null;
   STATE.solverResultAttemptId = null;
   STATE.solverFinishedAt = null;
@@ -24946,11 +24947,66 @@ async function saveLiveDrawing(num, svgHtml){
 
 /* ====== Главный экран решения ======
    Рисуется поверх обычного UI когда STATE.solverVariantId != null. */
+/* === Polling пометок учителя в решалке ===
+   Раз в 15 секунд (пока ученик внутри решалки и есть liveAttemptId)
+   подтягиваем teacher_scratch + teacher_drawing для всех заданий live-попытки.
+   Если что-то изменилось — render(). Не блокирует UI, ошибки молча логируем.
+   У прокси reg.ru не работает WebSocket, поэтому polling вместо realtime. */
+let _solverTeacherMarksHash = '';
+function startSolverTeacherMarksPolling(){
+  if(STATE._solverTeacherMarksIntervalId) return;
+  const tick = async () => {
+    if(!STATE.solverVariantId){
+      stopSolverTeacherMarksPolling();
+      return;
+    }
+    /* Учитель/preview — не подтягиваем (он сам автор пометок) */
+    if(STATE.solverTeacherEdit || STATE.solverPreview) return;
+    const attId = STATE.liveAttemptId;
+    if(!attId) return;
+    try {
+      const rows = await restRequest('GET',
+        '/test_variant_answers?attempt_id=eq.' + attId +
+        '&select=question_num,teacher_scratch,teacher_drawing');
+      if(!Array.isArray(rows)) return;
+      const next = {};
+      rows.forEach(r => {
+        if(r.teacher_scratch || r.teacher_drawing){
+          next[r.question_num] = {
+            teacher_scratch: r.teacher_scratch || null,
+            teacher_drawing: r.teacher_drawing || null
+          };
+        }
+      });
+      const hash = JSON.stringify(next);
+      if(hash === _solverTeacherMarksHash) return;
+      _solverTeacherMarksHash = hash;
+      STATE.solverTeacherMarks = next;
+      render();
+    } catch(e){
+      console.warn('[solver teacher marks poll]', e.message);
+    }
+  };
+  /* Первый тик сразу, потом по таймеру */
+  tick();
+  STATE._solverTeacherMarksIntervalId = setInterval(tick, 15000);
+}
+function stopSolverTeacherMarksPolling(){
+  if(STATE._solverTeacherMarksIntervalId){
+    clearInterval(STATE._solverTeacherMarksIntervalId);
+    STATE._solverTeacherMarksIntervalId = null;
+  }
+}
+
 function viewSolverVariant(){
   if(!STATE.solverData){
     return el('div', { class:'fade-in', style:{ textAlign:'center', padding:'40px', color:'var(--ink-3)' }},
       '⏳ Загружаю вариант…');
   }
+  /* Live-подгрузка пометок учителя: пока ученик в решалке, опрашиваем БД
+     раз в 15 секунд и складываем teacher_scratch/teacher_drawing в STATE.
+     Если что-то новое — render() и пометка появляется над инструментами. */
+  startSolverTeacherMarksPolling();
   /* Если завершено — рисуем страницу результата */
   if(STATE.solverResult){
     return viewSolverResult();
@@ -25142,6 +25198,19 @@ function viewSolverVariant(){
        Ученик выделяет фрагменты, красит, подчёркивает, ставит скобки
        прямо внутри формулировки. Изменения сохраняются как scratch. */
     card.append(makeEditableQuestionText(q));
+    /* === Live-пометки учителя для этого задания ===
+       Учитель в кабинете отметил карандашом / маркером прямо в БД.
+       Polling ниже подтягивает teacher_scratch + teacher_drawing раз в 15с,
+       и они отображаются read-only прямо над инструментами ответа. */
+    const tm = (STATE.solverTeacherMarks || {})[q.num];
+    if(tm && (tm.teacher_scratch || tm.teacher_drawing)){
+      const tmBlock = renderTeacherMarksReadOnly({
+        questionText: q.question_text || '',
+        teacherScratch: tm.teacher_scratch || '',
+        teacherDrawing: tm.teacher_drawing || ''
+      });
+      if(tmBlock) card.append(tmBlock);
+    }
     /* Для задания 21 — особый UI: dropdown'ы с правилами под каждым предложением */
     if(q.num === 21){
       const t21 = makeTask21Field(q);
