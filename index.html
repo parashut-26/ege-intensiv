@@ -23841,13 +23841,38 @@ function modalEditVariant(){
     onclick: () => { STATE.variantEditFullscreen = !STATE.variantEditFullscreen; render(); }
   }, isFs ? '⤡' : '⛶');
 
+  /* Глобальный индикатор автосохранения — показывается в шапке модалки.
+     Каждое поле, отредактированное учителем, через 1.5 сек после последнего
+     ввода триггерит PATCH в БД. Если уже PATCH в полёте — показываем
+     «⏳ сохраняю...». Если все прошли — «✓ всё сохранено». При ошибке — «⚠». */
+  const saveStatus = el('span', {
+    style:{ fontSize:'12px', fontWeight:'700', color:'#065F46',
+            background:'#D1FAE5', padding:'4px 10px', borderRadius:'999px' }
+  }, '✓ всё сохранено');
+  const setStatus = (kind) => {
+    if(kind === 'pending'){
+      saveStatus.textContent = '⏳ сохраняю…';
+      saveStatus.style.background = '#FEF3C7';
+      saveStatus.style.color = '#92400E';
+    } else if(kind === 'error'){
+      saveStatus.textContent = '⚠ ошибка сохранения';
+      saveStatus.style.background = '#FEE2E2';
+      saveStatus.style.color = '#991B1B';
+    } else {
+      saveStatus.textContent = '✓ всё сохранено';
+      saveStatus.style.background = '#D1FAE5';
+      saveStatus.style.color = '#065F46';
+    }
+  };
+
   const head = el('div', { class:'modal-head' },
     el('div', null,
       el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
         '✏️ Редактирование варианта'),
       el('h2', { style:{ marginTop:'4px' }},
         STATE.editVariantData ? STATE.editVariantData.variant.title : '⏳ Загружаю…')),
-    el('div', { style:{ display:'flex', gap:'4px', alignItems:'center' }},
+    el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
+      saveStatus,
       fsBtn,
       el('button', { class:'x', onclick: close }, '×')));
 
@@ -23890,11 +23915,81 @@ function modalEditVariant(){
     qByNum[27] = placeholder;
   }
 
-  /* Поле названия — onChange пишет в variant.title чтобы пережить render() */
+  /* === Автосохранение ===
+     Делает PATCH в указанную таблицу/строку через 1.5 сек после последнего
+     вызова save(). Несколько save() от разных полей кумулируются — за раз
+     отправляется текущее значение, а не вся история. */
+  const _saveTimers = {};   // key → timeout id
+  const _pending = new Set(); // key — поле в полёте
+  function autoSave(table, id, column, value){
+    const key = table + ':' + id + ':' + column;
+    _pending.add(key);
+    setStatus('pending');
+    if(_saveTimers[key]) clearTimeout(_saveTimers[key]);
+    _saveTimers[key] = setTimeout(async () => {
+      try {
+        const patch = {}; patch[column] = (typeof value === 'string' ? value : value);
+        if(typeof value === 'string' && !value.trim()) patch[column] = null;
+        await restRequest('PATCH', '/' + table + '?id=eq.' + id,
+          patch, { prefer: 'return=minimal' });
+        _pending.delete(key);
+        if(_pending.size === 0) setStatus('ok');
+      } catch(e){
+        console.warn('[autosave] ' + key + ':', e.message);
+        _pending.delete(key);
+        setStatus('error');
+      }
+    }, 1500);
+  }
+  /* Для вопроса: если у q ещё нет id (свежесозданный placeholder), сначала
+     INSERT-им заглушку чтобы получить id, затем PATCH-аем поле. */
+  async function autoSaveQuestion(q, column, value){
+    if(!q.id){
+      try {
+        const inserted = await restRequest('POST',
+          '/test_variant_questions?on_conflict=variant_id,num',
+          {
+            variant_id: q.variant_id,
+            num: q.num,
+            question_text: q.question_text || '',
+            correct_answer: q.num === 27 ? null : (q.correct_answer || ''),
+            max_points: q.max_points || ((q.num === 8 || q.num === 22) ? 2 : (q.num === 27 ? 22 : 1))
+          },
+          { prefer: 'resolution=merge-duplicates,return=representation' });
+        if(Array.isArray(inserted) && inserted[0]){
+          q.id = inserted[0].id;
+        }
+      } catch(e){
+        console.warn('[autosave] failed to create q:', e.message);
+        setStatus('error');
+        return;
+      }
+    }
+    autoSave('test_variant_questions', q.id, column, value);
+  }
+  async function autoSaveSourceText(s, value){
+    if(!s.id){
+      try {
+        const inserted = await restRequest('POST',
+          '/test_variant_source_texts?on_conflict=variant_id,kind',
+          { variant_id: s.variant_id, kind: s.kind, body: value || '' },
+          { prefer: 'resolution=merge-duplicates,return=representation' });
+        if(Array.isArray(inserted) && inserted[0]){
+          s.id = inserted[0].id;
+        }
+      } catch(e){ console.warn('[autosave] failed to create src:', e.message); setStatus('error'); return; }
+    }
+    autoSave('test_variant_source_texts', s.id, 'body', value);
+  }
+
+  /* Поле названия — onChange пишет в variant.title + autosave */
   const titleInput = el('input', { type:'text', value: variant.title,
     style:{ width:'100%', padding:'8px 12px', border:'1px solid var(--border-2)', borderRadius:'8px', fontSize:'14px', fontWeight:'700', boxSizing:'border-box', marginBottom:'14px' }
   });
-  titleInput.oninput = () => { variant.title = titleInput.value; };
+  titleInput.oninput = () => {
+    variant.title = titleInput.value;
+    autoSave('test_variants', variant.id, 'title', titleInput.value);
+  };
   body.append(
     el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginBottom:'4px', fontWeight:'700' }}, 'Название'),
     titleInput);
@@ -23909,19 +24004,28 @@ function modalEditVariant(){
     const block = el('div', { style:{ marginTop:'10px', padding:'8px 10px', background:'var(--bg)', borderRadius:'8px', border:'1px solid var(--border)' }});
     const taskEd = richTextEditor(q.question_text || '', {
       minHeight:'140px', fontSize:'13px',
-      onChange: (html) => { q.question_text = html; }
+      onChange: (html) => {
+        q.question_text = html;
+        autoSaveQuestion(q, 'question_text', html);
+      }
     });
     const ansInp = el('input', { type:'text', value: q.correct_answer || '',
       style:{ width:'100%', padding:'8px 10px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'14px', fontWeight:'700', boxSizing:'border-box', marginTop:'4px' }
     });
-    ansInp.oninput = () => { q.correct_answer = ansInp.value; };
+    ansInp.oninput = () => {
+      q.correct_answer = ansInp.value;
+      autoSaveQuestion(q, 'correct_answer', ansInp.value);
+    };
     /* Пояснение — почему правильный ответ именно такой. Ученик увидит после сдачи. */
     const explInp = el('textarea', { rows:6,
       placeholder:'Почему именно так? (правило, разбор). Ученик увидит после сдачи.',
       style:{ width:'100%', padding:'8px 10px', border:'1px solid var(--border-2)', borderRadius:'6px', fontSize:'13px', boxSizing:'border-box', marginTop:'4px', minHeight:'120px', resize:'vertical', fontFamily:'inherit', lineHeight:'1.45' }
     });
     explInp.value = q.explanation || '';
-    explInp.oninput = () => { q.explanation = explInp.value; };
+    explInp.oninput = () => {
+      q.explanation = explInp.value;
+      autoSaveQuestion(q, 'explanation', explInp.value);
+    };
     /* Кнопка генерации через YandexGPT — заполняет textarea черновиком */
     const aiBtn = el('button', {
       style:{ padding:'2px 8px', fontSize:'11px', cursor:'pointer', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px', color:'#92400E', fontWeight:'700' },
@@ -23972,11 +24076,20 @@ function modalEditVariant(){
   const src22Obj = srcByKind['text_22_26'];
   const q27 = qByNum[27];
   const src13Ed = richTextEditor(src13Obj.body || '', { minHeight:'240px', fontSize:'13px',
-    onChange: (html) => { src13Obj.body = html; }});
+    onChange: (html) => {
+      src13Obj.body = html;
+      autoSaveSourceText(src13Obj, html);
+    }});
   const src22Ed = richTextEditor(src22Obj.body || '', { minHeight:'240px', fontSize:'13px',
-    onChange: (html) => { src22Obj.body = html; }});
+    onChange: (html) => {
+      src22Obj.body = html;
+      autoSaveSourceText(src22Obj, html);
+    }});
   const src27Ed = richTextEditor(q27.question_text || '', { minHeight:'240px', fontSize:'13px',
-    onChange: (html) => { q27.question_text = html; }});
+    onChange: (html) => {
+      q27.question_text = html;
+      autoSaveQuestion(q27, 'question_text', html);
+    }});
   /* Предполагаемый ответ / пояснение к 27 заданию — учитель пишет
      модельный ответ или комментарий по теме сочинения. Лежит в
      q27.explanation (то же поле, что и для заданий 1-26). */
@@ -23988,7 +24101,10 @@ function modalEditVariant(){
             fontFamily:'inherit', lineHeight:'1.5' }
   });
   expl27.value = q27.explanation || '';
-  expl27.oninput = () => { q27.explanation = expl27.value; };
+  expl27.oninput = () => {
+    q27.explanation = expl27.value;
+    autoSaveQuestion(q27, 'explanation', expl27.value);
+  };
 
   body.append(
     el('div', { style:{ marginTop:'14px', fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }}, '📖 Исходный текст для заданий 1-3'),
