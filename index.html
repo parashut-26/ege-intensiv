@@ -11018,6 +11018,24 @@ async function saveAnswerField(attemptId, num, column, value){
   return { ok: true, affected: 1, via: 'insert' };
 }
 
+/* === Единая ширина холста для разметки (учитель + ученик) ===
+   Чтобы рисунок учителя на 800px-десктопе не сминался у ученика на 380px-
+   телефоне, везде (студент в решалке, учитель в модалке, оба read-only)
+   используем ОДНУ фиксированную ширину контейнера 480px. Тогда текст
+   переносится одинаково, и SVG-pixel-координаты пометок ложатся точно
+   на те же слова. На узких экранах появится горизонтальный скролл —
+   это плата за консистентность разметки. */
+const MARK_CANVAS_WIDTH = 480;
+function wrapInScrollContainer(inner){
+  /* overflow-x:auto + width:max-content на внутреннем элементе — даёт
+     горизонтальный скролл если контейнер ученика уже 480px. На десктопе
+     scrollbar не показывается, потому что 480 ≤ ширина модалки. */
+  const sc = el('div', { style:{ overflowX:'auto', overflowY:'visible',
+    maxWidth:'100%', WebkitOverflowScrolling:'touch' }});
+  sc.append(inner);
+  return sc;
+}
+
 /* === Helpers для сохранения и рендера SVG-разметки с масштабированием ===
    Раньше: в БД лежал просто `<path>...<path>...` с pixel-координатами,
    которые работают только при той же ширине контейнера, что была при
@@ -11191,7 +11209,13 @@ function makeTeacherMarksEditor(opts){
   }
   ed.oninput = scheduleScratchSave;
 
-  const editorContainer = el('div', { style:{ position:'relative' }});
+  const editorContainer = el('div', { style:{ position:'relative',
+    width: MARK_CANVAS_WIDTH + 'px', boxSizing:'border-box' }});
+  /* Фиксируем ширину самого contenteditable, чтобы текст переносился
+     идентично у учителя и ученика. Иначе SVG-pixel-координаты пометок
+     лягут «не на те строки». */
+  ed.style.width = '100%';
+  ed.style.boxSizing = 'border-box';
   editorContainer.append(ed);
   svgLayer = mkSvg('svg', {
     style:'position:absolute;top:0;left:0;width:100%;height:100%;' +
@@ -11300,14 +11324,20 @@ function makeTeacherMarksEditor(opts){
 
   const statusEl = el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'8px' }}, '');
 
+  /* Тулбар и editorContainer — фиксированной ширины 480px. Оборачиваем
+     в горизонтально-скроллящийся контейнер, чтобы на узких экранах
+     модалки они не ломали вёрстку. */
+  toolbar.style.width = MARK_CANVAS_WIDTH + 'px';
+  toolbar.style.boxSizing = 'border-box';
+  const stack = el('div', { style:{ width: MARK_CANVAS_WIDTH + 'px' }},
+    toolbar, editorContainer);
   return el('div', { style:{ marginBottom:'14px' }},
     el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between',
                         gap:'6px', marginBottom:'6px', flexWrap:'wrap' }},
       el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E' }},
         '✏️ Мои пометки (увидит ученик)'),
       statusEl),
-    toolbar,
-    editorContainer);
+    wrapInScrollContainer(stack));
 }
 
 /* === Read-only рендер пометок учителя для ученика === */
@@ -11316,9 +11346,13 @@ function renderTeacherMarksReadOnly(opts){
   const sc = (teacherScratch || '').trim();
   const dr = (teacherDrawing || '').trim();
   if(!sc && !dr) return null;
+  /* Ширина 480 — зеркало холста учителя в makeTeacherMarksEditor.
+     Тогда текст ляжет в те же строки, что и при рисовании, и SVG
+     попадёт ровно на те же слова, куда учитель писал. */
   const wrap = el('div', { style:{ position:'relative',
+    width: MARK_CANVAS_WIDTH + 'px', boxSizing:'border-box',
     padding:'12px 14px', background:'#FFFEF7', borderLeft:'4px solid #F59E0B',
-    borderRadius:'8px', marginBottom:'14px', fontSize:'14px',
+    borderRadius:'8px', fontSize:'14px',
     lineHeight:'1.6', whiteSpace:'pre-wrap', overflow:'visible' }});
   const inner = el('div', { style:{ position:'relative', zIndex:'1' }});
   inner.innerHTML = sc || sanitizeQuestionHtml(questionText || '');
@@ -11335,11 +11369,11 @@ function renderTeacherMarksReadOnly(opts){
       if(tmp.firstChild) wrap.append(tmp.firstChild);
     }
   }
-  return el('div', null,
+  return el('div', { style:{ marginBottom:'14px' }},
     el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E',
                         marginBottom:'6px' }},
       '✏️ Пометки учителя'),
-    wrap);
+    wrapInScrollContainer(wrap));
 }
 
 /* === Рендер структурированного ответа ученика для модалки учителя/ученика ===
@@ -11598,11 +11632,13 @@ function modalExamineQuestion(){
     const hasMarks = !!(sc || drawing);
     if(hasMarks){
       /* Версия С ПОМЕТКАМИ — текст из scratch (если есть) или формулировка,
-         а сверху абсолютный SVG-слой с карандашом. Лежит первым, чтобы
-         учитель сразу увидел, как ребёнок размечал. */
+         а сверху абсолютный SVG-слой с карандашом. Ширина MARK_CANVAS_WIDTH
+         — зеркало холста ученика, чтобы текст переносился одинаково и
+         pixel-координаты SVG ложились на те же слова. */
       const markedWrap = el('div', { style:{ position:'relative',
+        width: MARK_CANVAS_WIDTH + 'px', boxSizing:'border-box',
         padding:'12px 14px', background:'#FFFBEB', borderLeft:'4px solid #FACC15',
-        borderRadius:'8px', marginBottom:'14px', fontSize:'14px',
+        borderRadius:'8px', fontSize:'14px',
         lineHeight:'1.6', whiteSpace:'pre-wrap', overflow:'visible' }});
       const txtInner = el('div', { style:{ position:'relative', zIndex:'1' }});
       txtInner.innerHTML = sc || sanitizeQuestionHtml(q.question_text || '(пусто)');
@@ -11628,7 +11664,7 @@ function modalExamineQuestion(){
           el('span', null, '🖌 Пометки ученика'),
           el('span', { style:{ fontSize:'10px', fontWeight:'400', color:'var(--ink-3)' }},
             'То, что ребёнок отметил во время решения (' + labelParts.join(' + ') + ').')),
-        markedWrap);
+        wrapInScrollContainer(markedWrap));
     }
     /* Чистая формулировка — всегда показываем после пометок, чтобы можно
        было сверить, что именно ученик размечал. Если пометок нет — это
@@ -24904,8 +24940,13 @@ function makeEditableQuestionText(q){
   /* === SVG-слой для карандаша поверх текста ===
      Лежит абсолютно поверх ed, прозрачно ловит pointer events когда
      активен карандаш. Координаты в пикселях относительно контейнера —
-     рисунок «прилипает» к тексту, не скролится отдельно. */
-  const editorContainer = el('div', { style:{ position:'relative' }});
+     рисунок «прилипает» к тексту, не скролится отдельно.
+     Фиксируем ширину MARK_CANVAS_WIDTH чтобы текст переносился одинаково
+     у ученика и в кабинете учителя — тогда пометки лягут точно. */
+  const editorContainer = el('div', { style:{ position:'relative',
+    width: MARK_CANVAS_WIDTH + 'px', boxSizing:'border-box' }});
+  ed.style.width = '100%';
+  ed.style.boxSizing = 'border-box';
   editorContainer.append(ed);
   svgLayer = svgEl('svg', {
     style: 'position:absolute;top:0;left:0;width:100%;height:100%;' +
@@ -24998,7 +25039,15 @@ function makeEditableQuestionText(q){
   svgLayer.addEventListener('pointercancel', finishStroke);
   svgLayer.addEventListener('pointerleave', finishStroke);
 
-  wrap.append(toolbar, editorContainer);
+  /* Тулбар тоже фиксируем по ширине, чтобы он не растягивался шире холста.
+     Стек (тулбар + editor) кладём в горизонтально-скроллящийся контейнер —
+     на узких экранах ученик подскроллит вправо, текст и пометки лягут
+     ровно так же, как их рисовал учитель. */
+  toolbar.style.width = MARK_CANVAS_WIDTH + 'px';
+  toolbar.style.boxSizing = 'border-box';
+  const stack = el('div', { style:{ width: MARK_CANVAS_WIDTH + 'px' }},
+    toolbar, editorContainer);
+  wrap.append(wrapInScrollContainer(stack));
   return wrap;
 }
 
