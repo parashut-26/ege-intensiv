@@ -22770,59 +22770,127 @@ function makeTask16Field(q){
 
   if(!STATE.solverChecks16) STATE.solverChecks16 = {};
   if(!STATE.solverChecks16[num]) STATE.solverChecks16[num] = {};
-  const picks = STATE.solverChecks16[num];
+  const data = STATE.solverChecks16[num];
+  /* Миграция со старого формата { sentNum: true } → { sentNum: {gapIdx:true} }
+     Старая отметка «было выбрано» теряется (она была без позиций), это ок. */
+  for(const k of Object.keys(data)){
+    if(data[k] === true || typeof data[k] !== 'object') data[k] = {};
+  }
 
   const wrap = el('div', { style:{ marginTop:'10px',
     padding:'10px 12px', background:'#F9FAFB',
     border:'1px solid var(--border)', borderRadius:'10px' }},
     el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
                         marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }},
-      '📌 Отметь предложения с одной запятой'),
+      '📌 Расставь запятые между словами'),
     el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
-      'Расставь запятые мысленно. Отметь галочкой только те, где запятая ровно ОДНА.'));
+      'Тапни промежуток между словами — там появится запятая. ' +
+      'В ответ попадут предложения, где запятая ровно ОДНА (так требует задание 16).'));
+
+  const statusEl = el('div', { style:{ fontSize:'12px', color:'var(--ink-2)',
+    fontWeight:'700', marginTop:'10px', padding:'8px 10px', background:'#FFF',
+    borderRadius:'8px', border:'1px solid var(--border)' }});
+
+  const updateAnswer = () => {
+    const matched = [];
+    sentences.forEach(s => {
+      const gaps = data[s.num] || {};
+      const cnt = Object.keys(gaps).filter(k => gaps[k]).length;
+      if(cnt === 1) matched.push(s.num);
+    });
+    matched.sort((a,b) => a-b);
+    STATE.solverAnswers[num] = matched.join('');
+    statusEl.innerHTML = '';
+    statusEl.append(
+      el('span', { style:{ color:'var(--ink-3)' }}, 'В ответе: '),
+      el('span', { style:{ color:'var(--p-deep)', fontSize:'15px', letterSpacing:'.1em' }},
+        STATE.solverAnswers[num] || '—'),
+      el('span', { style:{ color:'var(--ink-3)', fontWeight:'500', marginLeft:'8px',
+                            fontSize:'11px' }},
+        '(предложения, где ровно одна запятая)')
+    );
+    saveSolverDraft();
+  };
 
   sentences.forEach(sent => {
-    const cb = el('input', {
-      type:'checkbox',
-      checked: !!picks[sent.num],
-      style:{ width:'18px', height:'18px', cursor:'pointer', flexShrink:0 },
-      onchange: (ev) => {
-        if(ev.target.checked) picks[sent.num] = true;
-        else delete picks[sent.num];
-        saveSolverDraft();
-      }
+    if(!data[sent.num]) data[sent.num] = {};
+    const sentData = data[sent.num];
+
+    const sentBox = el('div', {
+      style:{ padding:'10px 4px', borderTop:'1px dashed var(--border)' }
     });
-    const row = el('label', {
-      style:{ display:'flex', flexWrap:'wrap', gap:'8px', alignItems:'flex-start',
-              padding:'8px 0', borderTop:'1px dashed var(--border)', cursor:'pointer' }
-    },
-      cb,
-      el('div', { style:{ minWidth:'24px', fontWeight:'700', color:'var(--p-deep)', fontSize:'13px' }},
-        sent.num + ')'),
-      el('div', { style:{ flex:'1 1 200px', minWidth:'150px', fontSize:'13px',
-                          lineHeight:'1.4', color:'var(--ink)' }}, sent.text));
-    wrap.append(row);
+
+    const header = el('div', {
+      style:{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'4px' }
+    });
+    const numLabel = el('div', {
+      style:{ fontWeight:'800', color:'var(--p-deep)', fontSize:'13px', minWidth:'24px' }
+    }, sent.num + ')');
+    const countChip = el('span', {
+      style:{ marginLeft:'auto', padding:'2px 8px', fontSize:'11px', fontWeight:'700',
+              borderRadius:'6px' }
+    });
+    header.append(numLabel, countChip);
+
+    const textBox = el('div', {
+      style:{ fontSize:'14px', lineHeight:'2', color:'var(--ink)',
+              userSelect:'none' }
+    });
+
+    /* Разбиваем предложение на слова. Сохраняем пунктуацию вместе со словом
+       (точки/тире прицепляются к соседнему токену), чтобы тап-зоны вставлять
+       только между «настоящими» словами. */
+    const words = sent.text.split(/\s+/).filter(w => w.length);
+
+    const renderSent = () => {
+      textBox.innerHTML = '';
+      let commaCount = 0;
+      words.forEach((w, i) => {
+        textBox.append(document.createTextNode(w));
+        if(i < words.length - 1){
+          const active = !!sentData[i];
+          if(active) commaCount++;
+          const gap = el('span', {
+            style:{ display:'inline-block', cursor:'pointer',
+                    padding: active ? '1px 8px' : '1px 6px',
+                    margin:'0 2px',
+                    color: active ? '#DC2626' : '#9CA3AF',
+                    fontSize: active ? '20px' : '13px',
+                    fontWeight: active ? '800' : '600',
+                    verticalAlign:'middle',
+                    minWidth:'16px', textAlign:'center',
+                    background: active ? '#FEE2E2' : 'transparent',
+                    border: active ? '2px solid #FCA5A5' : '2px dashed #E5E7EB',
+                    borderRadius:'6px',
+                    lineHeight:'1',
+                    transition:'all .12s' },
+            onclick: () => {
+              if(sentData[i]) delete sentData[i];
+              else sentData[i] = true;
+              renderSent();
+              updateAnswer();
+            }
+          }, active ? ',' : '·');
+          textBox.append(gap);
+        }
+      });
+      /* Обновляем чип-счётчик */
+      const c = commaCount;
+      let bg = '#F3F4F6', fg = '#6B7280';
+      if(c === 1){ bg = '#D1FAE5'; fg = '#065F46'; }
+      else if(c > 1){ bg = '#FEF3C7'; fg = '#92400E'; }
+      countChip.style.background = bg;
+      countChip.style.color = fg;
+      countChip.textContent = c === 0 ? '0 запятых' : c === 1 ? '✓ 1 запятая' : c + ' запятых';
+    };
+    renderSent();
+
+    sentBox.append(header, textBox);
+    wrap.append(sentBox);
   });
 
-  const genBtn = el('button', {
-    type:'button',
-    class:'btn btn-p btn-sm',
-    style:{ marginTop:'12px', fontSize:'13px', fontWeight:'700' },
-    onclick: () => {
-      const result = Object.keys(picks)
-        .map(Number)
-        .filter(n => picks[n])
-        .sort((a,b) => a-b)
-        .join('');
-      STATE.solverAnswers[num] = result;
-      saveSolverDraft();
-      render();
-      showToast(result
-        ? '✓ Ответ сгенерирован: ' + result
-        : '⚠ Не отмечено ни одного предложения');
-    }
-  }, '📝 Сформировать ответ');
-  wrap.append(genBtn);
+  wrap.append(statusEl);
+  updateAnswer();
 
   return wrap;
 }
@@ -22846,70 +22914,113 @@ function parseTask17_20Gaps(questionText){
 }
 
 function makeTasks17_20Field(q){
-  const gaps = parseTask17_20Gaps(q.question_text);
-  if(gaps.length < 2) return null;
   const num = q.num;
+  /* Берём «сырой» текст задания, чистим HTML и схлопываем пробелы */
+  const rawTxt = String(q.question_text || '').replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  /* Ищем все (N) — это потенциальные места запятых */
+  const matches = [];
+  const re = /\((\d{1,2})\)/g;
+  let m;
+  while((m = re.exec(rawTxt)) !== null){
+    matches.push({ n: parseInt(m[1], 10), start: m.index, end: m.index + m[0].length });
+  }
+  if(matches.length < 2) return null;
 
   if(!STATE.solverGaps) STATE.solverGaps = {};
   if(!STATE.solverGaps[num]) STATE.solverGaps[num] = {};
   const picks = STATE.solverGaps[num];
+
+  /* Находим начало «работающей» части — обычно после двоеточия в инструкции
+     («... должна стоять запятая. Лес ...»). Если двоеточия нет — берём всё. */
+  let sentStart = 0;
+  const colonIdx = rawTxt.indexOf(':');
+  if(colonIdx > 20 && colonIdx < matches[0].start){
+    sentStart = colonIdx + 1;
+  } else {
+    /* Иначе ищем последнюю точку перед первым (1) */
+    const intro = rawTxt.slice(0, matches[0].start);
+    const lastDot = Math.max(intro.lastIndexOf('. '), intro.lastIndexOf('.\n'));
+    if(lastDot > 20) sentStart = lastDot + 1;
+  }
+  const sentText = rawTxt.slice(sentStart).trim();
+  /* Пересчитаем индексы матчей в координаты sentText */
+  const sentMatches = matches
+    .map(mm => ({ n: mm.n, start: mm.start - sentStart, end: mm.end - sentStart }))
+    .filter(mm => mm.start >= 0);
 
   const wrap = el('div', { style:{ marginTop:'10px',
     padding:'10px 12px', background:'#F9FAFB',
     border:'1px solid var(--border)', borderRadius:'10px' }},
     el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
                         marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }},
-      '📌 Нажми на цифры, где должна стоять запятая'),
+      '📌 Тапни цифру — на её месте появится запятая'),
     el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
-      'В тексте задания цифры (1), (2), ... отмечают потенциальные места запятых. ' +
-      'Жми на цифру, чтобы пометить — там нужна запятая.'));
+      'Каждая цифра — потенциальное место запятой. Тап включает запятую, повторный тап — убирает.'));
 
-  const btnsRow = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'6px',
-    padding:'8px 0' }});
-  const renderBtns = () => {
-    btnsRow.innerHTML = '';
-    gaps.forEach(n => {
-      const isPicked = !!picks[n];
-      const btn = el('button', {
-        type:'button',
-        style:{ padding:'8px 14px', fontSize:'15px', fontWeight:'700',
-                cursor:'pointer', borderRadius:'8px',
-                border:'2px solid ' + (isPicked ? '#16A34A' : 'var(--border-2)'),
-                background: isPicked ? '#D1FAE5' : '#fff',
-                color: isPicked ? '#065F46' : 'var(--ink)',
-                fontFamily:'inherit', minWidth:'48px' },
-        onclick: () => {
-          if(picks[n]) delete picks[n];
-          else picks[n] = true;
-          saveSolverDraft();
-          renderBtns();
-        }
-      }, isPicked ? '✓ ' + n : String(n));
-      btnsRow.append(btn);
-    });
+  const textBox = el('div', {
+    style:{ padding:'14px 16px', background:'#FFF', borderRadius:'10px',
+            border:'1px solid var(--border)', fontSize:'15px',
+            lineHeight:'2.2', color:'var(--ink)', userSelect:'none' }
+  });
+
+  const statusEl = el('div', { style:{ fontSize:'12px', color:'var(--ink-2)',
+    fontWeight:'700', marginTop:'10px', padding:'8px 10px', background:'#FFF',
+    borderRadius:'8px', border:'1px solid var(--border)' }});
+
+  const updateAnswer = () => {
+    const result = Object.keys(picks).map(Number).filter(n => picks[n])
+      .sort((a,b) => a-b).join('');
+    STATE.solverAnswers[num] = result;
+    statusEl.innerHTML = '';
+    statusEl.append(
+      el('span', { style:{ color:'var(--ink-3)' }}, 'Ответ: '),
+      el('span', { style:{ color:'var(--p-deep)', fontSize:'15px', letterSpacing:'.1em' }},
+        result || '—')
+    );
+    saveSolverDraft();
   };
-  renderBtns();
-  wrap.append(btnsRow);
 
-  const genBtn = el('button', {
-    type:'button',
-    class:'btn btn-p btn-sm',
-    style:{ marginTop:'8px', fontSize:'13px', fontWeight:'700' },
-    onclick: () => {
-      const result = Object.keys(picks)
-        .map(Number)
-        .filter(n => picks[n])
-        .sort((a,b) => a-b)
-        .join('');
-      STATE.solverAnswers[num] = result;
-      saveSolverDraft();
-      render();
-      showToast(result
-        ? '✓ Ответ сгенерирован: ' + result
-        : '⚠ Не выбрано ни одной позиции');
+  const renderText = () => {
+    textBox.innerHTML = '';
+    let lastEnd = 0;
+    sentMatches.forEach(mm => {
+      if(mm.start > lastEnd){
+        textBox.append(document.createTextNode(sentText.slice(lastEnd, mm.start)));
+      }
+      const active = !!picks[mm.n];
+      const tap = el('span', {
+        style:{ display:'inline-block', cursor:'pointer',
+                padding: active ? '2px 8px' : '2px 7px',
+                margin:'0 1px',
+                color: active ? '#DC2626' : '#1D4ED8',
+                fontSize: active ? '20px' : '14px',
+                fontWeight:'800',
+                verticalAlign:'middle',
+                minWidth:'24px', textAlign:'center',
+                background: active ? '#FEE2E2' : '#EEF2FF',
+                border: '2px solid ' + (active ? '#FCA5A5' : '#C7D2FE'),
+                borderRadius:'6px',
+                lineHeight:'1',
+                transition:'all .12s' },
+        onclick: () => {
+          if(picks[mm.n]) delete picks[mm.n];
+          else picks[mm.n] = true;
+          renderText();
+          updateAnswer();
+        }
+      }, active ? ',' : String(mm.n));
+      textBox.append(tap);
+      lastEnd = mm.end;
+    });
+    if(lastEnd < sentText.length){
+      textBox.append(document.createTextNode(sentText.slice(lastEnd)));
     }
-  }, '📝 Сформировать ответ');
-  wrap.append(genBtn);
+  };
+  renderText();
+  updateAnswer();
+
+  wrap.append(textBox);
+  wrap.append(statusEl);
 
   return wrap;
 }
@@ -23329,10 +23440,18 @@ function computeAnswerFromStructured(q){
     const g = (STATE.solverGaps || {})[num] || {};
     return Object.keys(g).map(Number).filter(n => g[n]).sort((a,b) => a-b).join('');
   }
-  /* №16: чекбоксы предложений */
+  /* №16: тап-зоны между словами в каждом предложении.
+     ch[sentNum] = { gapIdx: true, ... } — позиции, где ученик поставил запятую.
+     В ответ идут номера предложений, где ровно ОДНА активная запятая. */
   if(num === 16){
     const ch = (STATE.solverChecks16 || {})[num] || {};
-    return Object.keys(ch).map(Number).filter(n => ch[n]).sort((a,b) => a-b).join('');
+    const matched = Object.keys(ch).map(Number).filter(n => {
+      const gaps = ch[n];
+      if(!gaps || typeof gaps !== 'object') return false;
+      const cnt = Object.keys(gaps).filter(k => gaps[k]).length;
+      return cnt === 1;
+    });
+    return matched.sort((a,b) => a-b).join('');
   }
   /* №21: предложения с целевым правилом */
   if(num === 21){
