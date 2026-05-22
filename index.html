@@ -25730,6 +25730,64 @@ function viewSolverVariant(){
           }, '💾 Сохранить')));
   wrap.append(header);
 
+  /* === Панель быстрого перехода к заданию ===
+     Sticky-ряд кнопок 1-26 + 27. Клик скроллит к карточке задания
+     (id="solver-task-N"). Цвет показывает состояние:
+       зелёный — проверено и верно
+       жёлтый — частично
+       красный — проверено и неверно
+       синий — есть ответ или структура, но «Проверить» не нажимали
+       бледно-жёлтый — есть пометки (карандаш/маркер) без ответа
+       серый — ничего не делал */
+  const navChip = (n) => {
+    const ans  = (STATE.solverAnswers || {})[n] || '';
+    const chk  = (STATE.solverChecked || {})[n];
+    const hasStruct = !!collectStructuredForNum(n);
+    const hasMark   = !!((STATE.solverScratch && STATE.solverScratch[n])
+                       || (STATE.solverDrawings && STATE.solverDrawings[n]));
+    let bg = '#F3F4F6', fg = '#6B7280', border = 'var(--border-2)';
+    if(chk && chk.max > 0){
+      if(chk.points >= chk.max){ bg = '#D1FAE5'; fg = '#065F46'; border = '#10B981'; }
+      else if(chk.points > 0){    bg = '#FEF3C7'; fg = '#92400E'; border = '#F59E0B'; }
+      else {                      bg = '#FEE2E2'; fg = '#991B1B'; border = '#EF4444'; }
+    } else if(ans.trim() || hasStruct){
+      bg = '#DBEAFE'; fg = '#1E40AF'; border = '#3B82F6';
+    } else if(hasMark){
+      bg = '#FEF3C7'; fg = '#92400E'; border = '#F59E0B';
+    }
+    return el('button', {
+      type:'button',
+      style:{ minWidth:'32px', height:'32px', padding:'0 6px',
+              borderRadius:'6px', background:bg, color:fg,
+              border:'1.5px solid ' + border, cursor:'pointer',
+              fontSize:'13px', fontWeight:'700', fontFamily:'inherit',
+              flexShrink:'0' },
+      onclick: () => {
+        const el = document.getElementById('solver-task-' + n);
+        if(el){
+          el.scrollIntoView({ behavior:'smooth', block:'start' });
+          /* Кратко подсветить карточку чтобы было видно куда улетели */
+          el.style.transition = 'box-shadow .3s';
+          el.style.boxShadow = '0 0 0 3px #FACC15';
+          setTimeout(() => { el.style.boxShadow = ''; }, 1500);
+        }
+      }
+    }, String(n));
+  };
+  const navRow = el('div', { style:{
+    display:'flex', gap:'4px', overflowX:'auto', overflowY:'hidden',
+    padding:'8px 4px', WebkitOverflowScrolling:'touch',
+    position:'sticky', top:'56px', zIndex:9,
+    background:'rgba(255,255,255,0.95)', backdropFilter:'blur(6px)',
+    borderBottom:'1px solid var(--border)', marginBottom:'10px' }});
+  /* Какие задания вообще есть в варианте — 1-26 минимум, плюс 27 если он есть */
+  const navNums = [];
+  for(let i = 1; i <= 26; i++) navNums.push(i);
+  if(STATE.solverData.questions.some(qq => qq.num === 27)) navNums.push(27);
+  navNums.forEach(n => navRow.append(navChip(n)));
+  /* Показываем только в режиме ученика — учителю в preview и edit не нужно */
+  if(!isTeacherMode) wrap.append(navRow);
+
   /* Инструкция */
   const autoFillCb = el('input', {
     type:'checkbox', id:'solver-autofill-cb',
@@ -25811,7 +25869,9 @@ function viewSolverVariant(){
 
   /* Задания слева */
   questions.forEach(q => {
-    const card = el('div', { class:'card', style:{ marginBottom:'12px' }});
+    /* Якорь для навигационной панели сверху — клик по чипу скроллит сюда */
+    const card = el('div', { id:'solver-task-' + q.num, class:'card', style:{ marginBottom:'12px',
+      scrollMarginTop:'120px' /* отступ под sticky-шапку + nav-ряд */ }});
     /* Заголовок */
     card.append(el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px' }},
       el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
@@ -25973,8 +26033,9 @@ function viewSolverVariant(){
      - Поле «Сформулируйте позицию автора» (короткая черновая опора для эссе)
      - Кнопка «Открыть редактор сочинения» (modalEssayDraft) */
   if(task27 && (task27.question_text || '').trim() && !filterNums){
-    const ecard = el('div', { class:'card',
-      style:{ marginBottom:'12px', background:'#FFFDF7', borderColor:'#FACC15' }});
+    const ecard = el('div', { id:'solver-task-27', class:'card',
+      style:{ marginBottom:'12px', background:'#FFFDF7', borderColor:'#FACC15',
+              scrollMarginTop:'120px' }});
     ecard.append(
       el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px', flexWrap:'wrap', gap:'8px' }},
         el('div', null,
