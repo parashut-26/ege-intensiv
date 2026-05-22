@@ -11627,7 +11627,94 @@ function renderStructuredAnswer(num, q, structured){
     }
   }
 
-  /* === Прочее (21, 8, 22, и неизвестные): просто JSON под спойлером === */
+  /* === №8 и №22: матчинг А-Д → 1-9 ===
+     Учителю нужно сразу видеть: для каждой буквы (грам. ошибка) — какую
+     цифру (предложение) выбрал ученик. Берём parsing формулировки через
+     parseTask22Matching, получаем letters[{letter,text}] и terms[{num,text}],
+     показываем парами. */
+  if((num === 8 || num === 22) && structured.matching22
+       && typeof parseTask22Matching === 'function'){
+    const parsed = parseTask22Matching(txt);
+    if(parsed && parsed.letters && parsed.letters.length){
+      const picks = structured.matching22;
+      const termsByNum = {};
+      (parsed.terms || []).forEach(t => { termsByNum[t.num] = t.text; });
+      const wrap = el('div', { style:{ padding:'10px 12px', background:'#F0F9FF',
+        border:'1px solid #93C5FD', borderRadius:'10px', marginBottom:'14px' }},
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
+                            marginBottom:'8px' }},
+          '📋 Что ученик подобрал к каждой букве'));
+      parsed.letters.forEach(lt => {
+        const pick = picks[lt.letter];
+        const termText = pick != null ? termsByNum[pick] : null;
+        const row = el('div', { style:{ display:'flex', gap:'8px',
+          padding:'6px 4px', borderTop:'1px dashed #BFDBFE',
+          fontSize:'13px', lineHeight:'1.5', alignItems:'flex-start' }});
+        row.append(
+          el('div', { style:{ display:'flex', alignItems:'center', gap:'4px', flexShrink:'0' }},
+            el('b', { style:{ color:'#1E40AF' }}, lt.letter + ')'),
+            el('span', {
+              style:{ display:'inline-flex', alignItems:'center', justifyContent:'center',
+                      minWidth:'22px', height:'22px', padding:'0 6px',
+                      background: pick != null ? '#FCD34D' : '#F3F4F6',
+                      color: pick != null ? '#92400E' : '#9CA3AF',
+                      border:'2px solid ' + (pick != null ? '#F59E0B' : '#E5E7EB'),
+                      borderRadius:'4px', fontWeight:'700', fontSize:'13px' }
+            }, pick != null ? String(pick) : '—')),
+          el('div', { style:{ flex:1, minWidth:0 }},
+            el('div', { style:{ fontWeight:'600', color:'var(--ink-2)', fontSize:'12px',
+                                marginBottom:'2px' }}, lt.text),
+            termText
+              ? el('div', { style:{ color:'#1E40AF', fontSize:'12px', fontStyle:'italic' }},
+                  '→ ' + termText)
+              : el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', fontStyle:'italic' }},
+                  '— не выбрано')));
+        wrap.append(row);
+      });
+      return wrap;
+    }
+  }
+
+  /* === №21: выбор правил под предложениями ===
+     Парсим предложения формулировки, для каждого показываем выбранные правила
+     ученика. picks._target — целевое правило из формулировки (например, 'запятая').
+     picks[sent.num] = ['rule1', 'rule2'] — список выбранных учеником правил. */
+  if(num === 21 && structured.dropdowns21
+       && typeof parseTask21Sentences === 'function'){
+    const sentences = parseTask21Sentences(txt);
+    const picks = structured.dropdowns21;
+    if(sentences.length){
+      const target = picks._target || null;
+      const wrap = el('div', { style:{ padding:'10px 12px', background:'#F0F9FF',
+        border:'1px solid #93C5FD', borderRadius:'10px', marginBottom:'14px' }},
+        el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
+                            marginBottom:'8px' }},
+          '📋 Что ученик выбрал в каждом предложении' +
+          (target ? ' (целевое: «' + target + '»)' : '')));
+      sentences.forEach(sent => {
+        const chosen = Array.isArray(picks[sent.num]) ? picks[sent.num] : [];
+        const isMatched = target && chosen.includes(target);
+        const row = el('div', { style:{ padding:'6px 4px', borderTop:'1px dashed #BFDBFE',
+          fontSize:'13px', lineHeight:'1.5' }});
+        row.append(
+          el('div', { style:{ display:'flex', alignItems:'center', gap:'6px', marginBottom:'2px' }},
+            el('b', { style:{ color:'#1E40AF' }}, sent.num + ')'),
+            chosen.length
+              ? el('span', { style:{ color:'var(--ink)', fontSize:'12px' }}, chosen.join(', '))
+              : el('span', { style:{ color:'var(--ink-3)', fontStyle:'italic', fontSize:'12px' }},
+                  '— не выбрано'),
+            target && chosen.length
+              ? el('span', { style:{ marginLeft:'auto', fontSize:'11px', fontWeight:'700',
+                                      color: isMatched ? '#065F46' : 'var(--ink-3)' }},
+                  isMatched ? '✓ совпало' : '')
+              : null));
+        wrap.append(row);
+      });
+      return wrap;
+    }
+  }
+
+  /* === Неизвестные типы: JSON под спойлером (fallback) === */
   const dump = el('details', { style:{ padding:'8px 12px', background:'#F9FAFB',
     border:'1px solid var(--border-2)', borderRadius:'8px', marginBottom:'14px',
     fontSize:'12px' }});
