@@ -25590,9 +25590,10 @@ function startSolverTeacherMarksPolling(){
     try {
       const rows = await restRequest('GET',
         '/test_variant_answers?attempt_id=eq.' + attId +
-        '&select=question_num,teacher_scratch,teacher_drawing,teacher_comment');
+        '&select=question_num,teacher_scratch,teacher_drawing,teacher_comment,points,max_points,user_answer');
       if(!Array.isArray(rows)) return;
       const next = {};
+      let pointsChanged = false;
       rows.forEach(r => {
         if(r.teacher_scratch || r.teacher_drawing || r.teacher_comment){
           next[r.question_num] = {
@@ -25601,12 +25602,30 @@ function startSolverTeacherMarksPolling(){
             teacher_comment: r.teacher_comment || null
           };
         }
+        /* Если учитель пересчитал баллы в БД (или скорректировал эталон),
+           обновляем у ученика STATE.solverChecked, чтобы он сразу увидел
+           актуальный балл и зелёный/красный цвет — без обновления страницы. */
+        if(r.points != null && r.max_points != null){
+          const prev = (STATE.solverChecked || {})[r.question_num];
+          if(!prev || prev.points !== r.points || prev.max !== r.max_points){
+            if(!STATE.solverChecked) STATE.solverChecked = {};
+            STATE.solverChecked[r.question_num] = {
+              points: Number(r.points) || 0,
+              max:    Number(r.max_points) || 0,
+              correct: ''
+            };
+            /* Ответ ученика тоже синхронизируем — на случай если он
+               менял через другое устройство (или учитель его правил). */
+            if(r.user_answer != null) STATE.solverAnswers[r.question_num] = r.user_answer;
+            pointsChanged = true;
+          }
+        }
       });
       const hash = JSON.stringify(next);
-      if(hash === _solverTeacherMarksHash) return;
-      _solverTeacherMarksHash = hash;
+      const marksChanged = hash !== _solverTeacherMarksHash;
+      if(marksChanged) _solverTeacherMarksHash = hash;
       STATE.solverTeacherMarks = next;
-      render();
+      if(marksChanged || pointsChanged) render();
     } catch(e){
       console.warn('[solver teacher marks poll]', e.message);
     }
