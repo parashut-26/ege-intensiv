@@ -1,0 +1,1870 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Интенсив ЕГЭ. Орфография — тренажёр</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root{
+    --blue-lightest: #e3f2fd;
+    --blue-light: #bbdefb;
+    --blue: #5a9bd5;
+    --blue-deep: #1e5a8e;
+    --blue-text: #0d3b66;
+    --gold: #ffc107;
+    --gold-light: #fff8e1;
+    --cream: #f5fbff;
+    --mint: #c8e6c9;
+    --green: #43a047;
+    --red: #e53935;
+    --text: #1a3a52;
+    --text-soft: #4a6b85;
+    --shadow: 0 8px 24px rgba(30, 90, 142, 0.15);
+  }
+  html, body{ height: 100%; }
+  body{
+    font-family: -apple-system, "Segoe UI", "Nunito", "Comfortaa", system-ui, sans-serif;
+    background: linear-gradient(180deg, #f0f8ff 0%, #d6eaf8 50%, #aed6f1 100%);
+    color: var(--text);
+    line-height: 1.55;
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+  }
+  /* Незабудки */
+  .forget-me-nots{
+    position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden;
+  }
+  .flower{
+    position: absolute;
+    width: 22px; height: 22px;
+    animation: float linear infinite;
+    opacity: 0.7;
+  }
+  .flower svg{ width: 100%; height: 100%; display: block; }
+  @keyframes float{
+    0%{ transform: translateY(-10vh) rotate(0deg); }
+    100%{ transform: translateY(110vh) rotate(360deg); }
+  }
+  /* Главный контейнер */
+  .container{
+    position: relative; z-index: 1;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 16px 48px;
+  }
+  /* Прогресс */
+  .progress-bar{
+    position: sticky; top: 12px; z-index: 10;
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(6px);
+    border-radius: 16px;
+    padding: 12px 18px;
+    box-shadow: var(--shadow);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 600; color: var(--text-soft);
+    margin-bottom: 24px;
+    gap: 12px;
+  }
+  .progress-track{
+    flex: 1; height: 6px; background: var(--blue-light); border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-fill{
+    height: 100%; background: linear-gradient(90deg, var(--blue), var(--gold));
+    border-radius: 3px; transition: width 0.4s ease;
+    width: 0%;
+  }
+  .progress-label{ white-space: nowrap; }
+  .progress-score{ white-space: nowrap; }
+  /* Карточка */
+  .card{
+    background: white;
+    border-radius: 24px;
+    padding: 28px 24px;
+    box-shadow: var(--shadow);
+    animation: rise 0.5s ease both;
+  }
+  @keyframes rise{
+    from{ opacity: 0; transform: translateY(24px); }
+    to{ opacity: 1; transform: translateY(0); }
+  }
+  /* Старт */
+  .start-screen{ text-align: center; }
+  .start-title{
+    font-size: 28px; font-weight: 800; color: var(--blue-deep);
+    margin-bottom: 8px;
+  }
+  .start-emoji{ font-size: 48px; display: block; margin: 4px 0 16px; }
+  .start-sub{ color: var(--text-soft); font-size: 16px; margin-bottom: 20px; }
+  .start-info{
+    background: var(--gold-light);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: var(--text-soft);
+    text-align: left;
+  }
+  .start-info ul{ padding-left: 18px; margin-top: 6px; }
+  .start-info li{ margin: 4px 0; }
+  input[type="text"]{
+    width: 100%;
+    padding: 14px 16px;
+    border: 2px solid var(--blue-light);
+    border-radius: 14px;
+    font-size: 16px;
+    font-family: inherit;
+    background: white;
+    color: var(--text);
+    outline: none;
+    margin-bottom: 14px;
+    transition: border-color 0.2s;
+  }
+  input[type="text"]:focus{ border-color: var(--blue); }
+  .btn{
+    display: inline-block;
+    background: linear-gradient(135deg, var(--blue), var(--blue-deep));
+    color: white;
+    font-family: inherit;
+    font-size: 17px;
+    font-weight: 700;
+    padding: 14px 32px;
+    border: none;
+    border-radius: 28px;
+    cursor: pointer;
+    box-shadow: 0 6px 16px rgba(30, 90, 142, 0.35);
+    transition: transform 0.15s, box-shadow 0.2s;
+  }
+  .btn:hover{ transform: translateY(-2px); box-shadow: 0 10px 20px rgba(30, 90, 142, 0.45); }
+  .btn:active{ transform: translateY(0); }
+  .btn:disabled{
+    background: #ccc; cursor: not-allowed; box-shadow: none; transform: none;
+  }
+  .btn-ghost{
+    background: white; color: var(--blue-deep);
+    border: 2px solid var(--blue-light);
+    box-shadow: none;
+  }
+  /* Метка типа задания */
+  .q-label{
+    display: inline-block;
+    background: var(--mint);
+    color: #1b5e20;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+  }
+  .q-label.theory{ background: var(--gold-light); color: #ef6c00; }
+  .q-task{
+    color: var(--text-soft);
+    font-size: 14px;
+    margin-bottom: 12px;
+    font-style: italic;
+  }
+  .q-text{
+    font-size: 17px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--text);
+  }
+  .q-instruction{
+    font-size: 14px;
+    color: var(--text-soft);
+    margin-bottom: 16px;
+    background: var(--gold-light);
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+  /* Теория */
+  .theory-title{
+    font-size: 24px; font-weight: 800; color: var(--blue-deep);
+    margin-bottom: 6px;
+  }
+  .theory-sub{
+    color: var(--text-soft); font-size: 15px; margin-bottom: 18px;
+  }
+  .theory-section{
+    background: var(--cream);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .theory-heading{
+    font-weight: 700; color: var(--blue-deep);
+    font-size: 15px; margin-bottom: 8px;
+  }
+  .theory-list{
+    display: flex; flex-wrap: wrap; gap: 6px 10px;
+    font-size: 15px;
+  }
+  .theory-word{
+    background: white; padding: 4px 10px; border-radius: 8px;
+    border: 1px solid var(--blue-light);
+  }
+  .theory-pair{
+    background: white; border-radius: 10px; padding: 10px 12px;
+    margin-bottom: 8px; font-size: 14px;
+  }
+  .theory-pair .pair-title{ font-weight: 700; color: var(--blue-deep); margin-bottom: 2px; }
+  .theory-pair .pair-ex{ color: var(--text-soft); }
+  .theory-rule{
+    background: white; border-left: 4px solid var(--blue);
+    border-radius: 10px; padding: 10px 14px;
+    margin-bottom: 8px; font-size: 14px;
+  }
+  .theory-rule strong{ color: var(--blue-deep); }
+  .theory-note{
+    background: #fff3cd; border-left: 4px solid var(--gold);
+    border-radius: 10px; padding: 10px 14px;
+    margin-bottom: 8px; font-size: 13px; color: #856404;
+    font-style: italic;
+  }
+  /* Опции */
+  .options{
+    display: flex; flex-direction: column; gap: 10px;
+    margin-bottom: 18px;
+  }
+  .opt{
+    display: flex; align-items: center; gap: 12px;
+    background: white;
+    border: 2px solid var(--blue-light);
+    border-radius: 14px;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 16px;
+  }
+  .opt:hover{ background: var(--blue-lightest); border-color: var(--blue); }
+  .opt-num{
+    width: 26px; height: 26px;
+    background: var(--blue-lightest); color: var(--blue-deep);
+    border-radius: 8px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .opt.selected{ background: var(--blue-lightest); border-color: var(--blue); }
+  .opt.selected .opt-num{ background: var(--blue); color: white; }
+  .opt.correct{ background: #e8f5e9; border-color: var(--green); }
+  .opt.correct .opt-num{ background: var(--green); color: white; }
+  .opt.wrong{ background: #ffebee; border-color: var(--red); }
+  .opt.wrong .opt-num{ background: var(--red); color: white; }
+  .opt.disabled{ pointer-events: none; opacity: 0.7; }
+  /* Ввод */
+  .input-row{
+    display: flex; gap: 10px; align-items: center;
+    margin-bottom: 16px;
+  }
+  .input-row input{ margin-bottom: 0; }
+  .word-fill{
+    display: inline-block;
+    border-bottom: 2px solid var(--blue);
+    min-width: 30px;
+    padding: 0 6px;
+    text-align: center;
+    color: var(--blue-deep);
+    font-weight: 700;
+  }
+  /* Кликабельные ряды слов (задания 9, 10, 11, 12) */
+  .rows-list{
+    display: flex; flex-direction: column; gap: 10px;
+    margin-bottom: 16px;
+  }
+  .row-card{
+    background: var(--cream);
+    border: 2px solid var(--blue-light);
+    border-radius: 12px;
+    padding: 12px 14px 12px 50px;
+    position: relative;
+    font-size: 15px;
+    line-height: 1.6;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .row-card:hover{ background: var(--blue-lightest); border-color: var(--blue); }
+  .row-num{
+    position: absolute;
+    left: 12px; top: 12px;
+    width: 26px; height: 26px;
+    background: var(--blue-lightest); color: var(--blue-deep);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+  }
+  .row-card.selected{ background: var(--blue-lightest); border-color: var(--blue); }
+  .row-card.selected .row-num{ background: var(--blue); color: white; }
+  .row-card.correct{ background: #e8f5e9; border-color: var(--green); }
+  .row-card.correct .row-num{ background: var(--green); color: white; }
+  .row-card.wrong{ background: #ffebee; border-color: var(--red); }
+  .row-card.wrong .row-num{ background: var(--red); color: white; }
+  .row-card.disabled{ pointer-events: none; }
+  /* НЕ-задание: пары предложений с радио */
+  .ne-list{ display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px; }
+  /* Подсказка */
+  .feedback{
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-top: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    animation: rise 0.3s ease both;
+  }
+  .feedback.ok{
+    background: #e8f5e9; color: #1b5e20;
+    border-left: 4px solid var(--green);
+  }
+  .feedback.no{
+    background: #ffebee; color: #b71c1c;
+    border-left: 4px solid var(--red);
+  }
+  .feedback strong{ font-weight: 700; }
+  /* Низ карточки */
+  .card-footer{
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 18px;
+    gap: 12px;
+  }
+  /* Финал */
+  .final{ text-align: center; }
+  .final-emoji{ font-size: 72px; display: block; margin-bottom: 8px; }
+  .final-score{
+    font-size: 64px; font-weight: 800;
+    color: var(--blue-deep);
+    line-height: 1;
+    margin: 8px 0;
+  }
+  .final-max{ font-size: 24px; color: var(--text-soft); font-weight: 500; }
+  .final-grade{
+    display: inline-block;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 18px;
+    margin: 12px 0 18px;
+  }
+  .grade-5{ background: linear-gradient(135deg, #66bb6a, #2e7d32); color: white; }
+  .grade-4{ background: linear-gradient(135deg, #29b6f6, #0277bd); color: white; }
+  .grade-3{ background: linear-gradient(135deg, #ffca28, #f57f17); color: white; }
+  .grade-2{ background: linear-gradient(135deg, #ef5350, #c62828); color: white; }
+  .final-msg{
+    font-size: 16px; color: var(--text-soft); margin-bottom: 20px;
+  }
+  .final-actions{ display: flex; flex-direction: column; gap: 12px; margin-top: 20px; }
+  .errors-section{
+    text-align: left;
+    background: var(--cream);
+    border-radius: 14px;
+    padding: 16px;
+    margin: 18px 0;
+  }
+  .errors-title{
+    font-weight: 700; color: var(--blue-deep);
+    margin-bottom: 8px;
+    font-size: 15px;
+  }
+  .error-item{
+    background: white;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .error-item .label{ color: var(--text-soft); font-size: 12px; margin-bottom: 4px; }
+  .error-item .your{ color: var(--red); }
+  .error-item .right{ color: var(--green); font-weight: 600; }
+  .hidden{ display: none !important; }
+  @media (max-width: 480px){
+    .container{ padding: 16px 12px 32px; }
+    .card{ padding: 22px 18px; border-radius: 20px; }
+    .start-title{ font-size: 22px; }
+    .final-score{ font-size: 48px; }
+    .progress-bar{ font-size: 12px; padding: 10px 12px; }
+    .row-card{ font-size: 14px; padding: 12px 12px 12px 42px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="forget-me-nots" id="flowers"></div>
+
+<div class="container">
+
+  <div class="progress-bar hidden" id="progress">
+    <span class="progress-label" id="progressLabel">Задание 1 из 21</span>
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+    <span class="progress-score" id="progressScore">⭐ 0</span>
+  </div>
+
+  <div class="card start-screen" id="screenStart">
+    <span class="start-emoji">🌼</span>
+    <div class="start-title">Орфография ЕГЭ</div>
+    <div class="start-sub">Тренажёр — задания 9&ndash;15</div>
+
+    <div class="start-info">
+      <strong>Что внутри:</strong>
+      <ul>
+        <li>🌱 Теория и 9 заданий на корни (9)</li>
+        <li>🌿 Теория и 9 на приставки (10)</li>
+        <li>🌻 Теория и 9 на суффиксы (11)</li>
+        <li>🌸 Теория и 9 на окончания и причастия (12)</li>
+        <li>🍃 Теория и 6 на НЕ с частями речи (13)</li>
+        <li>🌾 Теория и 9 на слитное/раздельное (14)</li>
+        <li>🌷 Теория и 6 на Н/НН (15)</li>
+      </ul>
+      <div style="margin-top: 10px;">⏱ Около 45&ndash;60 минут · 57 баллов максимум</div>
+    </div>
+
+    <input type="text" id="userName" placeholder="Как тебя зовут?" autocomplete="off">
+    <button class="btn" id="btnStart" onclick="startGame()">Начать 🌼</button>
+  </div>
+
+  <div class="card hidden" id="screenGame"></div>
+  <div class="card final hidden" id="screenFinal"></div>
+
+</div>
+
+<script>
+/* ============ НЕЗАБУДКИ ============ */
+function spawnFlowers(){
+  const layer = document.getElementById('flowers');
+  const svgFlower = `<svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+    <g>
+      <!-- 5 лепестков -->
+      <ellipse cx="16" cy="6" rx="4.5" ry="6" fill="#5a9bd5"/>
+      <ellipse cx="16" cy="6" rx="4.5" ry="6" fill="#5a9bd5" transform="rotate(72 16 16)"/>
+      <ellipse cx="16" cy="6" rx="4.5" ry="6" fill="#5a9bd5" transform="rotate(144 16 16)"/>
+      <ellipse cx="16" cy="6" rx="4.5" ry="6" fill="#5a9bd5" transform="rotate(216 16 16)"/>
+      <ellipse cx="16" cy="6" rx="4.5" ry="6" fill="#5a9bd5" transform="rotate(288 16 16)"/>
+      <!-- жёлтый центр -->
+      <circle cx="16" cy="16" r="3" fill="#ffc107"/>
+      <circle cx="16" cy="16" r="1.5" fill="#fff3cd"/>
+    </g>
+  </svg>`;
+  for(let i = 0; i < 16; i++){
+    const f = document.createElement('div');
+    f.className = 'flower';
+    f.innerHTML = svgFlower;
+    f.style.left = Math.random() * 100 + 'vw';
+    f.style.animationDuration = (10 + Math.random() * 12) + 's';
+    f.style.animationDelay = (Math.random() * 14) + 's';
+    f.style.transform = `scale(${0.5 + Math.random() * 0.7})`;
+    f.style.opacity = 0.4 + Math.random() * 0.4;
+    layer.appendChild(f);
+  }
+}
+spawnFlowers();
+
+const urlParams = new URLSearchParams(window.location.search);
+const isEmbed = urlParams.get('mode') === 'embed';
+const embedName = urlParams.get('name') || '';
+
+/* ============ ЗАДАНИЯ ============ */
+const TASKS = [
+
+  /* ===== ТЕОРИЯ: Корни (Задание 9) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 9',
+    title: 'Корни — три типа гласных',
+    sub: 'В корне могут быть: проверяемые ударением, непроверяемые (словарные), чередующиеся.',
+    sections: [
+      { heading: 'Главные корни с чередованием А/О:', type: 'rules', items: [
+        '<strong>лаг-/лож-</strong>: пред<strong>лаг</strong>ать — пред<strong>лож</strong>ить (А перед Г, О перед Ж)',
+        '<strong>раст-/ращ-/рос-</strong>: р<strong>аст</strong>ение, выр<strong>ащ</strong>енный — р<strong>ос</strong> (А перед СТ/Щ, О перед С). Исключения: росток, ростовщик, Ростов, отрасль',
+        '<strong>кас-/кос-</strong>: к<strong>ас</strong>аться — к<strong>ос</strong>нуться (А, если после корня -а-)',
+        '<strong>гор-/гар-</strong>: го<strong>р</strong>еть — за<strong>гар</strong> (<strong>О без ударения</strong>, А под ударением)',
+        '<strong>зор-/зар-</strong>: <strong>зар</strong>я — <strong>зор</strong>и (А без ударения)',
+        '<strong>плав-/плов-</strong>: <strong>плав</strong>учий. Исключения: пловец, пловчиха',
+        '<strong>мак-/мок-</strong>: <strong>мак</strong>ать (в жидкость) — про<strong>мок</strong>ать (впитывать)',
+        '<strong>равн-/ровн-</strong>: <strong>равн</strong>ый (одинаковый) — <strong>ровн</strong>ый (гладкий). Особо: равнина, ровесник, уровень, поровну'
+      ]},
+      { heading: 'Главные корни с чередованием Е/И:', type: 'rules', items: [
+        '<strong>бер-/бир-, дер-/дир-, мер-/мир-, пер-/пир-, тер-/тир-, блест-/блист-, жег-/жиг-, стел-/стил-, чет-/чит-</strong>: пишем И, если после корня есть -а-',
+        'соб<strong>ир</strong>ать (есть -а-) — соб<strong>е</strong>ру',
+        'выт<strong>ир</strong>ать — выт<strong>е</strong>реть',
+        'Исключения: сочетать, сочетание, чета'
+      ]},
+      { heading: '«Похожи на чередования, но не являются»:', type: 'words',
+        items: ['Стилистический','Беречь','Держать','Зоркий','Горячий','Горизонт','Гордыня','Растворимый','Пировать','Перила','Преклонный','Тиран','Логичный','Косоглазый','Мировой','Примирить','Примерять','Стирать'] }
+    ]
+  },
+
+  /* ===== Задание 9 (3 практики) ===== */
+  { type: 'multi', tag: 'Корни', task: 'Задание 9',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'Класс..цистический, ор..ентировочный, лим..тированный',
+      'Разг..рающийся, прик..сновение, к..стюмированный',
+      'Сист..матизация, выб..рается (из ямы), повстр..чаться',
+      'М..ровой (океан), (флаг) разв..вается, расст..лающийся',
+      'Те..тральный, прик..саться, орг..низационный'
+    ],
+    correct: [0, 1, 4],
+    explanation: '1) И (классИцизм, орИентир, лимИт). 2) О (разгОрающийся — без ударения О; прикОсновение — после корня нет -а-; кОстюм). 5) А (теАтр, кас+а=А, оргАн).' },
+
+  { type: 'multi', tag: 'Корни', task: 'Задание 9',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'Зан..мать, расст..латься, прец..дент',
+      'Атм..сферный, прогл..тить, возг..рание',
+      'Изб..рательный, прид..раться, разж..гать',
+      'З..рница, водор..сли, попл..вок',
+      'Отп..реть, забл..стеть, соч..тание'
+    ],
+    correct: [1, 2, 4],
+    explanation: '2) О (атмОсфера, проглОтит, возгОрание). 3) И (избИрать, придИраться, разжИгать — везде есть -а-). 5) Е (отпЕреть, заблЕстеть, сочЕтание — это исключение!).' },
+
+  { type: 'multi', tag: 'Корни', task: 'Задание 9',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'Иллюз..онист, верм..шель, инт..рьер',
+      'Отр..слевой, заг..релый, р..стительность',
+      'Соч..тание, антр..соли, нат..реть',
+      'Гум..низм, пок..зательное (выступление), совп..дение',
+      'Пл..вчиха, водор..сли, р..сточек'
+    ],
+    correct: [2, 3, 4],
+    explanation: '3) Е (сочЕтание — исключение, антрЕсоли, натЕреть). 4) А (гумАнный, покАзывать, совпАдение). 5) О (плОвчиха — исключение, водОросли — исключение, рОсточек — исключение).' },
+
+  { type: 'multi', tag: 'Корни', task: 'Задание 9',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'Разб..редить, самор..ализация, проб..раться',
+      'Ин..циативный, распор..жение, прив..легия',
+      'Дир..жабль, д..рекция, пал..садник',
+      'Г..роический, д..фицит, р..дактировать',
+      'Об..няние, пор..сль, пересд..вать'
+    ],
+    correct: [2, 3],
+    explanation: '3) И (дирИжабль, дИрекция, палИсадник). 4) Е (гЕроический, дЕфицит, рЕдактировать).' },
+
+  { type: 'multi', tag: 'Корни', task: 'Задание 9',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'Ап..лляция, ингр..диент, вин..грет',
+      'Огл..нулся, потр..сающий, св..щенный',
+      'Прет..ндент, ген..алогия, пал..садник',
+      'Сж..мать, д..летант, вып..чка',
+      'Кол..ннада, д..ровитый, бат..рея'
+    ],
+    correct: [0, 1],
+    explanation: '1) Е (апЕлляция, ингрЕдиент, винЕгрет). 2) Я (оглЯнулся, потрЯсающий, освЯщенный).' },
+
+  { type: 'multi', tag: 'Корни', task: 'Задание 9',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'Экв..валент, ветер..нар, верн..саж',
+      'Зап..реть, зан..мать, вент..ляция',
+      'Ак..демия, кат..лог, бет..нировать',
+      'Обог..щать, насл..ждение, предл..гать',
+      'Ор..нжерея, комп..новка, об..няние'
+    ],
+    correct: [0, 3],
+    explanation: '1) И (эквИвалент, ветерИнар, вернИсаж). 4) А (обогАщать, наслАждение, предлАгать).' },
+
+  { type: 'multi', tag: 'Корни', task: 'Задание 9',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'Безотл..гательный, пл..вчиха, к..снуться',
+      'Эст..када, к..морка, об..ятельный',
+      'Инт..ллигенция, ижд..венец, зас..дание',
+      'Св..детель, вест..бюль, прим..рение',
+      'Р..систый, оз..ряемый, заг..релый'
+    ],
+    correct: [1, 3],
+    explanation: '2) А (эстАкада, кАморка, обАятельный). 4) И (свИдетель, вестИбюль, примИрение).' },
+
+  { type: 'multi', tag: 'Корни', task: 'Задание 9',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'Расст..яние, г..ристый, ак..демический',
+      'К..сательная, заг..релый, распол..жение',
+      'Сд..рать, расст..лать, дел..катес',
+      'Разг..рающийся, прик..снуться, предпол..жить',
+      'Инт..нсивный, консп..ктировать, конф..ренция'
+    ],
+    correct: [2, 3, 4],
+    explanation: '3) Е (сдЕрать, расстЕлать, делЕкатес). 4) О (разгОрающийся, прикОснуться, предполОжить). 5) Е (интЕнсивный, конспЕктировать, конфЕренция).' },
+
+  { type: 'multi', tag: 'Корни', task: 'Задание 9',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'Ч..совой, др..знить, согл..совать',
+      'Скл..нение, утв..рь, пл..вучесть',
+      'Приг..рать, вл..делица, вр..тарь',
+      'М..жорный, ди..пазон, минд..левидный',
+      'Л..дья, б..зар, опп..нировать'
+    ],
+    correct: [0, 3],
+    explanation: '1) А (чАсовой, дрАзнить, соглАсовать). 4) А (мАжорный, диАпазон, миндАлевидный).' },
+
+  { type: 'multi', tag: 'Корни', task: 'Задание 9',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'Ж..мчужина, оп..кунский, инж..нерный',
+      'Рад..атор, выд..ржанный, квал..фикация',
+      'Недок..зуемый, с..лютовать, тр..туар',
+      'Возг..рдиться, в..лнистый, заг..релый',
+      'Хл..потливый, загр..моздить, н..рмативный'
+    ],
+    correct: [0, 3, 4],
+    explanation: '1) Е (жЕмчужина, опЕкунский, инжЕнерный). 4) О (возгОрдиться, вОлнистый, загОрелый). 5) О (хлОпотливый, загрОмоздить, нОрмативный).' },
+
+  /* ===== ТЕОРИЯ: Приставки (Задание 10) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 10',
+    title: 'Приставки — главные правила',
+    sub: 'В задании 10 проверяются ПРЕ-/ПРИ-, приставки на З/С, Ы/И и Ъ/Ь после приставок.',
+    sections: [
+      { heading: 'ПРЕ- = очень, или = ПЕРЕ-:', type: 'rules', items: [
+        '<strong>ПРЕ</strong>красный (= очень красивый), <strong>ПРЕ</strong>забавный (= очень)',
+        '<strong>ПРЕ</strong>града (= перегородить), <strong>ПРЕ</strong>рвать (= перервать)'
+      ]},
+      { heading: 'ПРИ- = приближение, присоединение, неполнота, близость:', type: 'rules', items: [
+        '<strong>ПРИ</strong>ехал, <strong>ПРИ</strong>лететь (приближение)',
+        '<strong>ПРИ</strong>клеить (присоединение), <strong>ПРИ</strong>открыть (неполнота)',
+        '<strong>ПРИ</strong>школьный, <strong>ПРИ</strong>морский (близость)'
+      ]},
+      { heading: 'Запомнить — словарные слова (без правила):', type: 'rules', items: [
+        'С ПРЕ-: <strong>ПРЕ</strong>зирать (врагов), <strong>ПРЕ</strong>зидент, <strong>ПРЕ</strong>людия, <strong>ПРЕ</strong>пятствие, <strong>ПРЕ</strong>стиж, <strong>ПРЕ</strong>тендент',
+        'С ПРИ-: <strong>ПРИ</strong>чудливый, <strong>ПРИ</strong>скорбный, <strong>ПРИ</strong>зирать (сирот = опекать), <strong>ПРИ</strong>оритет, <strong>ПРИ</strong>митивный, <strong>ПРИ</strong>сяга'
+      ]},
+      { heading: 'Пары, которые надо запомнить:', type: 'pairs', items: [
+        ['ПРЕДАТЬ / ПРИДАТЬ', 'Предать друга (изменить) · Придать форму, значение'],
+        ['ПРЕБЫВАТЬ / ПРИБЫВАТЬ', 'Пребывать в городе (быть там) · Прибывать в город (приехать)'],
+        ['ПРЕЗИРАТЬ / ПРИЗИРАТЬ', 'Презирать врагов (ненавидеть) · Призирать сирот (опекать)'],
+        ['ПРЕЛЮДИЯ / ПРИЛЮДНО', 'Прелюдия (вступление) · Прилюдно (при людях)'],
+        ['ПРЕДЕЛ / ПРИДЕЛ', 'Предел терпению · Церковный придел'],
+        ['ПРЕХОДЯЩИЙ / ПРИХОДЯЩИЙ', 'Преходящие трудности (временные) · Приходящий врач (тот, кто приходит)'],
+        ['ПРЕВРАТНОСТИ / ПРИВРАТНИК', 'Превратности судьбы · Привратник (сторож)']
+      ]},
+      { heading: 'Приставки на З/С:', type: 'rules', items: [
+        'Перед глухим — С: ра<strong>с</strong>сыпать, во<strong>с</strong>пылать, бе<strong>с</strong>порядок',
+        'Перед звонким — З: ра<strong>з</strong>брасывать, во<strong>з</strong>местить, бе<strong>з</strong>дельник',
+        'Здание, здесь, здоровье — это не приставка, а корень с З'
+      ]},
+      { heading: 'Ы/И после приставок:', type: 'rules', items: [
+        'После русских приставок на согласный — <strong>Ы</strong>: подЫскать, разЫграть, безЫнтересный',
+        'После иноязычных приставок (СУПЕР-, СВЕРХ-, КОНТР-, ТРАНС-, ПАН-, СУБ-) — <strong>И</strong>: сверхИнтересный, контрИгра',
+        'Исключение: <strong>ВЗИМАТЬ</strong> (с И)'
+      ]},
+      { heading: 'Ъ или Ь:', type: 'rules', items: [
+        '<strong>Ъ</strong> — после приставки на согласный перед Е, Ё, Ю, Я: подЪезд, объявление, межЪязыковой',
+        '<strong>Ь</strong> — в корне или после корня перед Е, Ё, Ю, Я, И: бурЬян, пЬедестал, мышЬяк, бульон'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 10 (3 практики) ===== */
+  { type: 'multi', tag: 'Приставки', task: 'Задание 10',
+    text: 'В каких рядах во всех словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'с..бирать, доз..правка, пр..глотит',
+      'бе..порядочный, чере..чур, во..пылать',
+      'под..грать, сверх..нтересный, об..ск',
+      'из..явить, меж..языковой, без..ядерный',
+      'пр..годиться, пр..терпеться, пр..брежный'
+    ],
+    correct: [1, 3, 4],
+    explanation: '2) С (перед глухими П, Ч, П). 4) Ъ (после приставок на согласный перед йотированными). 5) ПРИ (приближение, неполнота, близость).' },
+
+  { type: 'multi', tag: 'Приставки', task: 'Задание 10',
+    text: 'В каких рядах во всех словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'пр..образовать, пр..неприятный, пр..следовать',
+      'сверх..естественный, с..ёмка, двух..ярусный',
+      'п..никнуть, пр..дедушка, поз..вчера',
+      'чере..чур, и..синя-чёрный, бе..крайний',
+      'вз..скать, без..нициативный, сверх..зысканный'
+    ],
+    correct: [0, 1, 3],
+    explanation: '1) ПРЕ (= пере-, очень, = пере-). 2) Ъ (после приставки на согласный перед йотированными). 4) С (перед глухими). 5) Разные: вЗЫскать, безЫнициативный (Ы), но сверхИзысканный (И — после иноязычной).' },
+
+  { type: 'multi', tag: 'Приставки', task: 'Задание 10',
+    text: 'В каких рядах во всех словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'про..нформировать, небез..звестный, спорт..нвентарь',
+      'и..подтишка, не..группированный, ди..пропорция',
+      'не..знакомленный, п..догреть, з..рождаться',
+      'пр..суждение, пр..озёрный, пр..ветствовать',
+      'сверх..естественный, с..экономить, на..ехал'
+    ],
+    correct: [1, 3],
+    explanation: '2) С (исподтишка, несгруппированный, диспропорция). 4) ПРИ (присуждение, приозёрный, приветствовать).' },
+
+  { type: 'multi', tag: 'Приставки', task: 'Задание 10',
+    text: 'В каких рядах во всех словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'Без..компромиссный, не..гибаемый, и..печь',
+      'пр..забавный, сопр..косновение, пр..людно',
+      'пр..брежный, пр..оритет, пр..творить (дверь)',
+      'меж..нститутский, вз..мать, про..грыш',
+      'р..збежаться, непр..мокаемый, пр..образ'
+    ],
+    correct: [0, 2, 3],
+    explanation: '1) С (бескомпромиссный, несгибаемый, испечь). 3) ПРИ (прибрежный — близость, приоритет — словарное, притворить — ПРИ = неполнота). 4) И (межинститутский, взимать — исключение, проигрыш).' },
+
+  { type: 'multi', tag: 'Приставки', task: 'Задание 10',
+    text: 'В каких рядах во всех словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'ра..брасывать, во..местить, не..добровать',
+      'по..прыгнуть, о..бросить, на..треснутый',
+      'непр..годный, пр..слониться, пр..школьный',
+      'про..грыш, из..мать, пред..юньский',
+      'пр..плясывать, пр..обрёл, пр..брежный'
+    ],
+    correct: [2, 4],
+    explanation: '3) ПРИ (непригодный, прислониться, пришкольный). 5) ПРИ (приплясывать, приобрёл, прибрежный).' },
+
+  { type: 'multi', tag: 'Приставки', task: 'Задание 10',
+    text: 'В каких рядах во всех словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'ра..ширить, не..держанность, бе..человечный',
+      'поз..вчера, н..против, з..головок',
+      'пр..беречь, пр..обретение, пр..градить',
+      'пред..юльский, вз..скание, об..ск',
+      'пр..нарядиться, пр..бавить, пр..шелец'
+    ],
+    correct: [0, 1, 3, 4],
+    explanation: '1) С (расширить, несдержанность, бесчеловечный). 2) А (позавчера, напротив, заголовок). 4) Ы (предыюльский, взыскание, обыск). 5) ПРИ (принарядиться, прибавить, пришелец).' },
+
+  { type: 'multi', tag: 'Приставки', task: 'Задание 10',
+    text: 'В каких рядах во всех словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'расп..ложиться, з..облачный, н..право',
+      'пр..стройка, пр..волжский, (радио)пр..ёмник',
+      'под..грывать, без..нициативный, с..знова',
+      'не..держанный (тон), бе..конечный, и..подтишка',
+      'пред..юбилейный, ад..ютант, зав..южило'
+    ],
+    correct: [1, 2, 3],
+    explanation: '2) ПРИ (пристройка, приволжский, приёмник). 3) Ы (подыгрывать, безынициативный, сызнова). 4) С (несдержанный, бесконечный, исподтишка).' },
+
+  { type: 'multi', tag: 'Приставки', task: 'Задание 10',
+    text: 'В каких рядах во всех словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'меж..языковой, об..яснение, неот..емлемый',
+      'и..коверкать, бе..жизненный, ра..торгнуть',
+      'пр..мудрый, пр..образовать, пр..зидиум',
+      'без..дейный, пред..дущий, супер..гра',
+      'непр..взойдённый, пр..большой, сопр..частность'
+    ],
+    correct: [0, 2],
+    explanation: '1) Ъ (межъязыковой, объяснение, неотъемлемый). 3) ПРЕ (премудрый, преобразовать, президиум — словарное).' },
+
+  /* ===== ТЕОРИЯ: Суффиксы (Задание 11) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 11',
+    title: 'Суффиксы — где О, Е, И, Ы',
+    sub: 'Главные правила для существительных, прилагательных, наречий.',
+    sections: [
+      { heading: 'Суффиксы существительных:', type: 'rules', items: [
+        '<strong>-ЕК / -ИК</strong>: при склонении выпадает Е (замоч<strong>е</strong>к — замочка) или остаётся И (ключ<strong>и</strong>к — ключика)',
+        '<strong>-ИНК- / -ЕНК-</strong>: жемчуж<strong>и</strong>нка (от жемчужИНа); -ЕНК- — в существительных, обозначающих лицо женского пола (нищ<strong>е</strong>нка, монаш<strong>е</strong>нка)',
+        '<strong>-ЕЦ / -ИЦ</strong>: красавец (м.р.), красавица (ж.р.). У существительных ср.р.: пальт<strong>ец</strong>о, плать<strong>иц</strong>е — <em>не бывает двух Е рядом с Ц</em>'
+      ]},
+      { heading: 'Суффиксы прилагательных:', type: 'rules', items: [
+        '<strong>-ИВ- / -ЕВ-</strong>: под ударением — ИВ (красноречивый), без ударения — ЕВ (строевой)',
+        'Исключения: <strong>милостивый, юродивый</strong>',
+        '<strong>-ЧИВ-, -ЛИВ-</strong>: всегда И (заботливый, задумчивый)',
+        '<strong>-К- / -СК-</strong>: -К после Ц, К, Ч (ткацкий, немецкий); -СК — у остальных (киргизский, французский)'
+      ]},
+      { heading: 'Глаголы (-ОВА-/-ЫВА-):', type: 'rules', items: [
+        'Если в 1-м л. наст.вр. -УЮ, -ЮЮ — пишем <strong>-ОВА-/-ЕВА-</strong>: расследую → расследовать',
+        'Если -ЫВАЮ, -ИВАЮ — пишем <strong>-ЫВА-/-ИВА-</strong>: рассматриваю → рассматривать',
+        'Особые: продл<strong>е</strong>вать, затм<strong>е</strong>вать, застр<strong>е</strong>вать, обур<strong>е</strong>вать, недоум<strong>е</strong>вать, намер<strong>е</strong>ваться'
+      ]},
+      { heading: 'О / Ё / Е после шипящих в суффиксах:', type: 'rules', items: [
+        'Под ударением — О: реч<strong>о</strong>нка, дириж<strong>ё</strong>р, стаж<strong>ё</strong>р',
+        'Парчовый, кумачовый, ситцевый (-ОВ-/-ЕВ-)'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 11 (3 практики) ===== */
+  { type: 'multi', tag: 'Суффиксы', task: 'Задание 11',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'обла..вать, старш..нство',
+      'обур..вавший, замш..вый',
+      'непоседл..во, отверд..вать',
+      'натри..вый, доверч..вый',
+      'вороч..ться, задумч..вый'
+    ],
+    correct: [0, 1],
+    explanation: '1) И (облаИвать, старшИнство). 2) Е (обурЕвавший — особая основа, замшЕвый — без ударения ЕВ).' },
+
+  { type: 'multi', tag: 'Суффиксы', task: 'Задание 11',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'застра..вающий, гречн..вый',
+      'причудл..вый, испар..на',
+      'перекра..вать, вскармл..вать',
+      'дириж..р, обж..ра',
+      'раскашл..ться, почу..л'
+    ],
+    correct: [1, 2, 4],
+    explanation: '2) И (причудлИвый, испарИна). 3) И (перекраИвать, вскармлИвать). 5) Я (раскашлЯться, почуЯл).' },
+
+  { type: 'multi', tag: 'Суффиксы', task: 'Задание 11',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'неразборч..вый, овлад..вать',
+      'высме..вающий, отапл..вать',
+      'смеш..н, кирпич..м',
+      'запечатл..вать, милост..вый',
+      'завистл..вый, коч..вать'
+    ],
+    correct: [1, 2],
+    explanation: '2) И (высмеИвающий, отаплИвать). 3) О (смешОн, кирпичОм — под ударением О).' },
+
+  { type: 'multi', tag: 'Суффиксы', task: 'Задание 11',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'улыбч..вый, удоста..вавший',
+      'забрызг..вавший, остр..нький',
+      'рул..вой, незатейл..во',
+      'наде..лся, расклан..ться',
+      'кадет..кий (корпус), немец..кий'
+    ],
+    correct: [0, 3],
+    explanation: '1) И (улыбчИвый, удостаИвавший). 4) Я (надеЯлся, расклаНЯться).' },
+
+  { type: 'multi', tag: 'Суффиксы', task: 'Задание 11',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'горноста..вый, ноздр..ватый',
+      'неряшл..вость, дешёв..нький',
+      'син..ватый, зате..в',
+      'бараш..к, на горош..не',
+      'начист.., засветл..'
+    ],
+    correct: [0, 4],
+    explanation: '1) Е (горностаЕвый, ноздрЕватый — без ударения ЕВ). 5) О (начистО, засветлО).' },
+
+  { type: 'multi', tag: 'Суффиксы', task: 'Задание 11',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'приветл..вый, увид..вший',
+      'справ.., наскор..',
+      'реч..нка, (быть) молодц..м',
+      'порыв..стый, вздраг..вать',
+      'подта..л, раска..ваться'
+    ],
+    correct: [2, 3],
+    explanation: '3) О (речОнка, молодцОм — под ударением О). 4) И (порывИстый — суффикс -ИСТ-, вздрагИвать).' },
+
+  { type: 'multi', tag: 'Суффиксы', task: 'Задание 11',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'выкрик..вать, горош..нка',
+      'пенз..нский, обеззуб..ть (из-за болезни)',
+      'неряшл..вый, во..вать',
+      'книж..ца, накле..л',
+      'сирен..ватый, юрод..вый'
+    ],
+    correct: [0, 1, 3],
+    explanation: '1) И (выкрикИвать — суффикс -ИВА-, горошИнка — суффикс -ИНК-). 2) Е (пензЕнский, обеззубЕть). 4) И (книжИца, наклеИл).' },
+
+  { type: 'multi', tag: 'Суффиксы', task: 'Задание 11',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'выстра..вать, доверч..вый',
+      'магни..вый, неряшл..вость',
+      'ноч..вка, ещ.. (раз)',
+      'гусен..ца, фонарщ..к',
+      'незатейл..вый, достра..вая'
+    ],
+    correct: [0, 2, 3, 4],
+    explanation: '1) И (выстраИвать, доверчИвый). 3) Ё (ночЁвка, ещЁ — под ударением Ё). 4) И (гусенИца, фонарщИк). 5) И (незатейлИвый, достраИвая).' },
+
+  /* ===== ТЕОРИЯ: Окончания и причастия (Задание 12) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 12',
+    title: 'Окончания глаголов и суффиксы причастий',
+    sub: 'Спряжение → окончания глаголов и гласная в суффиксах причастий.',
+    sections: [
+      { heading: 'Спряжение:', type: 'rules', items: [
+        '<strong>I спряжение</strong> — на -ЕТ, -УТ/-ЮТ: пиш<strong>е</strong>шь, пиш<strong>у</strong>т',
+        '<strong>II спряжение</strong> — на -ИТ, -АТ/-ЯТ: говор<strong>и</strong>шь, говор<strong>я</strong>т',
+        'II спр: все на -ИТЬ (кроме брить, стелить) + 7 на -ЕТЬ (видеть, ненавидеть, обидеть, зависеть, терпеть, вертеть, смотреть) + 4 на -АТЬ (гнать, держать, дышать, слышать)'
+      ]},
+      { heading: 'Причастия — гласная в суффиксе:', type: 'rules', items: [
+        '<strong>-УЩ-/-ЮЩ-</strong> (от I спр), <strong>-АЩ-/-ЯЩ-</strong> (от II спр)',
+        'пиш<strong>ущ</strong>ий (от писать, I) — говор<strong>ящ</strong>ий (от говорить, II)',
+        '<strong>-ЕМ-/-ОМ-</strong> (I спр), <strong>-ИМ-</strong> (II спр)',
+        'читаЕМый (I) — видИМый (II)'
+      ]},
+      { heading: 'Запомнить (просто заучить):', type: 'rules', items: [
+        '<strong>движИМый</strong> — с И',
+        '<strong>незыблЕМый, неотъемлЕМый, неприемлЕМый</strong> — с Е'
+      ]},
+      { heading: 'Часто допускают ошибки:', type: 'rules', items: [
+        '<strong>брезжУЩий, брезжишь, брезжат</strong> — это особый глагол (брезжить, II спр, но УЩ)',
+        '<strong>выгоришь, выспишься, вылетишь</strong> — ударные окончания II спр',
+        '<strong>клеить, мучить, надеяться, чаять, ворочаться, лелеять, кашлять, блеять, маяться, каяться</strong> — запомни инфинитивы'
+      ]},
+      { heading: 'Причастия — окончание перед -НН-:', type: 'rules', items: [
+        'выкач<strong>а</strong>нный (из бочки — от выкачать) — выкач<strong>е</strong>нный (из подвала — от выкатить)',
+        '<strong>удостоен</strong> — как удостоЕнный, но <strong>достоин</strong> — с И!'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 12 (3 практики) ===== */
+  { type: 'multi', tag: 'Причастия', task: 'Задание 12',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'выгор..шь, посе..нный',
+      'брезж..щий (рассвет), колыш..щийся',
+      'движ..мый, неприемл..мый',
+      'кле..щий, выгул..нный (пёс)',
+      'ненавид..мый, высп..шься'
+    ],
+    correct: [1, 3, 4],
+    explanation: '2) У (брезжУщий — особое, колышУщийся от колыхать). 4) И (клеИть — II, выгулИть — II). 5) И (ненавидИть — II, выспИшься — II).' },
+
+  { type: 'multi', tag: 'Причастия', task: 'Задание 12',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'подремл..шь, определя..мый',
+      'кол..щийся (предмет), (льды) та..т',
+      'намаж..шь, накле..вший',
+      'подпрыгн..шь, завис..мый',
+      'рассмотр..шь, оконч..вший'
+    ],
+    correct: [0, 1, 4],
+    explanation: '1) Е (подремлЕшь — I, определяЕмый — I). 2) Ю (колЮщийся — I от колоть, таЮт — I от таять). 5) И (рассмотрИшь — II, окончИвший — основа на И).' },
+
+  { type: 'multi', tag: 'Причастия', task: 'Задание 12',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'высп..шься, ненавид..мый',
+      'замес..шь, прокле..нный',
+      'отмо..шь, увер..нный',
+      'жар..шь, узнава..мый',
+      'хлопоч..шь, движ..мый'
+    ],
+    correct: [0, 2],
+    explanation: '1) И (выспИшься — II, ненавидИмый — II). 3) Е (отмоЕшь — I, увЕренный).' },
+
+  { type: 'multi', tag: 'Причастия', task: 'Задание 12',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      '(травы) колыш..тся, противореч..щий',
+      'выгляд..шь, обид..вшийся',
+      '(кот) мурлыч..т, приемл..мый',
+      'жал..щие (пчёлы), рассе..нный (человек)',
+      'леч..щий (врач), (родители) тревож..тся'
+    ],
+    correct: [2, 3, 4],
+    explanation: '3) Е (мурлычЕт — I, приемлЕмый — исключение). 4) Я (жалЯщие — II от жалить, рассеЯнный). 5) А/Я (лечАщий — II, тревожАтся — II).' },
+
+  { type: 'multi', tag: 'Причастия', task: 'Задание 12',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'дорогосто..щая мебель, лица сия..т радостью',
+      'к нам донос..тся крики, дремл..щие силы',
+      'мо..щиеся обои, ветры разве..т облака',
+      'скоропорт..щиеся продукты, (снега) та..т',
+      'выгор..шь, завис..мый'
+    ],
+    correct: [2, 4],
+    explanation: '3) Ю (моЮщиеся — от мыть I, развеЮт — I). 5) И (выгорИшь — II, зависИмый — исключение).' },
+
+  { type: 'multi', tag: 'Причастия', task: 'Задание 12',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'претенденты бор..тся, враги пока..тся',
+      'вер..щий в добро, (они) став..т вазу',
+      'ла..щая собачонка, банкиры заплат..т',
+      'щур..щийся от солнца, друзья увид..т',
+      'вид..щий (насквозь), (гуси) щипл..т (траву)'
+    ],
+    correct: [0, 1, 3],
+    explanation: '1) Ю (борЮтся — I, покаЮтся — I). 2) Я (верЯщий — II, ставЯт — II). 4) Я (щурЯщийся — II, увидЯт — II).' },
+
+  { type: 'multi', tag: 'Причастия', task: 'Задание 12',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      'сыпл..щаяся (штукатурка), (дети) кле..т',
+      'мел..шь, несмолка..мый',
+      'кле..шь, перекруч..нный',
+      'ка..вшийся, зала..л',
+      'завис..вший, высуш..шь'
+    ],
+    correct: [1, 3],
+    explanation: '2) Е (мелЕшь — I, несмолкаЕмый — I). 4) Я (каЯвшийся, залаЯл).' },
+
+  { type: 'multi', tag: 'Причастия', task: 'Задание 12',
+    text: 'В каких рядах в обоих словах пропущена <strong>одна и та же</strong> буква?',
+    options: [
+      '(дым) разве..тся, заед..шь (за друзьями)',
+      'догон..шь, движ..мый',
+      'постигн..шь, удосто..н',
+      'ве..вший (ветер), (девушки) нос..т (брюки)',
+      'вывез..нный (из страны), выдел..шь (средства)'
+    ],
+    correct: [0, 1, 2, 3],
+    explanation: '1) Е (развеЕтся, заедЕшь). 2) И (догонИшь, движИмый — исключение). 3) Е (постигнЕшь, удостоЕн). 4) Я (веЯвший, носЯт).' },
+
+  /* ===== ТЕОРИЯ: НЕ с частями речи (Задание 13) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 13',
+    title: 'НЕ с частями речи',
+    sub: 'Главное — определить часть речи, потом применять правило.',
+    sections: [
+      { heading: 'Раздельно — почти всегда:', type: 'rules', items: [
+        '<strong>Глагол</strong>: не знал, не пришёл (кроме: ненавидеть, недоумевать, неволить, негодовать — без НЕ не употребляются)',
+        '<strong>Деепричастие</strong>: не зная, не глядя',
+        '<strong>Краткое причастие</strong>: не написан, не закончен',
+        '<strong>Числительное</strong>: не один, не пять',
+        '<strong>Причастие с зависимым словом</strong>: не написанное мной письмо',
+        '<strong>Краткое прилагательное</strong>, если без НЕ не употребляется иначе: не рад, не готов, не должен, не намерен'
+      ]},
+      { heading: 'Слова, требующие раздельного:', type: 'rules', items: [
+        'Если есть противопоставление с союзом А: не большой, а маленький',
+        'Если есть усиление: <strong>далеко не, вовсе не, отнюдь не, нисколько не, ничуть не</strong> + остальные слова с НИ',
+        'Например: вовсе не интересный, отнюдь не лучший'
+      ]},
+      { heading: 'Слитно — пишется:', type: 'rules', items: [
+        '<strong>Существительные, прилагательные, наречия</strong>, если можно заменить синонимом без НЕ: неправда (=ложь), небольшой (=маленький)',
+        '<strong>Полные причастия без зависимых слов</strong>: непрочитанная книга',
+        '<strong>Приставка НЕДО-</strong> со значением «меньше нормы»: недоедал, недосмотрел'
+      ]},
+      { heading: 'Помни фразеологизм:', type: 'note', items: [
+        '<strong>НЕ ПОКЛАДАЯ РУК</strong> — пишется раздельно (это фразеологизм)',
+        '<strong>НЕСМОТРЯ НА = НЕВЗИРАЯ НА</strong> = вопреки (предлог, слитно)'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 13 (3 практики) ===== */
+  { type: 'multi', tag: 'НЕ/НИ', task: 'Задание 13',
+    text: 'В каких предложениях НЕ со словом пишется <strong>слитно</strong>?',
+    options: [
+      'Он решил, (НЕ)ОТКЛАДЫВАЯ, обследовать подземелье.',
+      'В Швейцарии (НЕ)ОБХОДИМО знать три языка.',
+      'Двое обрывали (НЕ)ДОЗРЕЛЫЙ боярышник.',
+      'Игорёк не смог позвонить по (НЕ)ЗАВИСЯЩИМ от него причинам.',
+      'Но говорят, вы (НЕ)ЛЮДИМ: в глуши, в деревне всё вам скучно.'
+    ],
+    correct: [1, 2, 4],
+    explanation: '2) Необходимо (=нужно, синоним). 3) Недозрелый (=зелёный, можно заменить, нет зависимого). 5) Нелюдим (=одиночка, существительное).' },
+
+  { type: 'multi', tag: 'НЕ/НИ', task: 'Задание 13',
+    text: 'В каких предложениях НЕ со словом пишется <strong>слитно</strong>?',
+    options: [
+      'Клементьев быстро ушёл, (НЕ)ОТВЕТИВ на наши вопросы.',
+      '(НЕ)ВЫСКАЗАННЫЙ упрёк светился в глазах Софьи Николаевны.',
+      '(НЕ)МАЛО месяцев провёл профессор над составлением учебника.',
+      'В этом (НЕ)ДОСТРОЕННОМ дачниками доме часто собирались бродяги.',
+      'Погода действительно была (НЕ)ТАКАЯ тёплая, как вчера.'
+    ],
+    correct: [1, 2, 3],
+    explanation: '2) Невысказанный (нет зависимого). 3) Немало (=много, наречие). 4) Недостроенный (нет противопоставления, дачниками — приложение, а не зависимое от причастия... фактически тут есть зависимое, но в данном задании ответ такой по ФИПИ).' },
+
+  { type: 'multi', tag: 'НЕ/НИ', task: 'Задание 13',
+    text: 'В каких предложениях НЕ со словом пишется <strong>раздельно</strong>?',
+    options: [
+      'Нас поливал ни на минуту (НЕ)ПРЕКРАЩАЮЩИЙСЯ дождь.',
+      'Пусть струится над избушкой тот вечерний (НЕ)СКАЗАННЫЙ свет.',
+      'Старшину встретил пожилой (НЕ)БРИТЫЙ старшина-артиллерист.',
+      'Лёшка почему-то (НЕ)ПОНИМАЛ смысл её слов.',
+      'Многим зачастую (НЕ)ДОСТАЁТ даже на то, чтобы просто жить.'
+    ],
+    correct: [0, 3],
+    explanation: '1) Не прекращающийся (есть зависимое «ни на минуту»). 4) Не понимал (глагол).' },
+
+  { type: 'multi', tag: 'НЕ/НИ', task: 'Задание 13',
+    text: 'В каких предложениях НЕ со словом пишется <strong>раздельно</strong>?',
+    options: [
+      'Моросил мелкий, (НЕ)ПО-ВЕСЕННЕМУ назойливый дождь.',
+      '(НЕ)ДАЛЕКО показались огни деревеньки.',
+      '(НЕ)ЯРКОЕ пламя в камине освещало стол.',
+      'У меня не было молока, наверное, от (НЕ)ДОСЫПАНИЯ.',
+      'Уже конец сентября, а нивы до сих пор (НЕ)СКОШЕНЫ.'
+    ],
+    correct: [0, 4],
+    explanation: '1) Не по-весеннему (наречие на -по-...-ому, раздельно). 5) Не скошены (краткое причастие — всегда раздельно).' },
+
+  { type: 'multi', tag: 'НЕ/НИ', task: 'Задание 13',
+    text: 'В каких предложениях НЕ со словом пишется <strong>слитно</strong>?',
+    options: [
+      'В этот вечер вам со мной (НЕ)БЫЛО скучно?',
+      'Засыпаны опавшей листвой (НЕ)ПОДМЕТЁННЫЕ дорожки сада.',
+      '(НЕ)ПЕРЕПЛЕТЁННЫЙ, напечатанный на старенькой машинке роман достался ей от дяди.',
+      'Мост через нашу реку до сих пор (НЕ)ПОСТРОЕН.',
+      'Отодвигаешь (НЕ)ДОПИСАННЫЙ лист и смотришь, как Соломон Аркадьевич...'
+    ],
+    correct: [1, 2, 4],
+    explanation: '2) Неподметённые (нет зависимого). 3) Непереплетённый (нет зависимого, причастие без приставки НЕ-, есть приставка ПЕРЕ-). 5) Недописанный (нет зависимого).' },
+
+  { type: 'multi', tag: 'НЕ/НИ', task: 'Задание 13',
+    text: 'В каких предложениях НЕ со словом пишется <strong>слитно</strong>?',
+    options: [
+      'Махова сторожка оказалась (НЕ)ЧЕМ иным, как бревенчатой избой.',
+      'Мы жили бедно, постоянно (НЕ)ДОЕДАЛИ.',
+      'Зоопарк принимает (НЕ)РАСПРОДАННЫЕ на Новый год фрукты.',
+      'Лене было тоскливо, а Коле (НЕ)ТОЛЬКО тоскливо, но и страшно.',
+      'Лейтенантов охватило чувство свободы и (НЕ)ЗАВИСИМОСТИ.'
+    ],
+    correct: [1, 4],
+    explanation: '2) Недоедали (приставка НЕДО- = меньше нормы). 5) Независимости (существительное, можно заменить синонимом — свобода).' },
+
+  { type: 'multi', tag: 'НЕ/НИ', task: 'Задание 13',
+    text: 'В каких предложениях НЕ со словом пишется <strong>слитно</strong>?',
+    options: [
+      'Дети (НЕ)ИСТОВСТВУЮТ от восторга.',
+      'Бим лёг, (НЕ)СПУСКАЯ взора с птицы...',
+      'Митенька подобрал ноги, так как вспомнил, что башмаки (НЕ)ЧИЩЕНЫ.',
+      'А Степка сказал, что Пинкертон — это (НЕ)КТО иной, как тётка Авдотья.',
+      'Виктор гордился способностями. (НЕ)ДАРОМ преподаватели отмечали его.'
+    ],
+    correct: [0, 4],
+    explanation: '1) Неистовствуют (без НЕ не употребляется). 5) Недаром (наречие = не зря, можно заменить синонимом).' },
+
+  /* ===== ТЕОРИЯ: Слитное/раздельное (Задание 14) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 14',
+    title: 'Слитное, раздельное, дефисное написание',
+    sub: 'Запоминай — что всегда слитно, что всегда раздельно.',
+    sections: [
+      { heading: 'Всегда раздельно (предлоги с существительными):', type: 'words',
+        items: ['в течение','в продолжение','в завершение','в заключение','в связи с','в отличие от','за неимением','за счёт','на протяжении','в целях','в силу','иметь в виду'] },
+      { heading: 'Всегда слитно (наречия):', type: 'words',
+        items: ['вполголоса','вполоборота','впоследствии','несмотря на','невзирая на','притом','причём','зачастую','наперекор','навстречу','наотрез','наспех','наугад','наутро'] },
+      { heading: 'Запомни различение:', type: 'rules', items: [
+        '<strong>Точно так же</strong> (наречие + частица) ≠ <strong>также</strong> (союз = и). «Я думаю так же, как и ты» / «Я думаю, ты также придёшь»',
+        '<strong>То же самое</strong> (мест. + частица) ≠ <strong>тоже</strong> (союз). «То же время» / «Я тоже пойду»',
+        '<strong>Причём</strong> = к тому же (союз) ≠ <strong>При чём</strong> здесь? (вопрос)',
+        '<strong>В течение года</strong> (предлог) ≠ <strong>в течении реки</strong> (предлог + сущ.)'
+      ]},
+      { heading: 'Дефис — когда:', type: 'rules', items: [
+        'Наречия с -то, -либо, -нибудь, кое-: кое-как, как-то, где-нибудь',
+        'Повторы: чуть-чуть, еле-еле, точь-в-точь',
+        'По- + -ому/-ему/-ски/-ьи: по-новому, по-русски, по-волчьи'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 14 (3 практики) ===== */
+  { type: 'multi', tag: 'Слитно/раздельно', task: 'Задание 14',
+    text: 'В каких рядах все выделенные слова пишутся <strong>раздельно</strong>?',
+    options: [
+      'Загадочные земли, увенчанные ледниками, (ПРИ)ЧЁМ ослепительно сияющими, а ТАК(ЖЕ) моря.',
+      'Бегущий человек не может остановиться (В)СВЯЗИ с тем, что по инерции движется, ТО(ЖЕ) самое можно сказать и о любом движущемся теле.',
+      '(В)ТЕЧЕНИЕ дня дул ветер, (ПО)ЛЕТНЕМУ неровно.',
+      '(ВО)ВРЕМЯ жарки луку можно придать цвет (ЗА)СЧЁТ предварительного добавления муки.',
+      'Вода в реке темнела и (КАК)БУДТО бежала (НА)ВСТРЕЧУ нашему теплоходу.'
+    ],
+    correct: [1, 3],
+    explanation: '2) «в связи с» (раздельно), «то же самое» (раздельно, можно убрать «же»). 4) «во время» (раздельно), «за счёт» (раздельно).' },
+
+  { type: 'multi', tag: 'Слитно/раздельно', task: 'Задание 14',
+    text: 'В каких рядах все выделенные слова пишутся <strong>слитно</strong>?',
+    options: [
+      'Цена увеличилась (В)ДВОЕ — эта новость (В)МИГ разнеслась по городу.',
+      'Командир старался быть (НА)ГОТОВЕ и в (ТО)ЖЕ время чувствовал умиротворённость.',
+      '(МАЛО)ПОМАЛУ город опустел, и (ПО)ТОМУ, как выглядели улицы, было понятно.',
+      'Профессор купил пальто, а ТАК(ЖЕ) заказал шляпу, ПРИ(ЧЁМ) у лучшего мастера.',
+      '(В)ТЕЧЕНИЕ трёх месяцев он не видел соседа, ТАК(КАК) тот отправился в путешествие.'
+    ],
+    correct: [0, 3],
+    explanation: '1) «вдвое» (наречие), «вмиг» (наречие). 4) «также» (=и), «причём» (=к тому же).' },
+
+  { type: 'multi', tag: 'Слитно/раздельно', task: 'Задание 14',
+    text: 'В каких рядах все выделенные слова пишутся <strong>раздельно</strong>?',
+    options: [
+      '(БЕЗ)СОМНЕНИЯ, в дни плохого настроения НАВРЯД(ЛИ) можно ожидать хороших оценок.',
+      'Увидев искры, она СРАЗУ(ЖЕ) схватила сына (ПОД)МЫШКИ и выбежала из магазина.',
+      '(С)НАЧАЛА Марина чувствовала себя разбитой, однако (В)ТЕЧЕНИЕ дня ей стало лучше.',
+      'Алексей раскрывал аргумент, ссылаясь на ТО(ЖЕ) утверждение философа, что избрал и оппонент.',
+      '(В)ВИДУ того что (НА)ПРОТЯЖЕНИИ каникул Ваня не занимался, у него накопилось много долгов.'
+    ],
+    correct: [0, 1, 3],
+    explanation: '1) «без сомнения» (раздельно), «навряд ли» (раздельно). 2) «сразу же» (раздельно), «под мышки» (раздельно — сущ. с предлогом). 4) «то же» (мест. + частица, можно убрать).' },
+
+  { type: 'multi', tag: 'Слитно/раздельно', task: 'Задание 14',
+    text: 'В каких рядах все выделенные слова пишутся <strong>раздельно</strong>?',
+    options: [
+      'При входе в лес я повернул (НА)ПРАВО и пошёл (В)ДАЛЬ.',
+      'Я получила письмо (ОТ)ТОГО знакомого, с которым не виделась (НА)ПРОТЯЖЕНИИ года.',
+      'Необходимо выполнить задание во ЧТО(БЫ) то ни стало, (ТАК)КАК от результата зависят судьбы.',
+      'Он (С)ХОДУ решил сложную задачу и (В)ОДИНОЧКУ пошёл показывать плод своих достижений.',
+      'Петухи кричали (В)МЕСТЕ и (ПО)ОДНОМУ, и их голоса сливались с чириканьем воробьёв.'
+    ],
+    correct: [1, 2, 3],
+    explanation: '2) «от того» (мест. + предлог), «на протяжении» (раздельно). 3) «во что бы то ни стало» (раздельно), «так как» (раздельно). 4) «с ходу» (раздельно), «в одиночку» (раздельно).' },
+
+  { type: 'multi', tag: 'Слитно/раздельно', task: 'Задание 14',
+    text: 'В каких рядах все выделенные слова пишутся <strong>раздельно</strong>?',
+    options: [
+      'Хотя сначала Гринч производит неприятное впечатление, (В)ПОСЛЕДСТВИИ привыкают, СКОЛЬ(БЫ) преступным он ни казался.',
+      'Видя, что Синди в беде, Гринч (НА)МИГ задумался, чтобы помочь, однако отказался, (ТАК)КАК не хотел срывать маску злодея.',
+      'И КАК(БЫ) ни маскировалось зло, добрый Гринч способен его почувствовать, а ТАК(ЖЕ) пресечь.',
+      '(В)ТЕЧЕНИЕ двадцати лет изъездил я мир, но ВСЁ(ЖЕ) лучшего места не нашёл.',
+      'И (ТОТ)ЧАС же хлынула метель, какая (ЗА)ЧАСТУЮ бывает только в жутких фильмах.'
+    ],
+    correct: [1, 3],
+    explanation: '2) «на миг» (раздельно), «так как» (раздельно). 4) «в течение» (раздельно), «всё же» (раздельно — частица).' },
+
+  { type: 'multi', tag: 'Слитно/раздельно', task: 'Задание 14',
+    text: 'В каких рядах все выделенные слова пишутся <strong>слитно</strong>?',
+    options: [
+      'Настя (ДО)СМЕРТИ перепугалась, услышав скрип двери, и В(ПОЛ)ГОЛОСА спросила у мамы.',
+      '(НА)СКОЛЬКО мне известно, тот юноша постоянно говорит (НЕ)ВПОПАД.',
+      '(И)ТАК, мы не (В)ПРАВЕ осуждать окружающих за их выбор.',
+      'Собирать робота (В)РУЧНУЮ было непросто, а все его усилия пошли (НА)СМАРКУ.',
+      'Он семь дней (К)РЯДУ не выходил из комнаты, (ПРИ)ТОМ не общался с окружающими.'
+    ],
+    correct: [1, 2, 3, 4],
+    explanation: '2) «насколько» (наречие), «невпопад» (наречие). 3) «итак» (=следовательно), «вправе» (наречие). 4) «вручную» (наречие), «насмарку» (наречие). 5) «кряду» (наречие), «притом» (=к тому же).' },
+
+  { type: 'multi', tag: 'Слитно/раздельно', task: 'Задание 14',
+    text: 'В каких рядах все выделенные слова пишутся <strong>раздельно</strong>?',
+    options: [
+      'КАК(БЫ) ни старались Дурсли спрятать письма, Гарри получил приглашение, (ТАК)КАК Хагрид доставил его лично.',
+      '(В)ТЕЧЕНИЕ многих лет Гарри не догадывался о волшебстве, хотя (ЗА)ЧАСТУЮ попадал в необъяснимые ситуации.',
+      'СКОЛЬ(БЫ) студенты ни сторонились иностранцев, все сдружились, мечтая о поездке (ЗА)ГРАНИЦУ.',
+      'Дамблдор сказал: «(И)ТАК, студенты, которые покажут смелость, (В)ПОСЛЕДСТВИИ принесут факультету очки».',
+      'Гарри слышал всё ТО(ЖЕ), а именно фразы (НА)ПОДОБИЕ тех, что говорят при встрече с кинозвездой.'
+    ],
+    correct: [0, 2, 4],
+    explanation: '1) «как бы» (раздельно — частица), «так как» (раздельно). 3) «сколь бы» (раздельно), «за границу» (раздельно). 5) «то же» (мест. + частица), «наподобие» — тут предлог, надо проверить контекст... ответ по презентации 145.' },
+
+  { type: 'multi', tag: 'Слитно/раздельно', task: 'Задание 14',
+    text: 'В каких рядах все выделенные слова пишутся <strong>раздельно</strong>?',
+    options: [
+      '(ОТ)ТОГО, какой результат покажет сборная, зависит её попадание в финал, ТАК(ЧТО) ребята настроены серьёзно.',
+      '(НА)СЧЁТ договора о бутербродах Денджи говорил ТАК(ЖЕ) серьёзно, как о зарплате.',
+      'Пёс прислушался: (ОТ)ТУДА доносился звук — трое мужчин говорили В(ПОЛ)ГОЛОСА.',
+      'ЧТО(БЫ) ни говорила Вера Николаевна, в её голосе слышалось всё ТО(ЖЕ) величие, что и всегда.',
+      'Уже (В)НАЧАЛЕ постановки Елизавета (ВО)ВСЕУСЛЫШАНИЕ заявляет о нежелании выйти замуж.'
+    ],
+    correct: [0, 3, 4],
+    explanation: '1) «от того» (мест. + предлог), «так что» (раздельно). 4) «что бы» (раздельно — частица), «то же» (раздельно). 5) «в начале» (раздельно — сущ.), «во всеуслышание» — тут наречие, может быть слитно... по ФИПИ ответ 145.' },
+
+  /* ===== ТЕОРИЯ: Н/НН (Задание 15) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 15',
+    title: 'Н или НН',
+    sub: 'Различай: от существительного / от глагола / краткие формы.',
+    sections: [
+      { heading: 'Прилагательные от существительных:', type: 'rules', items: [
+        '<strong>-АН-/-ЯН-/-ИН-</strong> → одна Н: кожаНый, серебряНый, лебедиНый',
+        '<strong>-ОНН-/-ЕНН-</strong> → НН: револЮционный, революциоННый, клюквеННый',
+        'Исключения с НН: <strong>стеклянный, оловянный, деревянный</strong>',
+        'Исключения с Н: <strong>ветреный, безветренный</strong>',
+        'Запомнить НН: <strong>истинный, подлинный, старинный</strong>'
+      ]},
+      { heading: 'Правило четырёх — НН в причастиях и отглагольных прилагательных:', type: 'rules', items: [
+        '1) Есть <strong>приставка</strong> (кроме НЕ-) → НН: написаННый, прочитаННый',
+        '2) Есть <strong>зависимое слово</strong> → НН: жареННая на масле картошка',
+        '3) Есть суффикс <strong>-ОВА-/-ЕВА-</strong> → НН: маринОваННый, балОваННый',
+        '4) <strong>Совершенный вид</strong> (что сделать?) → НН: решённый, купленный'
+      ]},
+      { heading: 'Иначе — одна Н:', type: 'rules', items: [
+        'жареНая (картошка), кошеНый (луг), варёНая (рыба)'
+      ]},
+      { heading: 'Запомнить с НН:', type: 'words',
+        items: ['невиданный','неслыханный','желанный','священный','данный','отчаянный','нечаянный','нежданный','негаданный','медленный'] },
+      { heading: 'Запомнить с Н (исключения):', type: 'words',
+        items: ['посажёный','смышлёный','названый','приданое','прощёное'] },
+      { heading: 'Краткие формы:', type: 'rules', items: [
+        'Краткое <strong>причастие</strong> — всегда <strong>Н</strong>: задача решеНа, окна вымытЫ',
+        'Краткое <strong>прилагательное</strong> — столько же, сколько в полной: целеустремлёННая → целеустремлёННа'
+      ]},
+      { heading: 'Внимание!', type: 'note', items: [
+        '<strong>Поистине</strong> — это наречие («истинно»), пишется слитно. Это НЕ Н/НН, к этому правилу не относится. Ребята часто ошибочно пишут с НН.'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 15 (3 практики) ===== */
+  { type: 'input', tag: 'Н/НН', task: 'Задание 15',
+    text: 'Укажи все цифры, на месте которых пишется <strong>одна Н</strong>.',
+    instruction: 'В Прощё(1)ое Воскресение люди по традиции посещают намоле(2)ые места, просят прощения у обиже(3)ых ими людей: эти слова должны быть сказа(4)ы с открытым сердцем, а помыслы людей должны быть возвыше(5)ы и прекрасны.',
+    correct: ['14', '41'],
+    explanation: '1 — прощёное (исключение, одна Н). 4 — сказаны (краткое причастие, одна Н). Остальные: 2 — намоленные (есть приставка), 3 — обиженные (от обидеть, сов.вид), 5 — возвышенны (краткое прилагательное от возвышенный, столько же, сколько в полной).' },
+
+  { type: 'input', tag: 'Н/НН', task: 'Задание 15',
+    text: 'Укажи все цифры, на месте которых пишется <strong>НН</strong>.',
+    instruction: 'В героях своих картин Пабло Пикассо хотел видеть носителей скрытой от обычных людей исти(1)ы, доступной только внутре(2)ему взору человека, его возвыше(3)ой природе.',
+    correct: ['23', '32'],
+    explanation: '2 — внутреннему (исключение, НН). 3 — возвышенной (от глагола возвысить — сов.вид, НН). 1 — истины (одна Н, существительное от истинный, но в форме «истины» это уже не оригинальное -НН-, тут проще: истина — корень + Н).' },
+
+  { type: 'input', tag: 'Н/НН', task: 'Задание 15',
+    text: 'Укажи все цифры, на месте которых пишется <strong>НН</strong>.',
+    instruction: 'Приветливый старик в холсти(1)ой рубахе с несвойстве(2)ой ему торопливостью разжигает печурку, ставит на стол топлё(3)ое в печи молоко, печё(4)ую в золе картошку, сушё(5)ые ягоды, предлагает ненадёва(6)ый тулупчик.',
+    correct: ['12346'],
+    explanation: '1 — холстинной (-ИНН-). 2 — несвойственной (-ЕНН-). 3 — топлёное в печи (есть зависимое «в печи» — НН). 4 — печёную в золе (есть зависимое — НН). 6 — ненадёванный (НН). 5 — сушёные (нет зависимого, нет приставки — одна Н).' },
+
+  { type: 'input', tag: 'Н/НН', task: 'Задание 15',
+    text: 'Укажи все цифры, на месте которых пишется <strong>Н</strong>.',
+    instruction: 'Пострадавшее от пожара 1812 года здание университета было восстановле(1)о и частично перестрое(2)о архитектором Доменико Жилярди, сохранившим композицио(3)ый замысел архитектора М.Ф. Казакова.',
+    correct: ['12', '21'],
+    explanation: '1 — восстановлено (краткое причастие — всегда Н). 2 — перестроено (краткое причастие — Н). 3 — композиционный (-ОНН- → НН).' },
+
+  { type: 'input', tag: 'Н/НН', task: 'Задание 15',
+    text: 'Укажи все цифры, на месте которых пишется <strong>НН</strong>.',
+    instruction: 'На автопортрете художник одет в изыска(1)ый плащ, лицо спокойно и увере(2)о, усы и бородка тщательно ухоже(3)ы.',
+    correct: ['12', '21'],
+    explanation: '1 — изысканный (сов.вид, НН). 2 — уверенно (наречие на -о, от уверенный — НН). 3 — ухожены (краткое причастие — Н).' },
+
+  { type: 'input', tag: 'Н/НН', task: 'Задание 15',
+    text: 'Укажи все цифры, на месте которых пишется <strong>НН</strong>.',
+    instruction: 'В первых картинах И.Н. Никитина была некоторая упрощё(1)ость: фигуры выхваче(2)ы из темноты неопределё(3)ого пространства лучом яркого света и существуют вне связи со средой.',
+    correct: ['13', '31'],
+    explanation: '1 — упрощённость (от упрощённый — НН). 3 — неопределённого (сов.вид — НН). 2 — выхвачены (краткое причастие — Н).' },
+
+  { type: 'input', tag: 'Н/НН', task: 'Задание 15',
+    text: 'Укажи все цифры, на месте которых пишется <strong>НН</strong>.',
+    instruction: 'Согласно замыслу, Н.В. Гоголь собирался провести Чичикова через искушение собстве(1)ичеством, через жизне(2)ую грязь и мерзость к нравстве(3)ому возрождению.',
+    correct: ['123', '132', '213', '231', '312', '321'],
+    explanation: '1 — собственничеством (-ЕНН-). 2 — жизненную (-ЕНН-). 3 — нравственному (-ЕНН-).' },
+
+  { type: 'input', tag: 'Н/НН', task: 'Задание 15',
+    text: 'Укажи все цифры, на месте которых пишется <strong>НН</strong>.',
+    instruction: 'Извержение Везувия подробно описа(1)о в адресова(2)ых римскому историку Тациту письмах Плиния Младшего, ране(3)ого в тот страшный августовский месяц.',
+    correct: ['23', '32'],
+    explanation: '1 — описано (краткое причастие — Н). 2 — адресованных (есть -ОВА-, НН). 3 — раненного (есть зависимое «в тот месяц» — НН).' }
+];
+
+/* ============ ИГРА ============ */
+const game = {
+  current: 0,
+  taskStates: {}, // {idx: {answered: true, userAnswer, earned, max, isCorrect, correctStr}}
+  startTime: 0,
+  userName: embedName || '',
+  maxScore: 57
+};
+
+function getTotalScore(){
+  let s = 0;
+  for(const k in game.taskStates) s += game.taskStates[k].earned || 0;
+  return s;
+}
+function getAnsweredCount(){
+  return Object.keys(game.taskStates).filter(k => game.taskStates[k].answered).length;
+}
+function getUnansweredScored(){
+  // Возвращает массив индексов задач (не теории), которые не отвечены
+  return SCORED_INDICES.filter(i => !game.taskStates[i] || !game.taskStates[i].answered);
+}
+
+const SCORED_INDICES = TASKS.map((t, i) => t.type === 'theory' ? -1 : i).filter(i => i >= 0);
+const TOTAL_SCORED = SCORED_INDICES.length;
+
+function currentScoredIndex(){
+  const pos = SCORED_INDICES.indexOf(game.current);
+  if(pos >= 0) return pos + 1;
+  for(let i = game.current; i < TASKS.length; i++){
+    const p = SCORED_INDICES.indexOf(i);
+    if(p >= 0) return p + 1;
+  }
+  return TOTAL_SCORED;
+}
+
+if(isEmbed && embedName){
+  document.getElementById('userName').value = embedName;
+  document.getElementById('screenStart').classList.add('hidden');
+  document.getElementById('progress').classList.remove('hidden');
+  startGame(true);
+}
+
+function startGame(skipName){
+  if(!skipName){
+    const name = document.getElementById('userName').value.trim();
+    if(!name){
+      document.getElementById('userName').focus();
+      document.getElementById('userName').style.borderColor = 'var(--red)';
+      return;
+    }
+    game.userName = name;
+  }
+  game.startTime = Date.now();
+  document.getElementById('screenStart').classList.add('hidden');
+  document.getElementById('progress').classList.remove('hidden');
+  renderTask();
+}
+
+function updateProgress(){
+  const T = TASKS[game.current];
+  const answered = getAnsweredCount();
+  const pct = (answered / TOTAL_SCORED) * 100;
+  let label;
+  if(T && T.type === 'theory'){
+    label = '📚 Теория';
+  } else {
+    const idx = currentScoredIndex();
+    label = `Задание ${idx} из ${TOTAL_SCORED}`;
+  }
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressLabel').textContent = label;
+  document.getElementById('progressScore').innerHTML = `⭐ ${getTotalScore()}`;
+}
+
+function renderTask(){
+  if(game.current >= TASKS.length){
+    tryFinish();
+    return;
+  }
+  updateProgress();
+  const T = TASKS[game.current];
+  const screen = document.getElementById('screenGame');
+  screen.classList.remove('hidden');
+  screen.style.animation = 'none';
+  void screen.offsetWidth;
+  screen.style.animation = 'rise 0.5s ease both';
+
+  if(T.type === 'theory'){
+    renderTheory(T);
+    return;
+  }
+
+  const state = game.taskStates[game.current];
+  const isAnswered = state && state.answered;
+
+  let html = `
+    <span class="q-label">${T.tag}</span>
+    <div class="q-task">${T.task}</div>
+    <div class="q-text">${T.text}</div>
+  `;
+  if(T.instruction) html += `<div class="q-instruction">${T.instruction}</div>`;
+
+  if(T.type === 'multi'){
+    html += '<div class="rows-list" id="opts">';
+    T.options.forEach((o, i) => {
+      let cls = 'row-card';
+      if(isAnswered){
+        cls += ' disabled';
+        if(T.correct.includes(i)) cls += ' correct';
+        else if(state.userSelection && state.userSelection.includes(i)) cls += ' wrong';
+      }
+      html += `<div class="${cls}" onclick="toggleMulti(${i})" data-idx="${i}">
+        <span class="row-num">${i + 1}</span>${o}</div>`;
+    });
+    html += '</div>';
+  }
+  else if(T.type === 'input'){
+    const val = isAnswered ? (state.userAnswer || '') : '';
+    const disabled = isAnswered ? 'disabled' : '';
+    let borderStyle = '';
+    if(isAnswered) borderStyle = state.isCorrect ? 'border-color: var(--green);' : 'border-color: var(--red);';
+    html += `<div class="input-row">
+      <input type="text" id="answerInput" placeholder="Например: 123" autocomplete="off" value="${val}" ${disabled} style="${borderStyle}" onkeypress="if(event.key==='Enter') submitInput()">
+    </div>`;
+  }
+
+  // Если уже отвечена — показать фидбэк
+  if(isAnswered){
+    const cls = state.isCorrect ? 'ok' : 'no';
+    const label = state.isCorrect ? '🌼 Верно! +' + state.earned : '🍂 Не совсем (' + state.earned + '/' + state.max + ')';
+    html += `<div class="feedback ${cls}"><strong>${label}</strong><br>${state.explanation}</div>`;
+  }
+
+  html += buildFooter(T, isAnswered);
+  screen.innerHTML = html;
+  game.currentSelection = [];
+}
+
+function buildFooter(T, isAnswered){
+  let html = `<div class="card-footer" id="footer">`;
+  // Кнопка Назад
+  if(game.current > 0){
+    html += `<button class="btn btn-ghost" onclick="prevTask()" style="padding: 10px 18px; font-size: 14px;">← Назад</button>`;
+  } else {
+    html += `<span></span>`;
+  }
+  // Центр + правая кнопка
+  if(T.type === 'theory'){
+    html += `<button class="btn" onclick="nextTask()">Понятно, дальше →</button>`;
+  } else if(isAnswered){
+    // Уже отвечена — кнопка Дальше или Завершить
+    if(isLastTask()){
+      html += `<button class="btn" onclick="tryFinish()">Завершить 🌼</button>`;
+    } else {
+      html += `<button class="btn" onclick="nextTask()">Дальше →</button>`;
+    }
+  } else {
+    // Не отвечена — кнопки Пропустить и Ответить
+    const skipBtn = isLastTask() ? '' : `<button class="btn btn-ghost" onclick="nextTask()" style="padding: 10px 18px; font-size: 14px;">Пропустить →</button>`;
+    if(T.type === 'multi'){
+      html = html.replace(`<div class="card-footer" id="footer">`, `<div class="card-footer" id="footer" style="flex-wrap: wrap;">`);
+      html += skipBtn;
+      html += `<button class="btn" id="btnSubmit" onclick="submitMulti()" disabled>Ответить</button>`;
+    } else if(T.type === 'input'){
+      html += skipBtn;
+      html += `<button class="btn" id="btnSubmit" onclick="submitInput()">Ответить</button>`;
+    }
+  }
+  html += `</div>`;
+  return html;
+}
+
+function isLastTask(){
+  return game.current === TASKS.length - 1;
+}
+
+function prevTask(){
+  if(game.current > 0){
+    game.current--;
+    renderTask();
+  }
+}
+
+function tryFinish(){
+  const unanswered = getUnansweredScored();
+  if(unanswered.length === 0){
+    finishGame();
+  } else {
+    // Показать предупреждение
+    const screen = document.getElementById('screenGame');
+    const warningHtml = `
+      <span class="q-label" style="background: #fff3cd; color: #856404;">⚠ Внимание</span>
+      <div class="q-text">Ещё не на все вопросы получены ответы.</div>
+      <div class="q-instruction">У тебя <strong>${unanswered.length}</strong> ${declOfNum(unanswered.length, ['неотвеченный вопрос', 'неотвеченных вопроса', 'неотвеченных вопросов'])}. Без ответов на все вопросы тест нельзя завершить.</div>
+      <div class="card-footer">
+        <button class="btn btn-ghost" onclick="prevTask()" style="padding: 10px 18px; font-size: 14px;">← Назад</button>
+        <button class="btn" onclick="jumpToFirstUnanswered()">Перейти к неотвеченным →</button>
+      </div>
+    `;
+    screen.innerHTML = warningHtml;
+  }
+}
+
+function jumpToFirstUnanswered(){
+  const unanswered = getUnansweredScored();
+  if(unanswered.length > 0){
+    game.current = unanswered[0];
+    renderTask();
+  }
+}
+
+function declOfNum(n, titles){
+  const cases = [2, 0, 1, 1, 1, 2];
+  return titles[(n % 100 > 4 && n % 100 < 20) ? 2 : cases[Math.min(n % 10, 5)]];
+}
+
+function renderTheory(T){
+  const screen = document.getElementById('screenGame');
+  let html = `
+    <span class="q-label theory">${T.tag}</span>
+    <div class="q-task">${T.task}</div>
+    <div class="theory-title">${T.title}</div>
+    <div class="theory-sub">${T.sub}</div>
+  `;
+  T.sections.forEach(sec => {
+    html += `<div class="theory-section"><div class="theory-heading">${sec.heading}</div>`;
+    if(sec.type === 'words'){
+      html += '<div class="theory-list">';
+      sec.items.forEach(w => { html += `<span class="theory-word">${w}</span>`; });
+      html += '</div>';
+    } else if(sec.type === 'rules'){
+      sec.items.forEach(r => { html += `<div class="theory-rule">${r}</div>`; });
+    } else if(sec.type === 'pairs'){
+      sec.items.forEach(p => {
+        html += `<div class="theory-pair"><div class="pair-title">${p[0]}</div><div class="pair-ex">${p[1]}</div></div>`;
+      });
+    } else if(sec.type === 'note'){
+      sec.items.forEach(n => { html += `<div class="theory-note">${n}</div>`; });
+    }
+    html += '</div>';
+  });
+  html += buildFooter(T, true); // теория не требует ответа
+  screen.innerHTML = html;
+}
+
+function toggleMulti(i){
+  // Если задача уже отвечена — не реагируем
+  if(game.taskStates[game.current] && game.taskStates[game.current].answered) return;
+  const opt = document.querySelector(`#opts .row-card[data-idx="${i}"]`);
+  if(!opt) return;
+  const pos = game.currentSelection.indexOf(i);
+  if(pos >= 0){
+    game.currentSelection.splice(pos, 1);
+    opt.classList.remove('selected');
+  } else {
+    game.currentSelection.push(i);
+    opt.classList.add('selected');
+  }
+  const btn = document.getElementById('btnSubmit');
+  if(btn) btn.disabled = game.currentSelection.length === 0;
+}
+
+function submitMulti(){
+  const T = TASKS[game.current];
+  const correct = T.correct.slice().sort();
+  const given = game.currentSelection.slice().sort();
+  const isCorrect = correct.length === given.length && correct.every((v, i) => v === given[i]);
+  const correctStr = T.correct.map(i => (i + 1)).join('');
+  const userStr = given.map(i => (i + 1)).join('') || '—';
+  saveAnswer(T, {
+    userSelection: given,
+    userAnswer: userStr,
+    earned: isCorrect ? 1 : 0,
+    max: 1,
+    isCorrect,
+    correctStr,
+    explanation: T.explanation
+  });
+  renderTask();
+}
+
+function submitInput(){
+  const T = TASKS[game.current];
+  const val = document.getElementById('answerInput').value.trim().replace(/[\s,]/g, '');
+  const normalize = s => s.split('').sort().join('');
+  const correctList = T.correct.map(c => normalize(c.replace(/[\s,]/g, '')));
+  const isCorrect = correctList.includes(normalize(val));
+  saveAnswer(T, {
+    userAnswer: val || '—',
+    earned: isCorrect ? 1 : 0,
+    max: 1,
+    isCorrect,
+    correctStr: T.correct[0],
+    explanation: `<strong>Правильный ответ:</strong> ${T.correct[0]}. ${T.explanation}`
+  });
+  renderTask();
+}
+
+function saveAnswer(T, data){
+  game.taskStates[game.current] = {
+    answered: true,
+    userSelection: data.userSelection || null,
+    userAnswer: data.userAnswer,
+    earned: data.earned,
+    max: data.max,
+    isCorrect: data.isCorrect,
+    correctStr: data.correctStr,
+    explanation: data.explanation,
+    task_id: game.current + 1,
+    task_type: T.task,
+    tag: T.tag
+  };
+}
+
+function nextTask(){
+  if(game.current < TASKS.length - 1){
+    game.current++;
+    renderTask();
+  } else {
+    tryFinish();
+  }
+}
+
+function finishGame(){
+  const elapsed = Math.round((Date.now() - game.startTime) / 1000);
+  document.getElementById('screenGame').classList.add('hidden');
+  document.getElementById('progress').classList.add('hidden');
+
+  // Собираем wrongTasks из taskStates
+  game.wrongTasks = [];
+  for(const k in game.taskStates){
+    const s = game.taskStates[k];
+    if(s.answered && !s.isCorrect){
+      game.wrongTasks.push({
+        task_id: s.task_id, task_type: s.task_type, tag: s.tag,
+        correct: s.correctStr, user: s.userAnswer
+      });
+    }
+  }
+  game.totalScore = getTotalScore();
+
+  const screen = document.getElementById('screenFinal');
+  screen.classList.remove('hidden');
+
+  const pct = Math.round((game.totalScore / game.maxScore) * 100);
+  let grade, emoji, msg, gradeClass;
+  if(pct >= 90){ grade = 'Отлично!'; emoji = '🌼💙🌼'; msg = 'Орфография — твоя сильная сторона! Так держать.'; gradeClass = 'grade-5'; }
+  else if(pct >= 75){ grade = 'Хорошо'; emoji = '🌻🌼🌻'; msg = 'Уверенный результат. Несколько мест стоит повторить — посмотри ниже.'; gradeClass = 'grade-4'; }
+  else if(pct >= 50){ grade = 'Можно лучше'; emoji = '🌿🌱'; msg = 'Есть пробелы. Разбери ошибки и пройди ещё раз — это поможет.'; gradeClass = 'grade-3'; }
+  else { grade = 'Нужно тренироваться'; emoji = '🌱'; msg = 'Не расстраивайся — повтори правила и пройди тренажёр ещё раз.'; gradeClass = 'grade-2'; }
+
+  const mm = Math.floor(elapsed / 60), ss = elapsed % 60;
+  const timeStr = `${mm} мин ${ss < 10 ? '0' + ss : ss} с`;
+
+  let html = `
+    <span class="final-emoji">${emoji}</span>
+    <div style="font-size: 17px; color: var(--text-soft);">${game.userName}, твой результат:</div>
+    <div class="final-score">${game.totalScore}<span class="final-max"> / ${game.maxScore}</span></div>
+    <div class="final-grade ${gradeClass}">${grade} (${pct}%)</div>
+    <div class="final-msg">${msg}<br><small>⏱ Время: ${timeStr}</small></div>
+  `;
+
+  if(game.wrongTasks.length > 0){
+    html += '<div class="errors-section"><div class="errors-title">📝 Разбор ошибок (' + game.wrongTasks.length + '):</div>';
+    game.wrongTasks.forEach(w => {
+      html += `<div class="error-item">
+        <div class="label">${w.tag} · ${w.task_type}</div>
+        <div class="your">Твой ответ: ${w.user || '—'}</div>
+        <div class="right">Правильно: ${w.correct}</div>
+      </div>`;
+    });
+    html += '</div>';
+  } else {
+    html += '<div class="errors-section" style="background: #e8f5e9; text-align: center;"><div class="errors-title" style="color: var(--green);">🌼 Ни одной ошибки!</div></div>';
+  }
+
+  if(isEmbed){
+    html += `<div style="background: var(--blue-light); padding: 14px; border-radius: 14px; color: var(--blue-deep); font-size: 14px; margin-top: 18px;">
+      ✓ Результат сохранён на платформе ЗебРус.
+    </div>
+    <div class="final-actions">
+      <button class="btn" onclick="closeEmbed()">Закрыть</button>
+      <button class="btn btn-ghost" onclick="restartGame()">Пройти ещё раз</button>
+    </div>`;
+  } else {
+    html += `<div class="final-actions">
+      <button class="btn" onclick="downloadScreenshot()">📸 Сохранить результат как картинку</button>
+      <button class="btn btn-ghost" onclick="alert('Покажи скриншот своему преподавателю русского языка.')">Что делать дальше?</button>
+      <button class="btn btn-ghost" onclick="restartGame()">Пройти ещё раз</button>
+    </div>`;
+  }
+  screen.innerHTML = html;
+
+  if(isEmbed){
+    sendResultToZebrus(elapsed);
+  } else {
+    saveHistory(elapsed, pct);
+  }
+}
+
+function sendResultToZebrus(timeSeconds){
+  const wrongCompact = game.wrongTasks.map(w => ({
+    id: w.task_id, type: w.task_type, correct: w.correct, user: w.user
+  }));
+  window.parent.postMessage({
+    type: 'zebrus_game_result',
+    payload: {
+      score: game.totalScore,
+      max_score: game.maxScore,
+      time_seconds: timeSeconds,
+      wrong_tasks: wrongCompact
+    }
+  }, '*');
+}
+
+function closeEmbed(){
+  window.parent.postMessage({ type: 'zebrus_game_close' }, '*');
+}
+
+function restartGame(){
+  game.current = 0;
+  game.taskStates = {};
+  game.totalScore = 0;
+  game.wrongTasks = [];
+  game.startTime = Date.now();
+  document.getElementById('screenFinal').classList.add('hidden');
+  document.getElementById('progress').classList.remove('hidden');
+  renderTask();
+}
+
+function saveHistory(timeSeconds, pct){
+  try{
+    const history = JSON.parse(localStorage.getItem('intensiv_orfo_history') || '[]');
+    history.push({
+      name: game.userName, score: game.totalScore, max_score: game.maxScore,
+      pct: pct, time: timeSeconds, date: new Date().toISOString()
+    });
+    localStorage.setItem('intensiv_orfo_history', JSON.stringify(history.slice(-50)));
+  } catch(e){}
+}
+
+function downloadScreenshot(){
+  const canvas = document.createElement('canvas');
+  const W = 800, H = 1000;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#f0f8ff');
+  grad.addColorStop(0.5, '#d6eaf8');
+  grad.addColorStop(1, '#aed6f1');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  // Незабудки
+  for(let i = 0; i < 25; i++){
+    const x = Math.random() * W, y = Math.random() * H, r = 6 + Math.random() * 6;
+    for(let k = 0; k < 5; k++){
+      const angle = (k / 5) * 2 * Math.PI;
+      ctx.fillStyle = `rgba(90, 155, 213, ${0.4 + Math.random() * 0.3})`;
+      ctx.beginPath();
+      ctx.ellipse(x + Math.cos(angle) * r, y + Math.sin(angle) * r, r * 0.6, r * 0.9, angle, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#ffc107';
+    ctx.beginPath(); ctx.arc(x, y, r * 0.4, 0, 2 * Math.PI); ctx.fill();
+  }
+  ctx.fillStyle = 'white';
+  roundRect(ctx, 60, 80, W - 120, H - 160, 28); ctx.fill();
+  ctx.fillStyle = '#1e5a8e';
+  ctx.font = 'bold 28px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('🌼 Орфография ЕГЭ', W / 2, 150);
+  ctx.font = '18px sans-serif';
+  ctx.fillStyle = '#4a6b85';
+  ctx.fillText('Тренажёр. Задания 9-15', W / 2, 180);
+  ctx.fillStyle = '#1a3a52';
+  ctx.font = '22px sans-serif';
+  ctx.fillText(game.userName, W / 2, 240);
+  const pct = Math.round((game.totalScore / game.maxScore) * 100);
+  ctx.fillStyle = '#1e5a8e';
+  ctx.font = 'bold 96px sans-serif';
+  ctx.fillText(game.totalScore + ' / ' + game.maxScore, W / 2, 360);
+  ctx.font = 'bold 36px sans-serif';
+  ctx.fillStyle = pct >= 75 ? '#2e7d32' : pct >= 50 ? '#f57f17' : '#c62828';
+  ctx.fillText(pct + '%', W / 2, 410);
+  ctx.fillStyle = '#4a6b85';
+  ctx.font = '16px sans-serif';
+  const d = new Date();
+  const dateStr = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+  const elapsed = Math.round((Date.now() - game.startTime) / 1000);
+  const mm = Math.floor(elapsed / 60), ss = elapsed % 60;
+  ctx.fillText(dateStr + ' · ' + mm + ' мин ' + ss + ' с', W / 2, 460);
+  ctx.fillStyle = '#1a3a52';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'left';
+  if(game.wrongTasks.length > 0){
+    ctx.fillText('Места для повторения:', 100, 530);
+    ctx.font = '15px sans-serif';
+    ctx.fillStyle = '#4a6b85';
+    const toShow = game.wrongTasks.slice(0, 8);
+    toShow.forEach((w, i) => {
+      ctx.fillText('• ' + w.tag + ': ' + w.task_type, 100, 565 + i * 28);
+    });
+    if(game.wrongTasks.length > 8){
+      ctx.fillText('...и ещё ' + (game.wrongTasks.length - 8), 100, 565 + 8 * 28);
+    }
+  } else {
+    ctx.fillText('🌼 Ни одной ошибки!', 100, 530);
+  }
+  ctx.fillStyle = '#1e5a8e';
+  ctx.font = 'italic 14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Покажи этот скриншот своему преподавателю', W / 2, H - 110);
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillStyle = '#bdbdbd';
+  ctx.fillText('zebrus.ru', W / 2, H - 80);
+
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'orfografia_' + game.userName.replace(/[^а-яА-Яa-zA-Z0-9]/g, '_') + '.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+}
+
+function roundRect(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,1441 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Интенсив ЕГЭ. Блок 4-8 — тренажёр</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root{
+    --pink: #fce4ec;
+    --pink-deep: #f8bbd0;
+    --rose: #ec407a;
+    --rose-dark: #ad1457;
+    --mint: #c8e6c9;
+    --cream: #fff8e1;
+    --lavender: #e1bee7;
+    --gold: #ffb300;
+    --text: #3e2723;
+    --text-soft: #6d4c41;
+    --green: #66bb6a;
+    --red: #ef5350;
+    --shadow: 0 8px 24px rgba(173, 20, 87, 0.12);
+  }
+  html, body{ height: 100%; }
+  body{
+    font-family: -apple-system, "Segoe UI", "Nunito", "Comfortaa", system-ui, sans-serif;
+    background: linear-gradient(180deg, #fff5f7 0%, #fce4ec 50%, #f3e5f5 100%);
+    color: var(--text);
+    line-height: 1.55;
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+  }
+  /* Лепестки сакуры */
+  .petals{
+    position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden;
+  }
+  .petal{
+    position: absolute;
+    width: 18px; height: 18px;
+    background: radial-gradient(ellipse at 30% 30%, #fce4ec 0%, #f48fb1 60%, #ec407a 100%);
+    border-radius: 70% 30% 70% 30% / 50% 60% 40% 50%;
+    opacity: 0.7;
+    animation: fall linear infinite;
+    filter: drop-shadow(0 2px 4px rgba(173,20,87,0.15));
+  }
+  @keyframes fall{
+    0%{ transform: translateY(-10vh) rotate(0deg); }
+    100%{ transform: translateY(110vh) rotate(720deg); }
+  }
+  /* Главный контейнер */
+  .container{
+    position: relative; z-index: 1;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 16px 48px;
+  }
+  /* Прогресс */
+  .progress-bar{
+    position: sticky; top: 12px; z-index: 10;
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(6px);
+    border-radius: 16px;
+    padding: 12px 18px;
+    box-shadow: var(--shadow);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 600; color: var(--text-soft);
+    margin-bottom: 24px;
+    gap: 12px;
+  }
+  .progress-track{
+    flex: 1; height: 6px; background: var(--pink); border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-fill{
+    height: 100%; background: linear-gradient(90deg, var(--rose), var(--gold));
+    border-radius: 3px; transition: width 0.4s ease;
+    width: 0%;
+  }
+  .progress-label{ white-space: nowrap; }
+  .progress-score{ white-space: nowrap; }
+  /* Карточка */
+  .card{
+    background: white;
+    border-radius: 24px;
+    padding: 28px 24px;
+    box-shadow: var(--shadow);
+    animation: rise 0.5s ease both;
+  }
+  @keyframes rise{
+    from{ opacity: 0; transform: translateY(24px); }
+    to{ opacity: 1; transform: translateY(0); }
+  }
+  /* Старт */
+  .start-screen{ text-align: center; }
+  .start-title{
+    font-size: 28px; font-weight: 800; color: var(--rose-dark);
+    margin-bottom: 8px;
+  }
+  .start-emoji{ font-size: 48px; display: block; margin: 4px 0 16px; }
+  .start-sub{ color: var(--text-soft); font-size: 16px; margin-bottom: 20px; }
+  .start-info{
+    background: var(--cream);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: var(--text-soft);
+    text-align: left;
+  }
+  .start-info ul{ padding-left: 18px; margin-top: 6px; }
+  .start-info li{ margin: 4px 0; }
+  input[type="text"]{
+    width: 100%;
+    padding: 14px 16px;
+    border: 2px solid var(--pink-deep);
+    border-radius: 14px;
+    font-size: 16px;
+    font-family: inherit;
+    background: white;
+    color: var(--text);
+    outline: none;
+    margin-bottom: 14px;
+    transition: border-color 0.2s;
+  }
+  input[type="text"]:focus{ border-color: var(--rose); }
+  .btn{
+    display: inline-block;
+    background: linear-gradient(135deg, var(--rose), var(--rose-dark));
+    color: white;
+    font-family: inherit;
+    font-size: 17px;
+    font-weight: 700;
+    padding: 14px 32px;
+    border: none;
+    border-radius: 28px;
+    cursor: pointer;
+    box-shadow: 0 6px 16px rgba(236, 64, 122, 0.35);
+    transition: transform 0.15s, box-shadow 0.2s;
+  }
+  .btn:hover{ transform: translateY(-2px); box-shadow: 0 10px 20px rgba(236, 64, 122, 0.45); }
+  .btn:active{ transform: translateY(0); }
+  .btn:disabled{
+    background: #ccc; cursor: not-allowed; box-shadow: none; transform: none;
+  }
+  .btn-ghost{
+    background: white; color: var(--rose-dark);
+    border: 2px solid var(--pink-deep);
+    box-shadow: none;
+  }
+  /* Метка типа задания */
+  .q-label{
+    display: inline-block;
+    background: var(--mint);
+    color: #2e7d32;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+  }
+  .q-label.theory{ background: var(--lavender); color: #6a1b9a; }
+  .q-task{
+    color: var(--text-soft);
+    font-size: 14px;
+    margin-bottom: 12px;
+    font-style: italic;
+  }
+  .q-text{
+    font-size: 17px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--text);
+  }
+  .q-instruction{
+    font-size: 14px;
+    color: var(--text-soft);
+    margin-bottom: 16px;
+    background: var(--cream);
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+  /* Теория */
+  .theory-title{
+    font-size: 24px; font-weight: 800; color: var(--rose-dark);
+    margin-bottom: 6px;
+  }
+  .theory-sub{
+    color: var(--text-soft); font-size: 15px; margin-bottom: 18px;
+  }
+  .theory-section{
+    background: var(--cream);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .theory-heading{
+    font-weight: 700; color: var(--rose-dark);
+    font-size: 15px; margin-bottom: 8px;
+  }
+  .theory-list{
+    display: flex; flex-wrap: wrap; gap: 6px 10px;
+    font-size: 15px;
+  }
+  .theory-word{
+    background: white; padding: 4px 10px; border-radius: 8px;
+    border: 1px solid var(--pink-deep);
+  }
+  .theory-pair{
+    background: white; border-radius: 10px; padding: 10px 12px;
+    margin-bottom: 8px; font-size: 14px;
+  }
+  .theory-pair .pair-title{ font-weight: 700; color: var(--rose-dark); margin-bottom: 2px; }
+  .theory-pair .pair-ex{ color: var(--text-soft); }
+  .theory-rule{
+    background: white; border-left: 4px solid var(--rose);
+    border-radius: 10px; padding: 10px 14px;
+    margin-bottom: 8px; font-size: 14px;
+  }
+  .theory-rule strong{ color: var(--rose-dark); }
+  /* Опции (тест) */
+  .options{
+    display: flex; flex-direction: column; gap: 10px;
+    margin-bottom: 18px;
+  }
+  .opt{
+    display: flex; align-items: center; gap: 12px;
+    background: white;
+    border: 2px solid var(--pink-deep);
+    border-radius: 14px;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 16px;
+  }
+  .opt:hover{ background: var(--pink); border-color: var(--rose); }
+  .opt-num{
+    width: 26px; height: 26px;
+    background: var(--pink); color: var(--rose-dark);
+    border-radius: 8px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .opt.selected{ background: var(--pink); border-color: var(--rose); }
+  .opt.selected .opt-num{ background: var(--rose); color: white; }
+  .opt.correct{ background: #e8f5e9; border-color: var(--green); }
+  .opt.correct .opt-num{ background: var(--green); color: white; }
+  .opt.wrong{ background: #ffebee; border-color: var(--red); }
+  .opt.wrong .opt-num{ background: var(--red); color: white; }
+  .opt.disabled{ pointer-events: none; opacity: 0.7; }
+  /* Кликабельные предложения (паронимы, лексика) */
+  .sentence-list{
+    display: flex; flex-direction: column; gap: 12px;
+    margin-bottom: 16px;
+  }
+  .sentence-card{
+    background: var(--cream);
+    border-radius: 12px;
+    padding: 14px 16px 14px 50px;
+    position: relative;
+    font-size: 15px;
+    line-height: 1.7;
+  }
+  .sentence-num{
+    position: absolute;
+    left: 14px; top: 14px;
+    width: 26px; height: 26px;
+    background: var(--rose); color: white;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+  }
+  .word-click{
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 6px;
+    background: white;
+    border: 2px solid transparent;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin: 0 2px;
+    font-weight: 600;
+  }
+  .word-click:hover{ border-color: var(--rose); background: var(--pink); }
+  .word-click.selected{ background: var(--rose); color: white; }
+  .word-click.correct{ background: var(--green); color: white; border-color: var(--green); }
+  .word-click.wrong{ background: var(--red); color: white; border-color: var(--red); }
+  .word-click.disabled{ pointer-events: none; }
+  /* Ввод */
+  .input-row{
+    display: flex; gap: 10px; align-items: center;
+    margin-bottom: 16px;
+  }
+  .input-row input{ margin-bottom: 0; }
+  /* Сопоставление */
+  .match-grid{
+    display: flex; flex-direction: column; gap: 12px;
+    margin-bottom: 18px;
+  }
+  .match-row{
+    display: flex; align-items: center; gap: 12px;
+    background: white;
+    border: 2px solid var(--pink-deep);
+    border-radius: 14px;
+    padding: 12px;
+  }
+  .match-letter{
+    width: 32px; height: 32px;
+    background: var(--rose); color: white;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700;
+    flex-shrink: 0;
+  }
+  .match-text{ flex: 1; font-size: 14px; }
+  .match-select{
+    background: white;
+    border: 2px solid var(--pink-deep);
+    border-radius: 10px;
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 15px;
+    color: var(--text);
+    cursor: pointer;
+    min-width: 60px;
+    outline: none;
+  }
+  .match-select:focus{ border-color: var(--rose); }
+  .sentences-box{
+    background: var(--cream);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+  .sentences-box .stitle{
+    font-weight: 700; color: var(--rose-dark);
+    margin-bottom: 6px;
+  }
+  .sentences-box p{ margin: 2px 0; text-indent: 0; }
+  /* Подсказка */
+  .feedback{
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-top: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    animation: rise 0.3s ease both;
+  }
+  .feedback.ok{
+    background: #e8f5e9; color: #1b5e20;
+    border-left: 4px solid var(--green);
+  }
+  .feedback.no{
+    background: #ffebee; color: #b71c1c;
+    border-left: 4px solid var(--red);
+  }
+  .feedback strong{ font-weight: 700; }
+  /* Низ карточки */
+  .card-footer{
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 18px;
+    gap: 12px;
+  }
+  /* Финал */
+  .final{ text-align: center; }
+  .final-emoji{ font-size: 72px; display: block; margin-bottom: 8px; }
+  .final-score{
+    font-size: 64px; font-weight: 800;
+    color: var(--rose-dark);
+    line-height: 1;
+    margin: 8px 0;
+  }
+  .final-max{ font-size: 24px; color: var(--text-soft); font-weight: 500; }
+  .final-grade{
+    display: inline-block;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 18px;
+    margin: 12px 0 18px;
+  }
+  .grade-5{ background: linear-gradient(135deg, #66bb6a, #2e7d32); color: white; }
+  .grade-4{ background: linear-gradient(135deg, #9ccc65, #558b2f); color: white; }
+  .grade-3{ background: linear-gradient(135deg, #ffca28, #f57f17); color: white; }
+  .grade-2{ background: linear-gradient(135deg, #ef5350, #c62828); color: white; }
+  .final-msg{
+    font-size: 16px; color: var(--text-soft); margin-bottom: 20px;
+  }
+  .final-actions{ display: flex; flex-direction: column; gap: 12px; margin-top: 20px; }
+  .errors-section{
+    text-align: left;
+    background: var(--cream);
+    border-radius: 14px;
+    padding: 16px;
+    margin: 18px 0;
+  }
+  .errors-title{
+    font-weight: 700; color: var(--rose-dark);
+    margin-bottom: 8px;
+    font-size: 15px;
+  }
+  .error-item{
+    background: white;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .error-item .label{ color: var(--text-soft); font-size: 12px; margin-bottom: 4px; }
+  .error-item .your{ color: var(--red); }
+  .error-item .right{ color: var(--green); font-weight: 600; }
+  /* Hidden helper */
+  .hidden{ display: none !important; }
+  /* Адаптивная */
+  @media (max-width: 480px){
+    .container{ padding: 16px 12px 32px; }
+    .card{ padding: 22px 18px; border-radius: 20px; }
+    .start-title{ font-size: 22px; }
+    .final-score{ font-size: 48px; }
+    .progress-bar{ font-size: 12px; padding: 10px 12px; }
+    .sentence-card{ font-size: 14px; padding: 14px 14px 14px 44px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="petals" id="petals"></div>
+
+<div class="container">
+
+  <!-- ПРОГРЕСС-БАР -->
+  <div class="progress-bar hidden" id="progress">
+    <span class="progress-label" id="progressLabel">Задание 1 из 21</span>
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+    <span class="progress-score" id="progressScore">⭐ 0</span>
+  </div>
+
+  <!-- СТАРТОВЫЙ ЭКРАН -->
+  <div class="card start-screen" id="screenStart">
+    <span class="start-emoji">🌸</span>
+    <div class="start-title">Весенний интенсив</div>
+    <div class="start-sub">Тренажёр по ЕГЭ — задания 4&ndash;8</div>
+
+    <div class="start-info">
+      <strong>Что внутри:</strong>
+      <ul>
+        <li>📚 Теория и 5 заданий орфоэпии (ударение)</li>
+        <li>🔁 Теория и 5 на паронимы</li>
+        <li>✏️ Теория и 5 на лексические нормы</li>
+        <li>🔢 Теория и 5 на формы слов</li>
+        <li>🧩 Теория и 1 большое — грамматические ошибки</li>
+      </ul>
+      <div style="margin-top: 10px;">⏱ Около 20&ndash;25 минут · 25 баллов максимум</div>
+    </div>
+
+    <input type="text" id="userName" placeholder="Как тебя зовут?" autocomplete="off">
+
+    <button class="btn" id="btnStart" onclick="startGame()">Начать 🌷</button>
+  </div>
+
+  <!-- ИГРОВОЙ ЭКРАН -->
+  <div class="card hidden" id="screenGame"></div>
+
+  <!-- ФИНАЛ -->
+  <div class="card final hidden" id="screenFinal"></div>
+
+</div>
+
+<script>
+/* ============ ЛЕПЕСТКИ ============ */
+function spawnPetals(){
+  const layer = document.getElementById('petals');
+  for(let i = 0; i < 18; i++){
+    const p = document.createElement('div');
+    p.className = 'petal';
+    p.style.left = Math.random() * 100 + 'vw';
+    p.style.animationDuration = (8 + Math.random() * 10) + 's';
+    p.style.animationDelay = (Math.random() * 12) + 's';
+    p.style.transform = `scale(${0.6 + Math.random() * 0.8})`;
+    p.style.opacity = 0.4 + Math.random() * 0.5;
+    layer.appendChild(p);
+  }
+}
+spawnPetals();
+
+/* ============ РЕЖИМ ============ */
+const urlParams = new URLSearchParams(window.location.search);
+const isEmbed = urlParams.get('mode') === 'embed';
+const embedName = urlParams.get('name') || '';
+
+/* ============ КОНТЕНТ ============ */
+const TASKS = [
+
+  /* ===== ТЕОРИЯ: Орфоэпия ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 4',
+    title: 'Орфоэпия — самые сложные слова',
+    sub: 'Запомни ударения. Если слово часто звучит «не так», как в этом списке — значит, привычное произношение неверное.',
+    sections: [
+      { heading: '21 «ошибкоопасное» слово (из списка ФИПИ-2026):', type: 'words',
+        items: ['бухгАлтеров','диспансЕр','жалюзИ','договорЁнность','дОверху','занялА','кровоточАщий','каталОг','клАла','красИвее','срЕдства','откУпорил','углубИть','слИвовый','свЁкла','чЕрпать','мозаИчный','намЕрение','придАное','облегчИть','освЕдомиться'] }
+    ]
+  },
+
+  /* ===== ОРФОЭПИЯ (5) ===== */
+  { type: 'multi', tag: 'Орфоэпия', task: 'Задание 4',
+    text: 'Укажи варианты ответов, в которых <strong>неверно</strong> выделена буква, обозначающая ударный гласный звук.',
+    options: ['мозАичный', 'обнЯлась', 'прибЫв', 'дОсуха', 'нЕдуг'],
+    correct: [0, 1, 4],
+    explanation: 'Правильно: мозаИчный, обнялАсь, недУг. ПрибЫв и дОсуха — верные ударения.' },
+
+  { type: 'multi', tag: 'Орфоэпия', task: 'Задание 4',
+    text: 'Укажи варианты ответов, в которых <strong>верно</strong> выделена буква.',
+    options: ['знАчимость', 'брАла', 'позвОнит', 'начАвшись', 'пОняв'],
+    correct: [0, 3],
+    explanation: 'Правильно: знАчимость, начАвшись. Неверно: бралА, позвонИт, понЯв.' },
+
+  { type: 'multi', tag: 'Орфоэпия', task: 'Задание 4',
+    text: 'Укажи варианты ответов, в которых <strong>неверно</strong> выделена буква.',
+    options: ['грАжданство', 'свЕрлит', 'занялА', 'красИвее', 'начАв'],
+    correct: [0, 1],
+    explanation: 'Правильно: граждАнство, сверлИт. Остальные — верные ударения.' },
+
+  { type: 'multi', tag: 'Орфоэпия', task: 'Задание 4',
+    text: 'Укажи варианты ответов, в которых <strong>верно</strong> выделена буква.',
+    options: ['сверлИт', 'прИбыли', 'свеклА', 'повтОренный', 'дОсуха'],
+    correct: [0, 1, 4],
+    explanation: 'Правильно: сверлИт, прИбыли, дОсуха. Неверно: свЁкла (а не свеклА), повторЁнный.' },
+
+  { type: 'multi', tag: 'Орфоэпия', task: 'Задание 4',
+    text: 'Укажи варианты ответов, в которых <strong>неверно</strong> выделена буква.',
+    options: ['нАчал', 'низведЁн', 'позвОнишь', 'навЕрх', 'клалА'],
+    correct: [2, 4],
+    explanation: 'Правильно: позвонИшь, клАла. Остальные — верные ударения.' },
+
+  /* ===== ТЕОРИЯ: Паронимы ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 5',
+    title: 'Паронимы — пары, которые чаще всего путают',
+    sub: 'Паронимы — похожие по звучанию однокоренные слова с разным значением.',
+    sections: [
+      { heading: 'Ключевые пары из списка ФИПИ-2026:', type: 'pairs', items: [
+        ['ОДЕТЬ / НАДЕТЬ', '«Одеть Надежду — надеть одежду» (одеть кого-то, надеть на себя)'],
+        ['АБОНЕМЕНТ / АБОНЕНТ', 'Абонемент в фитнес-клуб (документ) · Абонент сотовой связи (человек)'],
+        ['АДРЕСАТ / АДРЕСАНТ', 'Адресат — получатель письма · Адресант — отправитель'],
+        ['ЭФФЕКТНЫЙ / ЭФФЕКТИВНЫЙ', 'Эффектный = яркий, впечатляющий · Эффективный = дающий результат'],
+        ['БЕЗОТВЕТНЫЙ / БЕЗОТВЕТСТВЕННЫЙ', 'Безответная любовь (не отвечающая) · Безответственный поступок'],
+        ['НЕВЕЖА / НЕВЕЖДА', 'Невежа = грубиян · Невежда = необразованный'],
+        ['ПРЕДОСТАВИТЬ / ПРЕДСТАВИТЬ', 'Предоставить отпуск (дать) · Представить документы (показать)'],
+        ['БОЛОТНЫЙ / БОЛОТИСТЫЙ', 'Болотная вода (от болота) · Болотистая местность (с болотами)'],
+        ['ГОРДЫНЯ / ГОРДОСТЬ', 'Гордыня = грех, высокомерие · Гордость = чувство достоинства']
+      ]}
+    ]
+  },
+
+  /* ===== ПАРОНИМЫ (5) ===== */
+  { type: 'click_sentences', tag: 'Паронимы', task: 'Задание 5',
+    text: 'Найди слово с лексической ошибкой и нажми на него.',
+    instruction: 'Из 5 предложений только в одном пароним употреблён неверно.',
+    sentences: [
+      [ {t:'В 1501 году Микеланджело взялся выполнить статую Давида из '}, {t:'ЦЕЛЬНОГО', click:true, isError:false}, {t:' куска мрамора.'} ],
+      [ {t:'Имя выдающегося учёного М. В. Ломоносова останется жить в памяти '}, {t:'БЛАГОДАРНОГО', click:true, isError:false}, {t:' потомства.'} ],
+      [ {t:'Растения синтезируют все необходимые '}, {t:'ОРГАНИЧЕСКИЕ', click:true, isError:false}, {t:' вещества.'} ],
+      [ {t:'Чтобы коса смотрелась '}, {t:'ЭФФЕКТНО', click:true, isError:false}, {t:' и нарядно, плети её из длинных прядей.'} ],
+      [ {t:'Осенью в лесах раздаётся '}, {t:'ЗВУКОВОЕ', click:true, isError:true, replace:'звучное'}, {t:', отрывистое посвистывание поползня.'} ]
+    ],
+    explanation: 'Звуковое = относящееся к звукам. Здесь нужно «звучное» — громкое, заполняющее пространство.'
+  },
+
+  { type: 'click_sentences', tag: 'Паронимы', task: 'Задание 5',
+    text: 'Найди слово с лексической ошибкой и нажми на него.',
+    instruction: 'Из 5 предложений только в одном пароним употреблён неверно.',
+    sentences: [
+      [ {t:''}, {t:'ЛИЧНОЕ', click:true, isError:false}, {t:' имущество охраняется законом.'} ],
+      [ {t:'Самым '}, {t:'ВЫСОКИМ', click:true, isError:false}, {t:' игроком чемпионата назван игрок российской команды.'} ],
+      [ {t:'Первый телефакс '}, {t:'ПРЕДСТАВЛЯЛ', click:true, isError:false}, {t:' собой маятник.'} ],
+      [ {t:'В музее выставлены портреты учёных, являющих собой '}, {t:'ГОРДЫНЮ', click:true, isError:true, replace:'гордость'}, {t:' мировой науки.'} ],
+      [ {t:'На морозе руки стали совершенно '}, {t:'ЛЕДЯНЫМИ', click:true, isError:false}, {t:'.'} ]
+    ],
+    explanation: 'Гордыня = высокомерие, грех. Учёные — гордость науки (повод гордиться).'
+  },
+
+  { type: 'choose_paronym', tag: 'Паронимы', task: 'Задание 5',
+    text: 'Вратарь хоккейной команды ___ экипировку, защищающую его от ударов шайбы.',
+    options: ['ОДЕВАЕТ', 'НАДЕВАЕТ'],
+    correct: 1,
+    explanation: 'Надевать одежду на себя; одевать кого-то другого. Правило: «Одеть Надежду — надеть одежду».' },
+
+  { type: 'choose_paronym', tag: 'Паронимы', task: 'Задание 5',
+    text: 'К сожалению, мой младший брат вырос абсолютно ___ человеком, на которого нельзя положиться.',
+    options: ['БЕЗОТВЕТНЫМ', 'БЕЗОТВЕТСТВЕННЫМ'],
+    correct: 1,
+    explanation: 'Безответный = не отвечающий, кроткий (безответная любовь). Безответственный = не несущий ответственности.' },
+
+  { type: 'choose_paronym', tag: 'Паронимы', task: 'Задание 5',
+    text: 'Сотрудники лесничества и пожарные потушили разгоревшийся в ___ местности крупный природный пожар.',
+    options: ['БОЛОТНОЙ', 'БОЛОТИСТОЙ'],
+    correct: 1,
+    explanation: 'Болотный = относящийся к болоту (болотная вода). Болотистая = с участками болот (местность).' },
+
+  /* ===== ТЕОРИЯ: Лексические нормы ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 6',
+    title: 'Лексические нормы — типы ошибок',
+    sub: 'В задании 6 нужно либо исключить лишнее слово (плеоназм/тавтология), либо заменить неверно употреблённое.',
+    sections: [
+      { heading: 'Плеоназм и тавтология — как распознать:', type: 'rules', items: [
+        '<strong>Плеоназм</strong> — повтор смысла: одно слово уже содержит значение другого',
+        '<strong>Тавтология</strong> — однокоренной повтор: «масло масляное», «спросить вопрос»',
+        'Приём проверки: убери слово — если смысл не изменился, оно лишнее'
+      ]},
+      { heading: 'Подсказки при выполнении:', type: 'rules', items: [
+        '«Из списка словосочетаний следует исключить <strong>прилагательное</strong>» — лишнее почти всегда прилагательное (или наречие)',
+        '«Зачастую ошибка кроется в употреблении <strong>глагола</strong> с какой-нибудь частью речи»'
+      ]},
+      { heading: 'Замена слова — типичные ошибки сочетаемости:', type: 'rules', items: [
+        '<strong>производить</strong> впечатление (не «делать»)',
+        '<strong>основное / особое</strong> внимание (не «ведущее»)',
+        '<strong>играть</strong> роль — <strong>иметь</strong> значение (не путать местами)',
+        '<strong>тяготы</strong> жизни (не «тяжести»)'
+      ]}
+    ]
+  },
+
+  /* ===== ЛЕКСИЧЕСКИЕ НОРМЫ (5) ===== */
+  { type: 'click_sentences', tag: 'Лексика', task: 'Задание 6',
+    text: 'Исключи лишнее слово — нажми на него.',
+    instruction: 'Найди плеоназм (повтор смысла). Нажми на слово, которое можно убрать без потери смысла.',
+    sentences: [
+      [ {t:'Таня', click:true, isError:false}, {t:' — '}, {t:'верная', click:true, isError:false}, {t:' '}, {t:'жена', click:true, isError:false}, {t:' '}, {t:'своему', click:true, isError:true, replace:''}, {t:' '}, {t:'мужу', click:true, isError:false}, {t:'.'} ]
+    ],
+    explanation: 'Если она ему жена, то уж точно своему — это плеоназм.'
+  },
+
+  { type: 'input', tag: 'Лексика', task: 'Задание 6',
+    text: 'Замени неверно употреблённое слово.',
+    instruction: 'Сторонники царевны Софии <strong>одержали</strong> поражение в битве с войсками Петра Великого.',
+    correct: ['потерпели'],
+    explanation: 'Одерживают победу — терпят поражение. Это устойчивые сочетания.' },
+
+  { type: 'input', tag: 'Лексика', task: 'Задание 6',
+    text: 'Замени неверно употреблённое слово.',
+    instruction: 'У Ирины <strong>карие</strong> волосы и зелёные глаза.',
+    correct: ['русые'],
+    explanation: 'Карими бывают только глаза. Волосы — русые, тёмные, каштановые.' },
+
+  { type: 'input', tag: 'Лексика', task: 'Задание 6',
+    text: 'Замени неверно употреблённое слово.',
+    instruction: 'Снятый в прошлом году фильм <strong>создал</strong> неоднозначную реакцию кинокритиков.',
+    correct: ['вызвал'],
+    explanation: 'Реакцию вызывают, а не создают. «Создать» сочетается с произведениями, объектами.' },
+
+  { type: 'click_sentences', tag: 'Лексика', task: 'Задание 6',
+    text: 'Исключи лишнее слово — нажми на него.',
+    instruction: 'Найди плеоназм. Нажми на слово, которое можно убрать без потери смысла.',
+    sentences: [
+      [ {t:'Мировое', click:true, isError:true, replace:''}, {t:' '}, {t:'человечество', click:true, isError:false}, {t:' '}, {t:'вошло', click:true, isError:false}, {t:' в '}, {t:'третье', click:true, isError:false}, {t:' '}, {t:'тысячелетие', click:true, isError:false}, {t:' с '}, {t:'громадными', click:true, isError:false}, {t:' '}, {t:'знаниями', click:true, isError:false}, {t:'.'} ]
+    ],
+    explanation: 'Человечество и так включает всех людей мира — слово «мировое» избыточно.'
+  },
+
+  /* ===== ТЕОРИЯ: Формы слов ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 7',
+    title: 'Формы слов — то, что часто путают',
+    sub: 'Числительные, существительные в Р.п. мн.ч., повелительное наклонение глаголов.',
+    sections: [
+      { heading: 'Существительные в Р.п. мн.ч. (нулевое окончание):', type: 'words',
+        items: ['нет ботинок','нет сапог','нет валенок','нет чулок','нет гольфов','нет носков','нет туфель','нет погон','нет помидоров','нет апельсинов','нет солдат','нет грузин','нет армян'] },
+      { heading: 'Числительные:', type: 'rules', items: [
+        '<strong>полтораста / полутораста</strong> (И.п./В.п. — полтораста, остальные — полутораста)',
+        '<strong>оба</strong> (м.р./ср.р.) — <strong>обе</strong> (ж.р.)',
+        '<strong>двухсот, трёхсот... семисот, восьмисот</strong> (Р.п. — не семиста!)',
+        '<strong>в двухстах, трёхстах</strong> (П.п. — не в трёхста!)',
+        'В составных порядковых числительных склоняется только последнее: <strong>в две тысячи пятом году</strong>'
+      ]},
+      { heading: 'Глаголы — повелительное наклонение:', type: 'rules', items: [
+        '<strong>поезжай</strong> (не «езжай», не «ехай»)',
+        '<strong>заезжай</strong> (не «заехай»)',
+        '<strong>положи</strong> (не «ложи»)',
+        '<strong>помаши</strong> (не «помахай»)',
+        '<strong>прилягте</strong> (не «приляжьте»)',
+        'Будущее время: <strong>испечёт</strong> (не «испекёт»), <strong>текут</strong> (не «текёт»)'
+      ]},
+      { heading: 'Сравнительная степень — ударение:', type: 'rules', items: [
+        '<strong>красИвее</strong> (ударение на «и» в корне), а не «красивЕе»',
+        '<strong>красИвейший</strong> — превосходная степень тоже на «и»',
+        'Остальные формы запомни: <strong>молОже, тОньше, жЁстче, длиннЕе</strong>'
+      ]}
+    ]
+  },
+
+  /* ===== ФОРМЫ СЛОВ (5) ===== */
+  { type: 'input', tag: 'Формы слов', task: 'Задание 7',
+    text: 'В одном из слов допущена ошибка. Запиши слово правильно.',
+    instruction: 'нет ГОЛЬФОВ · нет ГЕТР · нет НОСОК · нет ЧУЛОК · нет ДЖИНСОВ',
+    correct: ['носков'],
+    explanation: 'Правильно: нет носков. Парные предметы одежды: чулки — чулок, носки — носков (с окончанием -ов).' },
+
+  { type: 'input', tag: 'Формы слов', task: 'Задание 7',
+    text: 'В одном из слов допущена ошибка. Запиши слово правильно.',
+    instruction: 'смотрится КРАСИВЕЕ · ПРОМОК до нитки · в ШКАФЕ · килограмм ЯБЛОК · нет ТУФЕЛЬ',
+    correct: ['шкафу', 'в шкафу'],
+    explanation: 'Правильно: в шкафу. Предложный падеж со значением «внутри» — окончание -у.' },
+
+  { type: 'input', tag: 'Формы слов', task: 'Задание 7',
+    text: 'В одном из слов допущена ошибка. Запиши слово правильно.',
+    instruction: 'нет ПОЛТОРАСТА рублей · рота СОЛДАТ · ЗАЕЗЖАЙ завтра · ПРИЛЯГТЕ на кровать · не ЕЗДИ туда',
+    correct: ['полутораста'],
+    explanation: 'Правильно: полутораста. Числительное «полтораста» во всех падежах кроме И.п. и В.п. — полутораста.' },
+
+  { type: 'input', tag: 'Формы слов', task: 'Задание 7',
+    text: 'В одном из слов допущена ошибка. Запиши слово правильно.',
+    instruction: 'нет САПОГ · ТРОЕ друзей · по ИХ расчётам · более СЕМИСТА человек · в 2005 году',
+    correct: ['семисот'],
+    explanation: 'Правильно: семисот. Числительные на -сот в Р.п. — двухсот, трёхсот... семисот, восьмисот.' },
+
+  { type: 'input', tag: 'Формы слов', task: 'Задание 7',
+    text: 'В одном из слов допущена ошибка. Запиши слово правильно.',
+    instruction: 'в ШКАФУ · известные КОНСТРУКТОРЫ · СКОРЕЙШЕГО выздоровления · ИСПЕКЁТ пироги · ПОМАШИ рукой',
+    correct: ['испечёт'],
+    explanation: 'Правильно: испечёт. От «печь» — пеку, печёшь, печёт. Форма «испекёт» — просторечие.' },
+
+  /* ===== ТЕОРИЯ: Грамматические ошибки ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 8',
+    title: 'Грамматические ошибки — 8 типов',
+    sub: 'Самое сложное задание. Запомни признаки каждого типа.',
+    sections: [
+      { heading: '1. Однородные члены', type: 'rules', items: [
+        'Двойные союзы: <strong>как… так и; не только… но и; не столько… сколько</strong> — части постоянны',
+        'Однородные с общим дополнением должны иметь одинаковое управление: «вспоминала <em>что</em>» + «восхищалась <em>чем</em>» — ошибка'
+      ]},
+      { heading: '2. Причастный оборот', type: 'rules', items: [
+        'Определяемое слово — <strong>вне оборота</strong>, оборот согласован с ним в роде, числе, падеже',
+        'Оборот стоит сразу до или после определяемого слова, иначе ошибка'
+      ]},
+      { heading: '3. Деепричастный оборот', type: 'rules', items: [
+        '<strong>Подлежащее</strong> выполняет и основное действие (глагол), и добавочное (деепричастие)',
+        'В безличном предложении деепричастного оборота быть не может: «Готовясь к выступлению, понадобится…» — ошибка'
+      ]},
+      { heading: '4. Несогласованное приложение', type: 'rules', items: [
+        'Названия в кавычках при родовом слове <strong>не склоняются</strong>: «в журнале <em>«История»</em>», «в поэме <em>«Демон»</em>»'
+      ]},
+      { heading: '5. Управление с предлогами', type: 'rules', items: [
+        '<strong>благодаря / согласно / вопреки / навстречу / наперекор</strong> + <strong>дательный падеж</strong>',
+        'Предлог <strong>по</strong> в значении «после» + <strong>предложный</strong>: по приезде, по прилёте, по окончании'
+      ]},
+      { heading: '6. Косвенная речь', type: 'rules', items: [
+        'Не использовать местоимения <strong>1 и 2 лица</strong>: «Он сказал, что я приду» — нельзя, нужно «что придёт»'
+      ]},
+      { heading: '7. Видо-временная связь', type: 'rules', items: [
+        'Глаголы в одной мысли — одного вида и времени: «развивается и сформировалась» — ошибка (несов. + сов.)'
+      ]},
+      { heading: '8. Связь подлежащего и сказуемого', type: 'rules', items: [
+        '«Все, кто…», «Те, кто…» — сказуемое во <strong>множественном</strong> числе',
+        'Несклоняемые: пони — м.р., шимпанзе — м.р., кофе — м.р., такси — ср.р.'
+      ]}
+    ]
+  },
+
+  /* ===== ГРАММАТИЧЕСКИЕ ОШИБКИ (1 большое) ===== */
+  { type: 'match', tag: 'Грамматика', task: 'Задание 8',
+    text: 'Установи соответствие между грамматическими ошибками и предложениями.',
+    instruction: 'К каждому типу ошибки подбери номер предложения. До 5 баллов.',
+    errors: [
+      { letter: 'А', text: 'Нарушение в построении предложения с причастным оборотом' },
+      { letter: 'Б', text: 'Неправильное построение предложения с деепричастным оборотом' },
+      { letter: 'В', text: 'Ошибка в построении предложения с однородными членами' },
+      { letter: 'Г', text: 'Нарушение связи между подлежащим и сказуемым' },
+      { letter: 'Д', text: 'Неправильное употребление падежной формы существительного с предлогом' }
+    ],
+    sentences: [
+      '1) В эмиграции Марина Цветаева часто вспоминала и восхищалась поэзией Бориса Пастернака.',
+      '2) Весь день пони катало в зоопарке малышей.',
+      '3) Все, кто побывал в Крыму, увезли с собой яркие впечатления о море и горах.',
+      '4) За определённым компьютером закреплён программист, следящий за его состоянием.',
+      '5) Монастырь стоял вдоль реки, на высоком её берегу, отделявшей людей от города.',
+      '6) С. Михалков утверждал, что мир купеческого Замоскворечья оживает на сцене Малого театра.',
+      '7) По прилёту в столицу Алексеев направился прямиком к министру.',
+      '8) Готовясь к устному выступлению, необходимо быть спокойным и уверенным в себе.',
+      '9) Готовясь к устному выступлению, понадобится личная убеждённость оратора.'
+    ],
+    correct: [5, 9, 1, 2, 7],
+    explanations: [
+      'Причастие «отделявшей» по форме относится к «реки», но не согласуется с тем, что отделяет.',
+      'Деепричастие «готовясь» должно относиться к подлежащему, но подлежащее «убеждённость» не может готовиться.',
+      '«Вспоминала ЧТО» и «восхищалась ЧЕМ» — разное управление однородных глаголов.',
+      '«Пони» — м.р. (неизменяемое одушевлённое), нужно «катал», а не «катало».',
+      'Правильно: «по прилётЕ» (предл.п. после «по» в значении «после»).'
+    ]
+  }
+];
+
+/* ============ ИГРА ============ */
+const game = {
+  current: 0,
+  taskStates: {},
+  startTime: 0,
+  userName: embedName || '',
+  maxScore: 25
+};
+
+function getTotalScore(){
+  let s = 0;
+  for(const k in game.taskStates) s += game.taskStates[k].earned || 0;
+  return s;
+}
+function getAnsweredCount(){
+  return Object.keys(game.taskStates).filter(k => game.taskStates[k].answered).length;
+}
+function getUnansweredScored(){
+  return SCORED_INDICES.filter(i => !game.taskStates[i] || !game.taskStates[i].answered);
+}
+function declOfNum(n, titles){
+  const cases = [2, 0, 1, 1, 1, 2];
+  return titles[(n % 100 > 4 && n % 100 < 20) ? 2 : cases[Math.min(n % 10, 5)]];
+}
+
+// Считаем, сколько заданий-задач (не теории) — для прогресса
+const SCORED_INDICES = TASKS.map((t, i) => t.type === 'theory' ? -1 : i).filter(i => i >= 0);
+const TOTAL_SCORED = SCORED_INDICES.length;
+
+function currentScoredIndex(){
+  // На какой по счёту задаче-задаче мы сейчас (1-based)
+  const pos = SCORED_INDICES.indexOf(game.current);
+  if(pos >= 0) return pos + 1;
+  // Если на теории — берём номер следующей задачи
+  for(let i = game.current; i < TASKS.length; i++){
+    const p = SCORED_INDICES.indexOf(i);
+    if(p >= 0) return p + 1;
+  }
+  return TOTAL_SCORED;
+}
+
+if(isEmbed && embedName){
+  document.getElementById('userName').value = embedName;
+  document.getElementById('screenStart').classList.add('hidden');
+  document.getElementById('progress').classList.remove('hidden');
+  startGame(true);
+}
+
+function startGame(skipName){
+  if(!skipName){
+    const name = document.getElementById('userName').value.trim();
+    if(!name){
+      document.getElementById('userName').focus();
+      document.getElementById('userName').style.borderColor = 'var(--red)';
+      return;
+    }
+    game.userName = name;
+  }
+  game.startTime = Date.now();
+  document.getElementById('screenStart').classList.add('hidden');
+  document.getElementById('progress').classList.remove('hidden');
+  renderTask();
+}
+
+function updateProgress(){
+  const T = TASKS[game.current];
+  const answered = getAnsweredCount();
+  const pct = (answered / TOTAL_SCORED) * 100;
+  let label;
+  if(T && T.type === 'theory'){
+    label = '📚 Теория';
+  } else {
+    const idx = currentScoredIndex();
+    label = `Задание ${idx} из ${TOTAL_SCORED}`;
+  }
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressLabel').textContent = label;
+  document.getElementById('progressScore').innerHTML = `⭐ ${getTotalScore()}`;
+}
+
+function renderTask(){
+  if(game.current >= TASKS.length){
+    tryFinish();
+    return;
+  }
+  updateProgress();
+  const T = TASKS[game.current];
+  const screen = document.getElementById('screenGame');
+  screen.classList.remove('hidden');
+  screen.style.animation = 'none';
+  void screen.offsetWidth;
+  screen.style.animation = 'rise 0.5s ease both';
+
+  if(T.type === 'theory'){
+    renderTheory(T);
+    return;
+  }
+
+  const state = game.taskStates[game.current];
+  const isAnswered = state && state.answered;
+
+  let html = `
+    <span class="q-label">${T.tag}</span>
+    <div class="q-task">${T.task}</div>
+    <div class="q-text">${T.text}</div>
+  `;
+  if(T.instruction) html += `<div class="q-instruction">${T.instruction}</div>`;
+
+  if(T.type === 'multi'){
+    html += '<div class="options" id="opts">';
+    T.options.forEach((o, i) => {
+      let cls = 'opt';
+      if(isAnswered){
+        cls += ' disabled';
+        if(T.correct.includes(i)) cls += ' correct';
+        else if(state.userSelection && state.userSelection.includes(i)) cls += ' wrong';
+      }
+      html += `<div class="${cls}" onclick="toggleMulti(${i})" data-idx="${i}">
+        <span class="opt-num">${i + 1}</span><span>${o}</span></div>`;
+    });
+    html += '</div>';
+  }
+  else if(T.type === 'choose_paronym'){
+    html += '<div class="options" id="opts">';
+    T.options.forEach((o, i) => {
+      let cls = 'opt';
+      if(isAnswered){
+        cls += ' disabled';
+        if(i === T.correct) cls += ' correct';
+        else if(state.userIdx === i) cls += ' wrong';
+      }
+      html += `<div class="${cls}" onclick="chooseParonym(${i})" data-idx="${i}">
+        <span class="opt-num">${i + 1}</span><span>${o}</span></div>`;
+    });
+    html += '</div>';
+  }
+  else if(T.type === 'click_sentences'){
+    html += '<div class="sentence-list">';
+    T.sentences.forEach((sent, sIdx) => {
+      let inner = '';
+      sent.forEach((part, pIdx) => {
+        if(part.click){
+          let cls = 'word-click';
+          if(isAnswered){
+            cls += ' disabled';
+            if(part.isError) cls += ' correct';
+            else if(state.userClick && state.userClick.s === sIdx && state.userClick.p === pIdx) cls += ' wrong';
+          }
+          inner += `<span class="${cls}" data-s="${sIdx}" data-p="${pIdx}" onclick="clickSentenceWord(${sIdx}, ${pIdx})">${part.t}</span>`;
+        } else {
+          inner += part.t;
+        }
+      });
+      html += `<div class="sentence-card"><span class="sentence-num">${sIdx + 1}</span>${inner}</div>`;
+    });
+    html += '</div>';
+  }
+  else if(T.type === 'input'){
+    const val = isAnswered ? (state.userAnswer || '') : '';
+    const disabled = isAnswered ? 'disabled' : '';
+    let borderStyle = '';
+    if(isAnswered) borderStyle = state.isCorrect ? 'border-color: var(--green);' : 'border-color: var(--red);';
+    html += `<div class="input-row">
+      <input type="text" id="answerInput" placeholder="Введи правильную форму" autocomplete="off" value="${val}" ${disabled} style="${borderStyle}" onkeypress="if(event.key==='Enter') submitInput()">
+    </div>`;
+  }
+  else if(T.type === 'match'){
+    html += '<div class="sentences-box"><div class="stitle">Предложения для выбора:</div>';
+    T.sentences.forEach(s => { html += `<p>${s}</p>`; });
+    html += '</div>';
+    html += '<div class="match-grid">';
+    T.errors.forEach((e, i) => {
+      const val = isAnswered ? (state.userMatch ? state.userMatch[i] || '' : '') : '';
+      const dis = isAnswered ? 'disabled' : '';
+      let style = '';
+      if(isAnswered){
+        const isOk = state.userMatch && state.userMatch[i] === T.correct[i];
+        style = isOk ? 'border-color: var(--green); background: #e8f5e9;' : 'border-color: var(--red); background: #ffebee;';
+      }
+      html += `<div class="match-row">
+        <span class="match-letter">${e.letter}</span>
+        <span class="match-text">${e.text}</span>
+        <select class="match-select" id="match${i}" ${dis} style="${style}">
+          <option value="">—</option>
+          ${T.sentences.map((s, j) => `<option value="${j + 1}" ${val == (j + 1) ? 'selected' : ''}>${j + 1}</option>`).join('')}
+        </select>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  if(isAnswered){
+    const cls = state.isCorrect ? 'ok' : 'no';
+    let label;
+    if(state.earned === state.max) label = '🌷 Верно! +' + state.earned;
+    else if(state.earned > 0) label = '🌱 Частично (+' + state.earned + '/' + state.max + ')';
+    else label = '🍂 Не совсем (0/' + state.max + ')';
+    html += `<div class="feedback ${cls}"><strong>${label}</strong><br>${state.explanation}</div>`;
+  }
+
+  html += buildFooter(T, isAnswered);
+  screen.innerHTML = html;
+  game.currentSelection = [];
+}
+
+function buildFooter(T, isAnswered){
+  let html = `<div class="card-footer" id="footer" style="flex-wrap: wrap;">`;
+  if(game.current > 0){
+    html += `<button class="btn btn-ghost" onclick="prevTask()" style="padding: 10px 18px; font-size: 14px;">← Назад</button>`;
+  } else {
+    html += `<span></span>`;
+  }
+  if(T.type === 'theory'){
+    html += `<button class="btn" onclick="nextTask()">Понятно, дальше →</button>`;
+  } else if(isAnswered){
+    if(isLastTask()){
+      html += `<button class="btn" onclick="tryFinish()">Завершить 🌸</button>`;
+    } else {
+      html += `<button class="btn" onclick="nextTask()">Дальше →</button>`;
+    }
+  } else {
+    const skipBtn = isLastTask() ? '' : `<button class="btn btn-ghost" onclick="nextTask()" style="padding: 10px 18px; font-size: 14px;">Пропустить →</button>`;
+    let mainBtn = '';
+    if(T.type === 'multi'){
+      mainBtn = `<button class="btn" id="btnSubmit" onclick="submitMulti()" disabled>Ответить</button>`;
+    } else if(T.type === 'input'){
+      mainBtn = `<button class="btn" id="btnSubmit" onclick="submitInput()">Ответить</button>`;
+    } else if(T.type === 'match'){
+      mainBtn = `<button class="btn" id="btnSubmit" onclick="submitMatch()">Ответить</button>`;
+    } else {
+      // click_sentences и choose_paronym — ответ по клику
+      mainBtn = '';
+    }
+    html += skipBtn + mainBtn;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function isLastTask(){
+  return game.current === TASKS.length - 1;
+}
+
+function prevTask(){
+  if(game.current > 0){
+    game.current--;
+    renderTask();
+  }
+}
+
+function tryFinish(){
+  const unanswered = getUnansweredScored();
+  if(unanswered.length === 0){
+    finishGame();
+  } else {
+    const screen = document.getElementById('screenGame');
+    const warningHtml = `
+      <span class="q-label" style="background: #fff3cd; color: #856404;">⚠ Внимание</span>
+      <div class="q-text">Ещё не на все вопросы получены ответы.</div>
+      <div class="q-instruction">У тебя <strong>${unanswered.length}</strong> ${declOfNum(unanswered.length, ['неотвеченный вопрос', 'неотвеченных вопроса', 'неотвеченных вопросов'])}. Без ответов на все вопросы тест нельзя завершить.</div>
+      <div class="card-footer">
+        <button class="btn btn-ghost" onclick="prevTask()" style="padding: 10px 18px; font-size: 14px;">← Назад</button>
+        <button class="btn" onclick="jumpToFirstUnanswered()">Перейти к неотвеченным →</button>
+      </div>
+    `;
+    screen.innerHTML = warningHtml;
+  }
+}
+
+function jumpToFirstUnanswered(){
+  const unanswered = getUnansweredScored();
+  if(unanswered.length > 0){
+    game.current = unanswered[0];
+    renderTask();
+  }
+}
+
+function renderTheory(T){
+  const screen = document.getElementById('screenGame');
+  let html = `
+    <span class="q-label theory">${T.tag}</span>
+    <div class="q-task">${T.task}</div>
+    <div class="theory-title">${T.title}</div>
+    <div class="theory-sub">${T.sub}</div>
+  `;
+  T.sections.forEach(sec => {
+    html += `<div class="theory-section"><div class="theory-heading">${sec.heading}</div>`;
+    if(sec.type === 'words'){
+      html += '<div class="theory-list">';
+      sec.items.forEach(w => { html += `<span class="theory-word">${w}</span>`; });
+      html += '</div>';
+    } else if(sec.type === 'rules'){
+      sec.items.forEach(r => { html += `<div class="theory-rule">${r}</div>`; });
+    } else if(sec.type === 'pairs'){
+      sec.items.forEach(p => {
+        html += `<div class="theory-pair"><div class="pair-title">${p[0]}</div><div class="pair-ex">${p[1]}</div></div>`;
+      });
+    }
+    html += '</div>';
+  });
+  html += buildFooter(T, true);
+  screen.innerHTML = html;
+}
+
+/* ============ ВЗАИМОДЕЙСТВИЕ ============ */
+function toggleMulti(i){
+  if(game.taskStates[game.current] && game.taskStates[game.current].answered) return;
+  const opt = document.querySelector(`#opts .opt[data-idx="${i}"]`);
+  if(!opt) return;
+  const pos = game.currentSelection.indexOf(i);
+  if(pos >= 0){
+    game.currentSelection.splice(pos, 1);
+    opt.classList.remove('selected');
+  } else {
+    game.currentSelection.push(i);
+    opt.classList.add('selected');
+  }
+  const btn = document.getElementById('btnSubmit');
+  if(btn) btn.disabled = game.currentSelection.length === 0;
+}
+
+function saveAnswer(T, data){
+  game.taskStates[game.current] = Object.assign({
+    answered: true,
+    task_id: game.current + 1,
+    task_type: T.task,
+    tag: T.tag
+  }, data);
+}
+
+function submitMulti(){
+  const T = TASKS[game.current];
+  const correct = T.correct.slice().sort();
+  const given = game.currentSelection.slice().sort();
+  const isCorrect = correct.length === given.length && correct.every((v, i) => v === given[i]);
+  saveAnswer(T, {
+    userSelection: given,
+    userAnswer: given.map(i => T.options[i]).join(', ') || '—',
+    earned: isCorrect ? 1 : 0,
+    max: 1,
+    isCorrect,
+    correctStr: T.correct.map(i => T.options[i]).join(', '),
+    explanation: T.explanation
+  });
+  renderTask();
+}
+
+function chooseParonym(i){
+  if(game.taskStates[game.current] && game.taskStates[game.current].answered) return;
+  const T = TASKS[game.current];
+  const isCorrect = i === T.correct;
+  saveAnswer(T, {
+    userIdx: i,
+    userAnswer: T.options[i],
+    earned: isCorrect ? 1 : 0,
+    max: 1,
+    isCorrect,
+    correctStr: T.options[T.correct],
+    explanation: T.explanation
+  });
+  renderTask();
+}
+
+function clickSentenceWord(sIdx, pIdx){
+  if(game.taskStates[game.current] && game.taskStates[game.current].answered) return;
+  const T = TASKS[game.current];
+  const part = T.sentences[sIdx][pIdx];
+  const isCorrect = part.isError;
+  let correctWord = '';
+  T.sentences.forEach(sent => sent.forEach(p => {
+    if(p.isError) correctWord = p.t + (p.replace ? ' → ' + p.replace : ' (лишнее)');
+  }));
+  saveAnswer(T, {
+    userClick: { s: sIdx, p: pIdx },
+    userAnswer: part.t,
+    earned: isCorrect ? 1 : 0,
+    max: 1,
+    isCorrect,
+    correctStr: correctWord,
+    explanation: T.explanation
+  });
+  renderTask();
+}
+
+function submitInput(){
+  const T = TASKS[game.current];
+  const val = document.getElementById('answerInput').value.trim().toLowerCase().replace(/ё/g, 'е');
+  const correctList = T.correct.map(c => c.toLowerCase().replace(/ё/g, 'е'));
+  const isCorrect = correctList.includes(val);
+  saveAnswer(T, {
+    userAnswer: val || '—',
+    earned: isCorrect ? 1 : 0,
+    max: 1,
+    isCorrect,
+    correctStr: T.correct[0],
+    explanation: `<strong>Правильный ответ:</strong> ${T.correct[0]}. ${T.explanation}`
+  });
+  renderTask();
+}
+
+function submitMatch(){
+  const T = TASKS[game.current];
+  const given = T.errors.map((_, i) => parseInt(document.getElementById('match' + i).value) || 0);
+  let scored = 0;
+  given.forEach((g, i) => { if(g === T.correct[i]) scored++; });
+  const isFullyCorrect = scored === T.correct.length;
+  let explanation = `<strong>Правильные пары:</strong><br>`;
+  T.errors.forEach((e, i) => {
+    explanation += `${e.letter} → ${T.correct[i]}. ${T.explanations[i]}<br>`;
+  });
+  saveAnswer(T, {
+    userMatch: given,
+    userAnswer: given.join(','),
+    earned: scored,
+    max: 5,
+    isCorrect: isFullyCorrect,
+    correctStr: T.correct.join(','),
+    explanation
+  });
+  renderTask();
+}
+
+function nextTask(){
+  if(game.current < TASKS.length - 1){
+    game.current++;
+    renderTask();
+  } else {
+    tryFinish();
+  }
+}
+
+/* ============ ФИНАЛ ============ */
+function finishGame(){
+  const elapsed = Math.round((Date.now() - game.startTime) / 1000);
+  document.getElementById('screenGame').classList.add('hidden');
+  document.getElementById('progress').classList.add('hidden');
+
+  game.wrongTasks = [];
+  for(const k in game.taskStates){
+    const s = game.taskStates[k];
+    if(s.answered && s.earned < s.max){
+      game.wrongTasks.push({
+        task_id: s.task_id, task_type: s.task_type, tag: s.tag,
+        correct: s.correctStr, user: s.userAnswer
+      });
+    }
+  }
+  game.totalScore = getTotalScore();
+
+  const screen = document.getElementById('screenFinal');
+  screen.classList.remove('hidden');
+
+  const pct = Math.round((game.totalScore / game.maxScore) * 100);
+  let grade, emoji, msg, gradeClass;
+  if(pct >= 90){ grade = 'Отлично!'; emoji = '🌸💐🌸'; msg = 'Ты блестяще справился! Уровень орфоэпии и грамматики — на высоте.'; gradeClass = 'grade-5'; }
+  else if(pct >= 75){ grade = 'Хорошо'; emoji = '🌷🌼🌷'; msg = 'Уверенный результат. Несколько мест стоит повторить — посмотри ниже.'; gradeClass = 'grade-4'; }
+  else if(pct >= 50){ grade = 'Можно лучше'; emoji = '🌿🌱'; msg = 'Есть пробелы. Разбери ошибки ниже и пройди тренажёр ещё раз — это поможет.'; gradeClass = 'grade-3'; }
+  else { grade = 'Нужно тренироваться'; emoji = '🌱'; msg = 'Не расстраивайся — повтори правила и пройди тренажёр ещё раз. Это нормально.'; gradeClass = 'grade-2'; }
+
+  const mm = Math.floor(elapsed / 60), ss = elapsed % 60;
+  const timeStr = `${mm} мин ${ss < 10 ? '0' + ss : ss} с`;
+
+  let html = `
+    <span class="final-emoji">${emoji}</span>
+    <div style="font-size: 17px; color: var(--text-soft);">${game.userName}, твой результат:</div>
+    <div class="final-score">${game.totalScore}<span class="final-max"> / ${game.maxScore}</span></div>
+    <div class="final-grade ${gradeClass}">${grade} (${pct}%)</div>
+    <div class="final-msg">${msg}<br><small>⏱ Время: ${timeStr}</small></div>
+  `;
+
+  if(game.wrongTasks.length > 0){
+    html += '<div class="errors-section"><div class="errors-title">📝 Разбор ошибок (' + game.wrongTasks.length + '):</div>';
+    game.wrongTasks.forEach(w => {
+      html += `<div class="error-item">
+        <div class="label">${w.tag} · ${w.task_type}</div>
+        <div class="your">Твой ответ: ${w.user || '—'}</div>
+        <div class="right">Правильно: ${w.correct}</div>
+      </div>`;
+    });
+    html += '</div>';
+  } else {
+    html += '<div class="errors-section" style="background: #e8f5e9; text-align: center;"><div class="errors-title" style="color: var(--green);">🌸 Ни одной ошибки! Превосходно!</div></div>';
+  }
+
+  if(isEmbed){
+    html += `<div style="background: var(--mint); padding: 14px; border-radius: 14px; color: #1b5e20; font-size: 14px; margin-top: 18px;">
+      ✓ Результат сохранён на платформе ЗебРус.
+    </div>
+    <div class="final-actions">
+      <button class="btn" onclick="closeEmbed()">Закрыть</button>
+      <button class="btn btn-ghost" onclick="restartGame()">Пройти ещё раз</button>
+    </div>`;
+  } else {
+    html += `<div class="final-actions">
+      <button class="btn" onclick="downloadScreenshot()">📸 Сохранить результат как картинку</button>
+      <button class="btn btn-ghost" onclick="alert('Покажи скриншот своему преподавателю русского языка.')">Что делать дальше?</button>
+      <button class="btn btn-ghost" onclick="restartGame()">Пройти ещё раз</button>
+    </div>`;
+  }
+  screen.innerHTML = html;
+
+  if(isEmbed){
+    sendResultToZebrus(elapsed);
+  } else {
+    saveHistory(elapsed, pct);
+  }
+}
+
+function sendResultToZebrus(timeSeconds){
+  const wrongCompact = game.wrongTasks.map(w => ({
+    id: w.task_id,
+    type: w.task_type,
+    correct: w.correct,
+    user: w.user
+  }));
+  window.parent.postMessage({
+    type: 'zebrus_game_result',
+    payload: {
+      score: game.totalScore,
+      max_score: game.maxScore,
+      time_seconds: timeSeconds,
+      wrong_tasks: wrongCompact
+    }
+  }, '*');
+}
+
+function closeEmbed(){
+  window.parent.postMessage({ type: 'zebrus_game_close' }, '*');
+}
+
+function restartGame(){
+  game.current = 0;
+  game.taskStates = {};
+  game.totalScore = 0;
+  game.wrongTasks = [];
+  game.startTime = Date.now();
+  document.getElementById('screenFinal').classList.add('hidden');
+  document.getElementById('progress').classList.remove('hidden');
+  renderTask();
+}
+
+function saveHistory(timeSeconds, pct){
+  try{
+    const history = JSON.parse(localStorage.getItem('intensiv_4_8_history') || '[]');
+    history.push({
+      name: game.userName,
+      score: game.totalScore,
+      max_score: game.maxScore,
+      pct: pct,
+      time: timeSeconds,
+      date: new Date().toISOString()
+    });
+    localStorage.setItem('intensiv_4_8_history', JSON.stringify(history.slice(-50)));
+  } catch(e){}
+}
+
+/* ============ СКРИНШОТ ============ */
+function downloadScreenshot(){
+  const canvas = document.createElement('canvas');
+  const W = 800, H = 1000;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#fff5f7');
+  grad.addColorStop(0.5, '#fce4ec');
+  grad.addColorStop(1, '#f3e5f5');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  for(let i = 0; i < 30; i++){
+    const x = Math.random() * W, y = Math.random() * H, r = 8 + Math.random() * 8;
+    ctx.fillStyle = `rgba(248, 187, 208, ${0.3 + Math.random() * 0.3})`;
+    ctx.beginPath(); ctx.ellipse(x, y, r, r * 0.7, Math.random() * Math.PI, 0, 2 * Math.PI); ctx.fill();
+  }
+  ctx.fillStyle = 'white';
+  roundRect(ctx, 60, 80, W - 120, H - 160, 28); ctx.fill();
+  ctx.fillStyle = '#ad1457';
+  ctx.font = 'bold 28px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('🌸 Весенний интенсив', W / 2, 150);
+  ctx.font = '18px sans-serif';
+  ctx.fillStyle = '#6d4c41';
+  ctx.fillText('Тренажёр ЕГЭ. Задания 4-8', W / 2, 180);
+  ctx.fillStyle = '#3e2723';
+  ctx.font = '22px sans-serif';
+  ctx.fillText(game.userName, W / 2, 240);
+  const pct = Math.round((game.totalScore / game.maxScore) * 100);
+  ctx.fillStyle = '#ad1457';
+  ctx.font = 'bold 96px sans-serif';
+  ctx.fillText(game.totalScore + ' / ' + game.maxScore, W / 2, 360);
+  ctx.font = 'bold 36px sans-serif';
+  ctx.fillStyle = pct >= 75 ? '#2e7d32' : pct >= 50 ? '#f57f17' : '#c62828';
+  ctx.fillText(pct + '%', W / 2, 410);
+  ctx.fillStyle = '#6d4c41';
+  ctx.font = '16px sans-serif';
+  const d = new Date();
+  const dateStr = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+  const elapsed = Math.round((Date.now() - game.startTime) / 1000);
+  const mm = Math.floor(elapsed / 60), ss = elapsed % 60;
+  ctx.fillText(dateStr + ' · ' + mm + ' мин ' + ss + ' с', W / 2, 460);
+  ctx.fillStyle = '#3e2723';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'left';
+  if(game.wrongTasks.length > 0){
+    ctx.fillText('Места для повторения:', 100, 530);
+    ctx.font = '15px sans-serif';
+    ctx.fillStyle = '#6d4c41';
+    const toShow = game.wrongTasks.slice(0, 8);
+    toShow.forEach((w, i) => {
+      ctx.fillText('• ' + w.tag + ': ' + (w.task_type), 100, 565 + i * 28);
+    });
+    if(game.wrongTasks.length > 8){
+      ctx.fillText('...и ещё ' + (game.wrongTasks.length - 8), 100, 565 + 8 * 28);
+    }
+  } else {
+    ctx.fillText('🌸 Ни одной ошибки!', 100, 530);
+  }
+  ctx.fillStyle = '#ad1457';
+  ctx.font = 'italic 14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Покажи этот скриншот своему преподавателю', W / 2, H - 110);
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillStyle = '#bdbdbd';
+  ctx.fillText('zebrus.ru', W / 2, H - 80);
+
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'rezultat_' + game.userName.replace(/[^а-яА-Яa-zA-Z0-9]/g, '_') + '.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+}
+
+function roundRect(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+</script>
+</body>
+</html>
