@@ -1,0 +1,1365 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Интенсив ЕГЭ. Пунктуация — тренажёр</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root{
+    --green-lightest: #e8f5e9;
+    --green-light: #c8e6c9;
+    --green: #66bb6a;
+    --green-deep: #2e7d32;
+    --green-text: #1b5e20;
+    --yellow: #fdd835;
+    --yellow-light: #fff9c4;
+    --cream: #f9fbe7;
+    --mint: #b9e0a5;
+    --grass: #7cb342;
+    --red: #e53935;
+    --text: #1b3a1d;
+    --text-soft: #4a6b4a;
+    --shadow: 0 8px 24px rgba(46, 125, 50, 0.15);
+  }
+  html, body{ height: 100%; }
+  body{
+    font-family: -apple-system, "Segoe UI", "Nunito", "Comfortaa", system-ui, sans-serif;
+    background: linear-gradient(180deg, #f1f8e9 0%, #dcedc8 50%, #c5e1a5 100%);
+    color: var(--text);
+    line-height: 1.55;
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+  }
+  /* Ромашки */
+  .meadow{
+    position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden;
+  }
+  .daisy{
+    position: absolute;
+    width: 26px; height: 26px;
+    animation: float linear infinite;
+    opacity: 0.7;
+  }
+  .daisy svg{ width: 100%; height: 100%; display: block; }
+  @keyframes float{
+    0%{ transform: translateY(-10vh) rotate(0deg); }
+    100%{ transform: translateY(110vh) rotate(360deg); }
+  }
+  .container{
+    position: relative; z-index: 1;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 16px 48px;
+  }
+  .progress-bar{
+    position: sticky; top: 12px; z-index: 10;
+    background: rgba(255,255,255,0.92);
+    backdrop-filter: blur(6px);
+    border-radius: 16px;
+    padding: 12px 18px;
+    box-shadow: var(--shadow);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 600; color: var(--text-soft);
+    margin-bottom: 24px;
+    gap: 12px;
+  }
+  .progress-track{
+    flex: 1; height: 6px; background: var(--green-light); border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-fill{
+    height: 100%; background: linear-gradient(90deg, var(--green), var(--yellow));
+    border-radius: 3px; transition: width 0.4s ease;
+    width: 0%;
+  }
+  .progress-label{ white-space: nowrap; }
+  .progress-score{ white-space: nowrap; }
+  .card{
+    background: white;
+    border-radius: 24px;
+    padding: 28px 24px;
+    box-shadow: var(--shadow);
+    animation: rise 0.5s ease both;
+  }
+  @keyframes rise{
+    from{ opacity: 0; transform: translateY(24px); }
+    to{ opacity: 1; transform: translateY(0); }
+  }
+  .start-screen{ text-align: center; }
+  .start-title{
+    font-size: 28px; font-weight: 800; color: var(--green-text);
+    margin-bottom: 8px;
+  }
+  .start-emoji{ font-size: 48px; display: block; margin: 4px 0 16px; }
+  .start-sub{ color: var(--text-soft); font-size: 16px; margin-bottom: 20px; }
+  .start-info{
+    background: var(--yellow-light);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: var(--text-soft);
+    text-align: left;
+  }
+  .start-info ul{ padding-left: 18px; margin-top: 6px; }
+  .start-info li{ margin: 4px 0; }
+  input[type="text"]{
+    width: 100%;
+    padding: 14px 16px;
+    border: 2px solid var(--green-light);
+    border-radius: 14px;
+    font-size: 16px;
+    font-family: inherit;
+    background: white;
+    color: var(--text);
+    outline: none;
+    margin-bottom: 14px;
+    transition: border-color 0.2s;
+  }
+  input[type="text"]:focus{ border-color: var(--green); }
+  .btn{
+    display: inline-block;
+    background: linear-gradient(135deg, var(--green), var(--green-deep));
+    color: white;
+    font-family: inherit;
+    font-size: 17px;
+    font-weight: 700;
+    padding: 14px 32px;
+    border: none;
+    border-radius: 28px;
+    cursor: pointer;
+    box-shadow: 0 6px 16px rgba(46, 125, 50, 0.35);
+    transition: transform 0.15s, box-shadow 0.2s;
+  }
+  .btn:hover{ transform: translateY(-2px); box-shadow: 0 10px 20px rgba(46, 125, 50, 0.45); }
+  .btn:active{ transform: translateY(0); }
+  .btn:disabled{
+    background: #ccc; cursor: not-allowed; box-shadow: none; transform: none;
+  }
+  .btn-ghost{
+    background: white; color: var(--green-deep);
+    border: 2px solid var(--green-light);
+    box-shadow: none;
+  }
+  .q-label{
+    display: inline-block;
+    background: var(--mint);
+    color: var(--green-text);
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+  }
+  .q-label.theory{ background: var(--yellow-light); color: #f57f17; }
+  .q-task{
+    color: var(--text-soft);
+    font-size: 14px;
+    margin-bottom: 12px;
+    font-style: italic;
+  }
+  .q-text{
+    font-size: 17px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--text);
+  }
+  .q-instruction{
+    font-size: 14px;
+    color: var(--text-soft);
+    margin-bottom: 16px;
+    background: var(--yellow-light);
+    border-radius: 10px;
+    padding: 10px 14px;
+  }
+  .theory-title{
+    font-size: 24px; font-weight: 800; color: var(--green-text);
+    margin-bottom: 6px;
+  }
+  .theory-sub{
+    color: var(--text-soft); font-size: 15px; margin-bottom: 18px;
+  }
+  .theory-section{
+    background: var(--cream);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .theory-heading{
+    font-weight: 700; color: var(--green-text);
+    font-size: 15px; margin-bottom: 8px;
+  }
+  .theory-list{
+    display: flex; flex-wrap: wrap; gap: 6px 10px;
+    font-size: 15px;
+  }
+  .theory-word{
+    background: white; padding: 4px 10px; border-radius: 8px;
+    border: 1px solid var(--green-light);
+  }
+  .theory-rule{
+    background: white; border-left: 4px solid var(--green);
+    border-radius: 10px; padding: 10px 14px;
+    margin-bottom: 8px; font-size: 14px;
+  }
+  .theory-rule strong{ color: var(--green-text); }
+  .theory-note{
+    background: #fff3cd; border-left: 4px solid var(--yellow);
+    border-radius: 10px; padding: 10px 14px;
+    margin-bottom: 8px; font-size: 13px; color: #856404;
+    font-style: italic;
+  }
+  .theory-pair{
+    background: white; border-radius: 10px; padding: 10px 12px;
+    margin-bottom: 8px; font-size: 14px;
+  }
+  .theory-pair .pair-title{ font-weight: 700; color: var(--green-text); margin-bottom: 2px; }
+  .theory-pair .pair-ex{ color: var(--text-soft); }
+  .options{ display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+  .opt{
+    display: flex; align-items: center; gap: 12px;
+    background: white;
+    border: 2px solid var(--green-light);
+    border-radius: 14px;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 16px;
+  }
+  .opt:hover{ background: var(--green-lightest); border-color: var(--green); }
+  .opt-num{
+    width: 26px; height: 26px;
+    background: var(--green-lightest); color: var(--green-text);
+    border-radius: 8px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .opt.selected{ background: var(--green-lightest); border-color: var(--green); }
+  .opt.selected .opt-num{ background: var(--green); color: white; }
+  .opt.correct{ background: #e8f5e9; border-color: var(--green-deep); }
+  .opt.correct .opt-num{ background: var(--green-deep); color: white; }
+  .opt.wrong{ background: #ffebee; border-color: var(--red); }
+  .opt.wrong .opt-num{ background: var(--red); color: white; }
+  .opt.disabled{ pointer-events: none; opacity: 0.7; }
+  .input-row{
+    display: flex; gap: 10px; align-items: center;
+    margin-bottom: 16px;
+  }
+  .input-row input{ margin-bottom: 0; }
+  .rows-list{
+    display: flex; flex-direction: column; gap: 10px;
+    margin-bottom: 16px;
+  }
+  .row-card{
+    background: var(--cream);
+    border: 2px solid var(--green-light);
+    border-radius: 12px;
+    padding: 12px 14px 12px 50px;
+    position: relative;
+    font-size: 15px;
+    line-height: 1.6;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .row-card:hover{ background: var(--green-lightest); border-color: var(--green); }
+  .row-num{
+    position: absolute;
+    left: 12px; top: 12px;
+    width: 26px; height: 26px;
+    background: var(--green-lightest); color: var(--green-text);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 13px;
+  }
+  .row-card.selected{ background: var(--green-lightest); border-color: var(--green); }
+  .row-card.selected .row-num{ background: var(--green); color: white; }
+  .row-card.correct{ background: #e8f5e9; border-color: var(--green-deep); }
+  .row-card.correct .row-num{ background: var(--green-deep); color: white; }
+  .row-card.wrong{ background: #ffebee; border-color: var(--red); }
+  .row-card.wrong .row-num{ background: var(--red); color: white; }
+  .row-card.disabled{ pointer-events: none; }
+  .feedback{
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-top: 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    animation: rise 0.3s ease both;
+  }
+  .feedback.ok{
+    background: #e8f5e9; color: var(--green-text);
+    border-left: 4px solid var(--green-deep);
+  }
+  .feedback.no{
+    background: #ffebee; color: #b71c1c;
+    border-left: 4px solid var(--red);
+  }
+  .feedback strong{ font-weight: 700; }
+  .card-footer{
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 18px;
+    gap: 12px;
+  }
+  .final{ text-align: center; }
+  .final-emoji{ font-size: 72px; display: block; margin-bottom: 8px; }
+  .final-score{
+    font-size: 64px; font-weight: 800;
+    color: var(--green-text);
+    line-height: 1;
+    margin: 8px 0;
+  }
+  .final-max{ font-size: 24px; color: var(--text-soft); font-weight: 500; }
+  .final-grade{
+    display: inline-block;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 18px;
+    margin: 12px 0 18px;
+  }
+  .grade-5{ background: linear-gradient(135deg, #66bb6a, #2e7d32); color: white; }
+  .grade-4{ background: linear-gradient(135deg, #9ccc65, #558b2f); color: white; }
+  .grade-3{ background: linear-gradient(135deg, #ffca28, #f57f17); color: white; }
+  .grade-2{ background: linear-gradient(135deg, #ef5350, #c62828); color: white; }
+  .final-msg{
+    font-size: 16px; color: var(--text-soft); margin-bottom: 20px;
+  }
+  .final-actions{ display: flex; flex-direction: column; gap: 12px; margin-top: 20px; }
+  .errors-section{
+    text-align: left;
+    background: var(--cream);
+    border-radius: 14px;
+    padding: 16px;
+    margin: 18px 0;
+  }
+  .errors-title{
+    font-weight: 700; color: var(--green-text);
+    margin-bottom: 8px;
+    font-size: 15px;
+  }
+  .error-item{
+    background: white;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .error-item .label{ color: var(--text-soft); font-size: 12px; margin-bottom: 4px; }
+  .error-item .your{ color: var(--red); }
+  .error-item .right{ color: var(--green-deep); font-weight: 600; }
+  .hidden{ display: none !important; }
+  @media (max-width: 480px){
+    .container{ padding: 16px 12px 32px; }
+    .card{ padding: 22px 18px; border-radius: 20px; }
+    .start-title{ font-size: 22px; }
+    .final-score{ font-size: 48px; }
+    .progress-bar{ font-size: 12px; padding: 10px 12px; }
+    .row-card{ font-size: 14px; padding: 12px 12px 12px 42px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="meadow" id="meadow"></div>
+
+<div class="container">
+
+  <div class="progress-bar hidden" id="progress">
+    <span class="progress-label" id="progressLabel">Задание 1</span>
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+    <span class="progress-score" id="progressScore">⭐ 0</span>
+  </div>
+
+  <div class="card start-screen" id="screenStart">
+    <span class="start-emoji">🌼</span>
+    <div class="start-title">Пунктуация ЕГЭ</div>
+    <div class="start-sub">Тренажёр — задания 16&ndash;21</div>
+
+    <div class="start-info">
+      <strong>Что внутри:</strong>
+      <ul>
+        <li>🌱 Теория и 6 заданий на однородные / ССП (16)</li>
+        <li>🌿 Теория и 8 на обособление (17)</li>
+        <li>🌻 Теория и 5 на вводные / обращения (18)</li>
+        <li>🌾 Теория и 4 на СПП (19)</li>
+        <li>🌳 Теория и 5 на сложные предложения с разными видами связи (20)</li>
+        <li>🌷 Теория и 5 на пунктуационный анализ (21)</li>
+      </ul>
+      <div style="margin-top: 10px;">⏱ Около 50&ndash;60 минут · 33 балла максимум</div>
+    </div>
+
+    <input type="text" id="userName" placeholder="Как тебя зовут?" autocomplete="off">
+    <button class="btn" id="btnStart" onclick="startGame()">Начать 🌼</button>
+  </div>
+
+  <div class="card hidden" id="screenGame"></div>
+  <div class="card final hidden" id="screenFinal"></div>
+
+</div>
+
+<script>
+/* ============ РОМАШКИ ============ */
+function spawnDaisies(){
+  const layer = document.getElementById('meadow');
+  const svgDaisy = `<svg viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+    <g>
+      <ellipse cx="20" cy="8" rx="5" ry="9" fill="white" stroke="#e0e0e0" stroke-width="0.5"/>
+      <ellipse cx="20" cy="8" rx="5" ry="9" fill="white" stroke="#e0e0e0" stroke-width="0.5" transform="rotate(45 20 20)"/>
+      <ellipse cx="20" cy="8" rx="5" ry="9" fill="white" stroke="#e0e0e0" stroke-width="0.5" transform="rotate(90 20 20)"/>
+      <ellipse cx="20" cy="8" rx="5" ry="9" fill="white" stroke="#e0e0e0" stroke-width="0.5" transform="rotate(135 20 20)"/>
+      <ellipse cx="20" cy="8" rx="5" ry="9" fill="white" stroke="#e0e0e0" stroke-width="0.5" transform="rotate(180 20 20)"/>
+      <ellipse cx="20" cy="8" rx="5" ry="9" fill="white" stroke="#e0e0e0" stroke-width="0.5" transform="rotate(225 20 20)"/>
+      <ellipse cx="20" cy="8" rx="5" ry="9" fill="white" stroke="#e0e0e0" stroke-width="0.5" transform="rotate(270 20 20)"/>
+      <ellipse cx="20" cy="8" rx="5" ry="9" fill="white" stroke="#e0e0e0" stroke-width="0.5" transform="rotate(315 20 20)"/>
+      <circle cx="20" cy="20" r="4.5" fill="#fdd835"/>
+      <circle cx="20" cy="20" r="2.5" fill="#f57f17"/>
+    </g>
+  </svg>`;
+  for(let i = 0; i < 16; i++){
+    const f = document.createElement('div');
+    f.className = 'daisy';
+    f.innerHTML = svgDaisy;
+    f.style.left = Math.random() * 100 + 'vw';
+    f.style.animationDuration = (12 + Math.random() * 12) + 's';
+    f.style.animationDelay = (Math.random() * 14) + 's';
+    f.style.transform = `scale(${0.5 + Math.random() * 0.7})`;
+    f.style.opacity = 0.4 + Math.random() * 0.4;
+    layer.appendChild(f);
+  }
+}
+spawnDaisies();
+
+const urlParams = new URLSearchParams(window.location.search);
+const isEmbed = urlParams.get('mode') === 'embed';
+const embedName = urlParams.get('name') || '';
+
+/* ============ ЗАДАНИЯ ============ */
+const TASKS = [
+
+  /* ===== ТЕОРИЯ: Однородные и ССП (Задание 16) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 16',
+    title: 'Однородные члены и ССП',
+    sub: 'Главное — посчитать запятые в каждом предложении и выбрать те, где ровно одна.',
+    sections: [
+      { heading: 'Запятая между однородными СТАВИТСЯ:', type: 'rules', items: [
+        'Перед союзами <strong>А, НО, ДА (=НО), ЗАТО, ОДНАКО</strong>: тёмный, но добрый',
+        'Перед <strong>повторяющимся И, ИЛИ, ЛИБО, ДА</strong>: и брат, и сестра приехали; и в лесу, и в поле растёт',
+        'Перед второй частью <strong>двойного союза</strong>: как…<em>,</em> так и; не только…<em>,</em> но и',
+        'Между однородными без союзов: пришёл, увидел, победил'
+      ]},
+      { heading: 'Запятая НЕ ставится:', type: 'rules', items: [
+        'Перед <strong>одиночным И, ИЛИ, ЛИБО, ДА (=и)</strong>: ум и сила',
+        'Внутри устойчивых оборотов: <em>и день и ночь, и стар и млад, ни рыба ни мясо, ни то ни сё, ни много ни мало, ни нашим ни вашим, ни встать ни сесть, ни убавить ни прибавить</em>'
+      ]},
+      { heading: 'Однородные vs неоднородные определения:', type: 'rules', items: [
+        '<strong>Однородные</strong> (запятая): характеризуют с одной стороны, можно вставить «И»: жёлтые<em>,</em> красные листья',
+        '<strong>Неоднородные</strong> (без запятой): с разных сторон: большой каменный дом, новая фарфоровая чашка'
+      ]},
+      { heading: 'ССП — запятая между частями:', type: 'rules', items: [
+        '<strong>Ставится</strong>: Небо потемнело<em>,</em> и пошёл дождь',
+        '<strong>НЕ ставится</strong>, если есть общий: второстепенный член, придаточное, вводное слово, или обе части вопросительные/восклицательные'
+      ]},
+      { heading: 'Внимание!', type: 'note', items: [
+        'В <em>и день и ночь, и смех и грех</em> и подобных устойчивых сочетаниях запятой нет. Во всех остальных случаях с повторяющимся И — запятая ставится.'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 16 (6 практик) ===== */
+  { type: 'multi', tag: 'Однородные / ССП', task: 'Задание 16',
+    text: 'Укажи предложения, в которых нужно поставить <strong>ОДНУ</strong> запятую.',
+    options: [
+      'Пёс выглядел сытым и счастливым и радостно вилял хвостом.',
+      'В дружине князя были его сыновья и братья из ближних и дальних поселений княжества.',
+      'И для Пушкина и для Лермонтова гражданская поэзия имела огромное значение.',
+      'Чичиков надел красивый костюм чистую рубашку и выглядел респектабельно.',
+      'Григорий Печорин разрушил жизни многих женщин и мужчин и надоел самому себе.'
+    ],
+    correct: [2, 3],
+    explanation: '3) Перед повторяющимся «и для Пушкина, и для Лермонтова» — одна запятая. 4) Между однородными дополнениями «костюм, чистую рубашку» — одна запятая.' },
+
+  { type: 'multi', tag: 'Однородные / ССП', task: 'Задание 16',
+    text: 'Укажи предложения, в которых нужно поставить <strong>ОДНУ</strong> запятую.',
+    options: [
+      'Среди псковских знакомых Пушкина были не только взрослые но и дети.',
+      'Море ловит стрелы молний и в своей пучине гасит.',
+      'Солнце сверкает на оконных стеклах и витринах и отражается в городских фонтанах.',
+      'И видишь ты синий свод неба да солнце да лес.',
+      'Ещё не рассвело и только на вершинах гор уже дрожал золотой свет.'
+    ],
+    correct: [0, 4],
+    explanation: '1) Перед второй частью двойного союза «не только… но и» — одна запятая. 5) Между частями ССП «не рассвело, и … дрожал свет» — одна запятая.' },
+
+  { type: 'multi', tag: 'Однородные / ССП', task: 'Задание 16',
+    text: 'Укажи предложения, в которых нужно поставить <strong>ОДНУ</strong> запятую.',
+    options: [
+      'Сравните строение семян фасоли и перца и выделите черты их сходства и различия.',
+      'Слышны были мерное дыхание спящих да треск горящих сучьев.',
+      'День был прохладный хотя и солнечный.',
+      'Менее могущественные и менее удачливые феодалы не имели собственного герба.',
+      'Влияние Фландрии существовало всегда и сравнение фламандской и голландской живописи не означает их противопоставления.'
+    ],
+    correct: [2, 4],
+    explanation: '3) Запятая перед «хотя» — придаточное уступительное. 5) Между частями ССП «влияние существовало, и сравнение… не означает» — одна запятая.' },
+
+  { type: 'multi', tag: 'Однородные / ССП', task: 'Задание 16',
+    text: 'Укажи предложения, в которых нужно поставить <strong>ОДНУ</strong> запятую.',
+    options: [
+      'После занятий Серёжка мчался или к артиллеристу или к лётчику.',
+      'Слышались шелест листьев и лёгкие вздохи ветра.',
+      'Овсянников разъезжал либо на беговых дрожках либо в небольшой тележке с кожаным верхом.',
+      'Из бездны времён дошли до нас в пословицах и поговорках радости и страдания людские.',
+      'Земельные владения помещика были небольшими и они не шли ни в какое сравнение с боярскими вотчинами.'
+    ],
+    correct: [0, 2, 4],
+    explanation: '1) Повторяющийся «или» — одна запятая. 3) Повторяющийся «либо» — одна запятая. 5) Между частями ССП «владения были небольшими, и они не шли» — одна запятая.' },
+
+  { type: 'multi', tag: 'Однородные / ССП', task: 'Задание 16',
+    text: 'Укажи предложения, в которых нужно поставить <strong>ОДНУ</strong> запятую.',
+    options: [
+      'Иногда мелькнёт стайка дельфинов или одинокая белая чайка.',
+      'Дельтаплан получил популярность из-за необычайной простоты и лёгкости конструкции.',
+      'Экология занимается исследованием отношений животных и растительных организмов и их сообществ между собой и окружающей средой.',
+      'Человек оценил в собаке как неприхотливость так и выносливость.',
+      'В комнате молчали и было слышно лишь уличный шум за окном.'
+    ],
+    correct: [3, 4],
+    explanation: '4) Перед второй частью двойного союза «как… так и» — одна запятая. 5) Между частями ССП «молчали, и было слышно» — одна запятая.' },
+
+  { type: 'multi', tag: 'Однородные / ССП', task: 'Задание 16',
+    text: 'Укажи предложения, в которых нужно поставить <strong>ОДНУ</strong> запятую.',
+    options: [
+      'В русских народных песнях поётся и о женской доле и о родной природе.',
+      'Весенний гром то грозно рычал то добродушно ворчал.',
+      'Любое техническое изобретение или искусство той или иной эпохи является результатом стремления к истине.',
+      'Ни скверная английская погода ни ледяная стужа спальни ни какие-то мелкие неурядицы не могли изменить настроения гостя.',
+      'Н.М. Карамзин любил путешествовать и из каждого путешествия писал друзьям письма.'
+    ],
+    correct: [0, 1, 4],
+    explanation: '1) Повторяющийся «и о… и о» — одна запятая. 2) Повторяющийся «то… то» — одна запятая. 5) Между частями ССП «Карамзин любил путешествовать, и из каждого… писал» — одна запятая (общего члена нет).' },
+
+  /* ===== ТЕОРИЯ: Обособление (Задание 17) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 17',
+    title: 'Обособление определений и обстоятельств',
+    sub: 'Причастные обороты, деепричастные обороты, приложения, сравнительные обороты.',
+    sections: [
+      { heading: 'Причастный оборот:', type: 'rules', items: [
+        '<strong>После</strong> определяемого слова — <strong>обособляется</strong>: книга<em>,</em> прочитанная мной<em>,</em>...',
+        '<strong>До</strong> определяемого слова — <strong>не обособляется</strong> (если нет добавочного значения): прочитанная мной книга',
+        'Если определяемое слово — <strong>личное местоимение</strong> — оборот обособляется в любой позиции: уставший<em>,</em> он сел',
+        'Если оборот имеет добавочное обстоятельственное значение (можно заменить «потому что») — обособляется и до слова'
+      ]},
+      { heading: 'Деепричастный оборот / одиночное деепричастие:', type: 'rules', items: [
+        '<strong>Всегда обособляется</strong>: пошёл<em>,</em> улыбаясь',
+        'Исключение — фразеологизмы: спустя рукава, сломя голову, не покладая рук'
+      ]},
+      { heading: 'Однородные обороты с союзом И:', type: 'rules', items: [
+        'Если ОБА оборота обособлены и однородны — между ними <strong>НЕТ запятой</strong>: говорили<em>,</em> улыбаясь и кивая друг другу',
+        'Если ВТОРОЙ оборот относится к другому слову — запятая нужна'
+      ]},
+      { heading: 'Включённость / союз И между разными конструкциями:', type: 'rules', items: [
+        'Если деепричастный оборот стоит ПОСЛЕ союза И — запятая ПОСЛЕ И перед оборотом нужна: сидел и<em>,</em> упираясь головой<em>,</em> читал',
+        'Конструкции с предлогами <strong>несмотря на, невзирая на</strong> — обособляются: несмотря на дождь<em>,</em> мы пошли'
+      ]},
+      { heading: 'Внимание!', type: 'note', items: [
+        'Если две похожих конструкции (причастный + причастный) соединены союзом И, но не являются однородными — между ними запятые нужны.'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 17 (8 практик) ===== */
+  { type: 'input', tag: 'Обособление', task: 'Задание 17',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Горная река (1) сжатая с обеих сторон неприступными стенами леса (2) пенилась (3) вздымая валы (4) и стремительно скользила вдаль.',
+    correct: ['1234', '1243', '2134', '2143', '2413', '2431', '3124', '3214', '4123', '4132', '4213', '4231', '4312', '4321', '1324', '1342', '1423', '1432', '3142', '3241', '3412', '3421'],
+    explanation: '1, 2 — выделяют причастный оборот «сжатая с обеих сторон…». 3, 4 — выделяют деепричастный оборот «вздымая валы». Союз «и» соединяет однородные сказуемые «пенилась» и «скользила».' },
+
+  { type: 'input', tag: 'Обособление', task: 'Задание 17',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Алексей (1) возмущённый несправедливым замечанием (2) быстро вышел из комнаты начальника (3) и (4) ни на кого не смотря (5) направился к выходу.',
+    correct: ['1245', '1254', '2145', '4521', '4512', '5421', '5412', '1452', '1425', '2154', '4125', '4152', '4215', '4251', '5124', '5142', '5214', '5241', '5412'],
+    explanation: '1, 2 — выделяют причастный оборот «возмущённый…». 4, 5 — выделяют деепричастный оборот «ни на кого не смотря» (стоит после союза И — запятая после И обязательна). 3 — не нужна.' },
+
+  { type: 'input', tag: 'Обособление', task: 'Задание 17',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Тёмно-синие вершины гор (1) изрытые морщинами (2) и (3) покрытые слоями снега (4) рисовались на бледном небосклоне.',
+    correct: ['14', '41'],
+    explanation: '1, 4 — выделяют группу из двух однородных причастных оборотов («изрытые морщинами» и «покрытые слоями снега»), соединённых одиночным союзом И. Между ними запятая не нужна.' },
+
+  { type: 'input', tag: 'Обособление', task: 'Задание 17',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Образованная на речке (1) запруда (2) по диагонали пересекая усадьбу Абрамцево (3) является единственной границей двора с хозяйственными постройками и парка (4) раскинувшегося к югу от усадебного дома.',
+    correct: ['234', '243', '324', '342', '423', '432'],
+    explanation: '2, 3 — выделяют деепричастный оборот «по диагонали пересекая усадьбу Абрамцево». 4 — перед причастным оборотом «раскинувшегося…», который стоит после определяемого слова. 1 — не нужна (причастный оборот стоит до слова).' },
+
+  { type: 'input', tag: 'Обособление', task: 'Задание 17',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Сад (1) всё больше редея (2) и (3) переходя в настоящий луг (4) спускался к (5) поросшей зелёным камышом и ивняком (6) реке.',
+    correct: ['14', '41'],
+    explanation: '1, 4 — выделяют два однородных деепричастных оборота, соединённых одиночным И («редея и переходя»). Между ними запятая не нужна. 5, 6 не нужны — причастный оборот «поросшей…» стоит ДО определяемого слова «реке».' },
+
+  { type: 'input', tag: 'Обособление', task: 'Задание 17',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'А уже через час оба сидели за шатким столиком (1) и (2) упираясь друг в друга головами (3) читали длинный список драгоценностей (4) некогда принадлежавших тёще Ипполита Матвеевича.',
+    correct: ['234', '243', '324', '342', '423', '432'],
+    explanation: '2, 3 — выделяют деепричастный оборот «упираясь головами», стоящий после союза И. 4 — перед причастным оборотом «некогда принадлежавших…». 1 — не нужна (одиночный И между однородными сказуемыми).' },
+
+  { type: 'input', tag: 'Обособление', task: 'Задание 17',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Утки шумно поднялись (1) испугавшись внезапного появления охотников (2) и (3) кувыркаясь в воздухе (4) медленно полетели прочь.',
+    correct: ['1234', '1243', '2134', '2143', '3124', '3214', '4123', '4132', '4213', '4231', '4312', '4321', '1324', '1342', '1423', '1432', '2314', '2341', '2413', '2431', '3142', '3241', '3412', '3421'],
+    explanation: 'Все четыре запятые нужны: 1, 2 — деепричастный оборот «испугавшись…»; 3, 4 — второй деепричастный оборот «кувыркаясь в воздухе». Это два РАЗНЫХ оборота, относящихся к разным сказуемым («поднялись» и «полетели»), а не однородные.' },
+
+  { type: 'input', tag: 'Обособление', task: 'Задание 17',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'В Нижнем Новгороде (1) городе на берегу Волги (2) возвышается (3) поражая наше воображение (4) один из самых больших трамплинов для прыжков на лыжах.',
+    correct: ['1234', '1243', '2134', '2143', '3124', '3214', '4123', '4132', '4213', '4231', '4312', '4321', '1324', '1342', '1423', '1432', '2314', '2341', '2413', '2431', '3142', '3241', '3412', '3421'],
+    explanation: '1, 2 — выделяют приложение «городе на берегу Волги». 3, 4 — выделяют деепричастный оборот «поражая наше воображение».' },
+
+  /* ===== ТЕОРИЯ: Вводные слова и обращения (Задание 18) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 18',
+    title: 'Вводные слова и обращения',
+    sub: 'Вводные слова всегда обособляются, обращения тоже. Главное — отличить вводное от похожего слова.',
+    sections: [
+      { heading: 'Группы вводных слов (всегда обособляются):', type: 'rules', items: [
+        '<strong>Чувства</strong>: к счастью, к сожалению, к удивлению',
+        '<strong>Уверенность/неуверенность</strong>: конечно, разумеется, бесспорно, безусловно, действительно, кажется, возможно',
+        '<strong>Источник</strong>: говорят, по словам…, по мнению…, по-моему',
+        '<strong>Порядок мыслей</strong>: итак, следовательно, значит, наоборот, далее, наконец, впрочем',
+        '<strong>Способ выражения</strong>: словом, одним словом, иначе говоря, попросту сказать',
+        '<strong>Призыв</strong>: видишь ли, поймите, послушайте'
+      ]},
+      { heading: 'Слова, КОТОРЫЕ НЕ ВЫДЕЛЯЮТСЯ (это НЕ вводные):', type: 'rules', items: [
+        '<strong>Однако</strong> в НАЧАЛЕ предложения — это союз (= но): «Однако дождь прошёл»',
+        'Частицы: <strong>исключительно, уж, ведь, всё-таки, едва ли, вряд ли, якобы, словно, будто</strong>',
+        '<strong>Будто/словно</strong> как часть составного именного сказуемого: «листья будто сквозят изумрудами»',
+        'Также: даже, именно, как раз, почти, лишь, между тем, поэтому, потому, к тому же, в конечном счёте, в результате, в общем'
+      ]},
+      { heading: 'Обособляется (выделяется запятыми):', type: 'rules', items: [
+        'Этикетное <strong>пожалуйста</strong> в значении «прошу»: <em>Передай, пожалуйста, соль</em>',
+        'Слова <strong>да, нет, ну</strong> в начале реплики: <em>Да, я согласен</em>'
+      ]},
+      { heading: 'Однако: вводное или союз?', type: 'pairs', items: [
+        ['ОДНАКО в НАЧАЛЕ предложения', 'СОЮЗ (= но), не выделяется: «Однако погода улучшилась»'],
+        ['ОДНАКО в СЕРЕДИНЕ или КОНЦЕ', 'ВВОДНОЕ, выделяется: «Погода, однако, улучшилась»']
+      ]},
+      { heading: 'Различение пар:', type: 'pairs', items: [
+        ['ПОХОЖЕ как вводное / как сказуемое', 'Озеро, похоже, бесконечно (вводное) / Озеро похоже на ленту (сказ.)'],
+        ['БЫВАЕТ как вводное / как сказуемое', 'Москва, бывает, прекрасна (вводное) / Это бывает редко (сказ.)'],
+        ['ОДНАКО / ЗАТО / НО', 'Все три могут быть в начале — союзы, не выделяются']
+      ]},
+      { heading: 'Обращения — всегда обособляются:', type: 'rules', items: [
+        'Простое: <em>Брат, ты дома?</em>',
+        'Распространённое: <em>Дорогой друг мой, я скучаю</em>',
+        'Несколько: <em>Эх ты, рыцарь, лежебока</em>'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 18 (5 практик) ===== */
+  { type: 'input', tag: 'Вводные / обращения', task: 'Задание 18',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Ветер мягко пронёсся по матово-зелёной ржи и (1) казалось (2) перебежал в берёзы. Обычно в жаркий летний день листья на деревьях не шелохнутся, они (3) будто (4) сквозят изумрудами.',
+    correct: ['12', '21'],
+    explanation: '1, 2 — выделяют вводное слово «казалось». 3, 4 — не нужны: «будто» здесь не вводное, а союз в составе сказуемого «будто сквозят».' },
+
+  { type: 'input', tag: 'Вводные / обращения', task: 'Задание 18',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Даниил Чёрный (1) по мнению искусствоведов (2) был живописцем первой величины. Самая большая его заслуга (3) однако (4) в том, что он увидел одарённость Андрея Рублёва.',
+    correct: ['1234', '1243', '2134', '2143', '3124', '3214', '4123', '4132', '4213', '4231', '4312', '4321', '1324', '1342', '1423', '1432', '2314', '2341', '2413', '2431', '3142', '3241', '3412', '3421'],
+    explanation: '1, 2 — выделяют вводный оборот «по мнению искусствоведов». 3, 4 — выделяют вводное слово «однако» в СЕРЕДИНЕ предложения (тут оно вводное, а не союз).' },
+
+  { type: 'input', tag: 'Вводные / обращения', task: 'Задание 18',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Критические статьи А.С. Пушкина (1) конечно (2) нельзя назвать философскими сочинениями. Однако (3) нельзя не заметить, что пушкинский текст насыщен оборотами.',
+    correct: ['12', '21'],
+    explanation: '1, 2 — выделяют вводное слово «конечно». 3 — не нужна: «однако» в НАЧАЛЕ предложения — это союз (= но), не выделяется.' },
+
+  { type: 'input', tag: 'Вводные / обращения', task: 'Задание 18',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Погода была солнечной, и вражеская разведка (1) несомненно (2) заметила бы засадный полк, поэтому воевода (3) в конечном счёте (4) отказался от рискованной операции. Однако (5) его сын ещё долго не понимал решения отца, осуждал его и (6) в конце концов (7) покинул родной дом.',
+    correct: ['12', '21'],
+    explanation: '1, 2 — выделяют вводное «несомненно». 3, 4 — не нужны: «в конечном счёте» — НЕ вводное. 5 — не нужна: «однако» в начале — союз. 6, 7 — не нужны: «в конце концов» — НЕ вводное.' },
+
+  { type: 'input', tag: 'Вводные / обращения', task: 'Задание 18',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Озеро (1) похоже (2) было бесконечным. По форме оно было (3) похоже (4) на вытянутую во всю длину ленту.',
+    correct: ['12', '21'],
+    explanation: '1, 2 — выделяют вводное «похоже» в значении «кажется». 3, 4 — не нужны: «похоже» здесь — часть составного именного сказуемого «было похоже на ленту».' },
+
+  /* ===== ТЕОРИЯ: СПП (Задание 19) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 19',
+    title: 'Сложноподчинённое предложение',
+    sub: 'Главное — найти границы придаточного. Особенно если оно внутри главного.',
+    sections: [
+      { heading: 'Основные правила:', type: 'rules', items: [
+        'Придаточное отделяется от главного <strong>запятой</strong>',
+        'Если придаточное стоит ВНУТРИ главного — выделяется запятыми с <strong>обеих сторон</strong>',
+        'Союзное слово <strong>КОТОРЫЙ</strong> может стоять НЕ в начале придаточного — запятая ставится перед собственно придаточным, а не перед «который»'
+      ]},
+      { heading: 'Однородные придаточные:', type: 'rules', items: [
+        'Если несколько придаточных одного типа соединены союзом И — между ними <strong>НЕТ запятой</strong> (как однородные)',
+        '«Я знаю<em>,</em> что ты пришёл и что ты устал» — перед вторым «что» запятая НЕ нужна'
+      ]},
+      { heading: 'Внимание!', type: 'note', items: [
+        'Главные члены главного предложения могут быть «разорваны» придаточным — следи за границами.'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 19 (4 практики) ===== */
+  { type: 'input', tag: 'СПП', task: 'Задание 19',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Ромашову всегда чуялось (1) в его прекрасном сумрачном лице (2) странная бледность (3) которого ещё сильнее оттенялась (4) чёрными волосами (5) что-то напряжённое.',
+    correct: ['25', '52'],
+    explanation: '2 — открывает придаточное определительное «бледность которого ещё сильнее оттенялась чёрными волосами». 5 — закрывает его. Союзное слово «которого» стоит НЕ в начале придаточного — между «бледность» и «которого» запятой нет.' },
+
+  { type: 'input', tag: 'СПП', task: 'Задание 19',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Постоянную температуру (1) пчёлы поддерживают лишь в центре улья (2) где растёт и развивается (3) их потомство.',
+    correct: ['2'],
+    explanation: '2 — открывает придаточное определительное «где растёт и развивается их потомство». Запятой 3 нет — однородные сказуемые «растёт и развивается» с одиночным И. Запятой 1 нет — это не граница придаточного.' },
+
+  { type: 'input', tag: 'СПП', task: 'Задание 19',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Если (1) командир полка и его заместители старались ничем это не выказывать (2) то Маслов не скрывал (3) что (4) считает меня мальчишкой (5) и обращался со мной соответственно (6) хотя (7) я воевал с первых месяцев войны, имел ранения и награды.',
+    correct: ['2356', '2365', '3256', '3265', '5236', '5263', '5326', '5362', '5623', '5632', '6235', '6253', '6325', '6352', '6523', '6532', '2536', '2563', '2635', '2653', '3526', '3562', '3625', '3652'],
+    explanation: '2 — между придаточным «Если…» и главным «то Маслов». 3 — перед изъяснительным «что считает меня». 5 — между однородными придаточными «считает» и «обращался» (соединены союзом И, но это не однородные придаточные, а главные!), 6 — перед уступительным «хотя я воевал». 4 и 7 не нужны.' },
+
+  { type: 'input', tag: 'СПП', task: 'Задание 19',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Даже не зная соответствующих установлений, можно было бы догадаться (1) что (2) нельзя на крутом берегу реки (3) где обычно располагались древнерусские города (4) ставить большие здания на площади, выходящей на реку, «спиной» к реке.',
+    correct: ['134', '143', '314', '341', '413', '431'],
+    explanation: '1 — перед изъяснительным «что нельзя на крутом берегу… ставить здания». 3, 4 — выделяют придаточное определительное «где обычно располагались древнерусские города», вклинившееся внутрь главного придаточного.' },
+
+  /* ===== ТЕОРИЯ: Сложное предложение с разными видами связи (Задание 20) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 20',
+    title: 'Сложное предложение с разными видами связи',
+    sub: 'Главная тема — стык союзов и функции союза И.',
+    sections: [
+      { heading: 'Стык союзов (И + что/когда/если/как):', type: 'rules', items: [
+        'Если после придаточного НЕТ <strong>ТО / ТАК / НО</strong> — между союзами <strong>запятая ставится</strong>',
+        'Например: «Я знал<em>,</em> что<em>,</em> когда уйду<em>,</em> мне станет грустно»',
+        'Если есть <strong>ТО / ТАК / НО</strong> — между союзами <strong>запятая НЕ ставится</strong>',
+        'Например: «Я знал<em>,</em> что когда уйду<em>,</em> то мне станет грустно»'
+      ]},
+      { heading: 'Различные функции союза И:', type: 'rules', items: [
+        'Между однородными сказуемыми — без запятой',
+        'Между частями ССП — с запятой',
+        'Перед однородным придаточным — без запятой',
+        'Каждый случай — отдельно проверять контекст'
+      ]},
+      { heading: 'Внимание!', type: 'note', items: [
+        'Перед союзом И тщательно смотрим: соединяет он однородные члены (без запятой) или части сложного предложения (с запятой).'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 20 (5 практик) ===== */
+  { type: 'input', tag: 'Сложные конструкции', task: 'Задание 20',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Когда они подлетели к космической станции (1) и компьютер начал искать исправный шлюз (2) капитан увидел другой корабль (3) которого почему-то никто до этого не замечал (4) и велел отложить стыковку.',
+    correct: ['234', '243', '324', '342', '423', '432'],
+    explanation: '2 — между придаточным времени «Когда… и компьютер начал искать шлюз» и главным «капитан увидел». 3, 4 — выделяют придаточное определительное «которого никто не замечал». 1 не нужна — «и компьютер начал искать» — однородное придаточное при «Когда подлетели».' },
+
+  { type: 'input', tag: 'Сложные конструкции', task: 'Задание 20',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Дамы потихоньку пошли за поднимавшимся по лестнице Алексеем (1) и (2) когда уже подошли к квартире (3) то заметили (4) что дверь отворена на маленькую щелочку (5) и что два чёрных глаза рассматривают их из темноты.',
+    correct: ['134', '143', '314', '341', '413', '431'],
+    explanation: '1 — между частями ССП «Дамы пошли, и… заметили». 3 — между «когда подошли» и «то заметили» (придаточное + ТО). 4 — перед изъяснительным «что дверь отворена». 5 не нужна — между однородными придаточными «что дверь» и «что два глаза» с союзом И. 2 не нужна — стык союзов «и + когда» при наличии ТО.' },
+
+  { type: 'input', tag: 'Сложные конструкции', task: 'Задание 20',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Ромашов медленно шёл по шоссе (1) и (2) пока глядел на волшебный пожар заката (3) ему чудилось (4) будто за яркой зарёй существует какая-то таинственная жизнь.',
+    correct: ['1234', '1243', '2134', '2143', '3124', '3214', '4123', '4132', '4213', '4231', '4312', '4321', '1324', '1342', '1423', '1432', '2314', '2341', '2413', '2431', '3142', '3241', '3412', '3421'],
+    explanation: 'Все четыре запятые нужны: 1 — между частями ССП «Ромашов шёл, и… чудилось». 2 — после союза И перед придаточным «пока глядел» (стык союзов, ТО нет). 3 — после придаточного «пока глядел». 4 — перед придаточным «будто за зарёй существует жизнь».' },
+
+  { type: 'input', tag: 'Сложные конструкции', task: 'Задание 20',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Со дна озера били тысячи ключей (1) и (2) хотя расшевелить его поверхность они не могли (3) звук пробивался сквозь водную поверхность и вызывал у туристов недоумение (4) потому что глаз привык связывать звук воды с её движением.',
+    correct: ['123', '132', '213', '231', '312', '321'],
+    explanation: '1 — между частями ССП «ключи били, и звук пробивался». 2 — после союза И перед придаточным «хотя расшевелить не могли» (стык союзов). 3 — после придаточного «хотя… не могли». 4 не нужна — «и вызывал недоумение» — однородное сказуемое с «пробивался», без запятой.' },
+
+  { type: 'input', tag: 'Сложные конструкции', task: 'Задание 20',
+    text: 'Расставь знаки препинания: укажи цифры, на месте которых должны стоять запятые.',
+    instruction: 'Вечерело (1) и (2) пока погода не испортилась (3) мы решили переправиться на другой берег (4) чтобы установить палатку (5) и разжечь костёр.',
+    correct: ['1234', '1243', '2134', '2143', '3124', '3214', '4123', '4132', '4213', '4231', '4312', '4321', '1324', '1342', '1423', '1432', '2314', '2341', '2413', '2431', '3142', '3241', '3412', '3421'],
+    explanation: '1 — между частями ССП «Вечерело, и мы решили». 2 — после союза И перед придаточным «пока погода не испортилась». 3 — после придаточного. 4 — перед придаточным цели «чтобы установить». 5 не нужна — «и разжечь костёр» — однородное обстоятельство цели.' },
+
+  /* ===== ТЕОРИЯ: Пунктуационный анализ (Задание 21) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 21',
+    title: 'Пунктуационный анализ — одно правило',
+    sub: 'Нужно найти предложения, где знак (тире / запятая / двоеточие) ставится по одному и тому же правилу.',
+    sections: [
+      { heading: 'ТИРЕ — основные случаи:', type: 'rules', items: [
+        '1) Между подлежащим и сказуемым: <em>Москва — столица России</em>',
+        '2) В неполном предложении на месте пропуска слова: <em>Слева — река, справа — лес</em>',
+        '3) В БСП (бессоюзное): противопоставление / резкая смена / вывод: <em>Я хотел уйти — меня остановили</em>',
+        '4) Обособление приложения: <em>Москва — столица Родины — сегодня празднует</em>',
+        '5) Однородные с обобщающим: <em>Везде: на крышах, на деревьях — лежал снег</em>',
+        '6) Прямая речь'
+      ]},
+      { heading: 'ДВОЕТОЧИЕ — основные случаи:', type: 'rules', items: [
+        '1) В БСП: причина, пояснение: <em>Мы озябли: было холодно</em>',
+        '2) После обобщающего слова перед однородными: <em>Я посетил города: Москву, Киев, Баку</em>',
+        '3) Перед прямой речью: <em>А он сказал: «Привет»</em>'
+      ]},
+      { heading: 'ЗАПЯТАЯ — 11 случаев:', type: 'rules', items: [
+        'Между однородными членами',
+        'Обособленное определение (в т.ч. причастный оборот)',
+        'Обособленное обстоятельство (в т.ч. деепричастный оборот)',
+        'Уточняющие члены',
+        'Сравнительный оборот',
+        'Обращение',
+        'Вводное слово',
+        'Междометия',
+        'Между частями ССП',
+        'Между частями СПП',
+        'Между частями БСП'
+      ]},
+      { heading: 'Как решать:', type: 'note', items: [
+        'Для каждого предложения определи, по какому правилу стоит знак. Найди те, где правило одно и то же. Записывай номера в любом порядке.'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 21 (5 практик) ===== */
+  { type: 'input', tag: 'Пункт. анализ', task: 'Задание 21',
+    text: 'Найди предложения, в которых <strong>запятая</strong> ставится по одному и тому же правилу.',
+    instruction: '(1)Часть Астраханского биосферного заповедника, Лотосовые поля, находится в дельте Волги. (2)3десь сложилась уникальная природная экосистема, не повторяющаяся нигде в мире! (3)Цветущие водяные поля России самые большие на Земле: они простираются на 15 км в длину. (4)Лотосовые «плантации» покрывают 5 тысяч гектаров. (5)Самые красивые поля раскинулись в 90-130 км от Астрахани, охватывая часть дельты. (6)Учёные-медики утверждают: цветы лотоса — прекрасное средство от болезней. (7)Ещё в древности люди заметили, что стоит поместить растение рядом с больным — и вскоре человек чувствует облегчение. (8)Именно он, лотос, снимает стресс, укрепляет иммунную и нервную системы, омолаживает организм.',
+    correct: ['18', '81'],
+    explanation: 'В предложениях 1 и 8 запятые выделяют обособленное приложение: 1) «Лотосовые поля» — приложение к «части заповедника», 8) «лотос» — приложение к «он».' },
+
+  { type: 'input', tag: 'Пункт. анализ', task: 'Задание 21',
+    text: 'Найди предложения, в которых <strong>тире</strong> ставится по одному и тому же правилу.',
+    instruction: '(1)Устремляясь по Алтаю, река Катунь пересекает территории с различными климатическими условиями. (2)Тем не менее, путешествуя по долине реки, можно без труда уловить общую тенденцию: на юге – холоднее и суше, на севере – теплее и дождливее. (3)Есть на Катуни «оазисы» с особым микроклиматом. (4)Например, в селе Малый Яломан в устье одноимённой реки растут яблоневые сады – в соседнем посёлке Иня порой гибнет даже картошка. (5)Мягкая зима и солнечное лето без изнуряющей жары характерны для окрестностей посёлка Чемал. (6)По речной долине часто гуляют ветры, зимой бывают бураны, переметающие дороги, – в окрестных горных хребтах зимы спокойные и снежные. (7)Ярко выражен здесь контраст дневных и ночных температур.',
+    correct: ['46', '64'],
+    explanation: 'В предложениях 4 и 6 тире ставится в БСП — противопоставление: «в селе Малый Яломан растут сады — в соседнем посёлке гибнет даже картошка» и «гуляют ветры, бываются бураны — в хребтах зимы спокойные».' },
+
+  { type: 'input', tag: 'Пункт. анализ', task: 'Задание 21',
+    text: 'Найди предложения, в которых <strong>тире</strong> ставится по одному и тому же правилу.',
+    instruction: '(1)Москва – это прекрасные виды, открывающиеся с высоких холмов, знаменитые особняки, дворики с древними церквями. (2)И конечно, самая главная достопримечательность столицы – Кремль! (3)Нет ни одного русского пейзажиста, который хотя бы раз не написал Кремль – самый знаменитый архитектурный ансамбль столицы. (4)Рассматривая виды Москвы, можно проследить изменения города со временем. (5)На одной из картин А.М. Васнецова древний Кремль со старыми башнями из белого камня – сегодня все стены и башни Кремля из красного кирпича. (6)В пейзаже И.К. Айвазовского на первом плане – извивающаяся лента Москвы-реки.',
+    correct: ['12', '21'],
+    explanation: 'В предложениях 1 и 2 тире ставится между подлежащим и сказуемым (Москва — это виды; достопримечательность — Кремль).' },
+
+  { type: 'input', tag: 'Пункт. анализ', task: 'Задание 21',
+    text: 'Найди предложения, в которых <strong>запятая</strong> ставится по одному и тому же правилу.',
+    instruction: '(1)Впадина Карагие, расположенная близ восточного побережья Каспийского моря, является одной из самых глубоких впадин в Азии. (2)Её глубина – 132 м, длина – 85 км, ширина – до 25 км. (3)Есть две официальные версии перевода названия глубинной долины: «чёрный склон» и «чёрная пасть». (4)Оба варианта очень точно описывают саму впадину: её склоны имеют вкрапления чёрной породы. (5)Местные жители называют впадину Батыр (в переводе с тюркского – «воин») в честь реликтового озера, находящегося на дне впадины. (6)Когда озеро пересыхает, дно впадины покрывается солончаком – почвой с высоким содержанием соли.',
+    correct: ['15', '51'],
+    explanation: 'В предложениях 1 и 5 запятые выделяют обособленные определения, выраженные причастными оборотами: «расположенная близ восточного побережья» (1) и «находящегося на дне впадины» (5).' },
+
+  { type: 'input', tag: 'Пункт. анализ', task: 'Задание 21',
+    text: 'Найди предложения, в которых <strong>тире</strong> ставится по одному и тому же правилу.',
+    instruction: '(1)В Некоузском районе Ярославской области сохранилась известная дворянская усадьба Борок. (2)В 1830 году усадьбу Борок приобрёл молодой Алексей Петрович Щепочкин – дворянин по происхождению. (3)Он был рачительным хозяином: закончил строительство барского дома. (4)Николай Александрович Морозов – последний хозяин усадьбы. (5)В 1923 году усадьба Борок была передана в пожизненное владение Н.А. Морозову – учёному, поэту и революционеру. (6)Но Николай Александрович подарил её Академии наук СССР для создания здесь научного учреждения – биологической станции. (7)Сегодня Борок – крупный научный центр России – известен во всём мире.',
+    correct: ['2567', '2576', '2657', '2675', '2756', '2765', '5267', '5276', '5627', '5672', '5726', '5762', '6257', '6275', '6527', '6572', '6725', '6752', '7256', '7265', '7526', '7562', '7625', '7652'],
+    explanation: 'В предложениях 2, 5, 6, 7 тире обособляет приложение: «Щепочкин — дворянин» (2), «Морозову — учёному» (5), «учреждения — биологической станции» (6), «Борок — крупный научный центр России» (7).' }
+];
+
+/* ============ ИГРА ============ */
+const game = {
+  current: 0,
+  taskStates: {},
+  startTime: 0,
+  userName: embedName || '',
+  maxScore: 33
+};
+
+function getTotalScore(){
+  let s = 0;
+  for(const k in game.taskStates) s += game.taskStates[k].earned || 0;
+  return s;
+}
+function getAnsweredCount(){
+  return Object.keys(game.taskStates).filter(k => game.taskStates[k].answered).length;
+}
+function getUnansweredScored(){
+  return SCORED_INDICES.filter(i => !game.taskStates[i] || !game.taskStates[i].answered);
+}
+function declOfNum(n, titles){
+  const cases = [2, 0, 1, 1, 1, 2];
+  return titles[(n % 100 > 4 && n % 100 < 20) ? 2 : cases[Math.min(n % 10, 5)]];
+}
+
+const SCORED_INDICES = TASKS.map((t, i) => t.type === 'theory' ? -1 : i).filter(i => i >= 0);
+const TOTAL_SCORED = SCORED_INDICES.length;
+
+function currentScoredIndex(){
+  const pos = SCORED_INDICES.indexOf(game.current);
+  if(pos >= 0) return pos + 1;
+  for(let i = game.current; i < TASKS.length; i++){
+    const p = SCORED_INDICES.indexOf(i);
+    if(p >= 0) return p + 1;
+  }
+  return TOTAL_SCORED;
+}
+
+if(isEmbed && embedName){
+  document.getElementById('userName').value = embedName;
+  document.getElementById('screenStart').classList.add('hidden');
+  document.getElementById('progress').classList.remove('hidden');
+  startGame(true);
+}
+
+function startGame(skipName){
+  if(!skipName){
+    const name = document.getElementById('userName').value.trim();
+    if(!name){
+      document.getElementById('userName').focus();
+      document.getElementById('userName').style.borderColor = 'var(--red)';
+      return;
+    }
+    game.userName = name;
+  }
+  game.startTime = Date.now();
+  document.getElementById('screenStart').classList.add('hidden');
+  document.getElementById('progress').classList.remove('hidden');
+  renderTask();
+}
+
+function updateProgress(){
+  const T = TASKS[game.current];
+  const answered = getAnsweredCount();
+  const pct = (answered / TOTAL_SCORED) * 100;
+  let label;
+  if(T && T.type === 'theory'){
+    label = '📚 Теория';
+  } else {
+    const idx = currentScoredIndex();
+    label = `Задание ${idx} из ${TOTAL_SCORED}`;
+  }
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressLabel').textContent = label;
+  document.getElementById('progressScore').innerHTML = `⭐ ${getTotalScore()}`;
+}
+
+function renderTask(){
+  if(game.current >= TASKS.length){
+    tryFinish();
+    return;
+  }
+  updateProgress();
+  const T = TASKS[game.current];
+  const screen = document.getElementById('screenGame');
+  screen.classList.remove('hidden');
+  screen.style.animation = 'none';
+  void screen.offsetWidth;
+  screen.style.animation = 'rise 0.5s ease both';
+
+  if(T.type === 'theory'){
+    renderTheory(T);
+    return;
+  }
+
+  const state = game.taskStates[game.current];
+  const isAnswered = state && state.answered;
+
+  let html = `
+    <span class="q-label">${T.tag}</span>
+    <div class="q-task">${T.task}</div>
+    <div class="q-text">${T.text}</div>
+  `;
+  if(T.instruction) html += `<div class="q-instruction">${T.instruction}</div>`;
+
+  if(T.type === 'multi'){
+    html += '<div class="rows-list" id="opts">';
+    T.options.forEach((o, i) => {
+      let cls = 'row-card';
+      if(isAnswered){
+        cls += ' disabled';
+        if(T.correct.includes(i)) cls += ' correct';
+        else if(state.userSelection && state.userSelection.includes(i)) cls += ' wrong';
+      }
+      html += `<div class="${cls}" onclick="toggleMulti(${i})" data-idx="${i}">
+        <span class="row-num">${i + 1}</span>${o}</div>`;
+    });
+    html += '</div>';
+  }
+  else if(T.type === 'input'){
+    const val = isAnswered ? (state.userAnswer || '') : '';
+    const disabled = isAnswered ? 'disabled' : '';
+    let borderStyle = '';
+    if(isAnswered) borderStyle = state.isCorrect ? 'border-color: var(--green-deep);' : 'border-color: var(--red);';
+    html += `<div class="input-row">
+      <input type="text" id="answerInput" placeholder="Например: 134" autocomplete="off" value="${val}" ${disabled} style="${borderStyle}" onkeypress="if(event.key==='Enter') submitInput()">
+    </div>`;
+  }
+
+  if(isAnswered){
+    const cls = state.isCorrect ? 'ok' : 'no';
+    const label = state.isCorrect ? '🌼 Верно! +' + state.earned : '🍂 Не совсем (' + state.earned + '/' + state.max + ')';
+    html += `<div class="feedback ${cls}"><strong>${label}</strong><br>${state.explanation}</div>`;
+  }
+
+  html += buildFooter(T, isAnswered);
+  screen.innerHTML = html;
+  game.currentSelection = [];
+}
+
+function buildFooter(T, isAnswered){
+  let html = `<div class="card-footer" id="footer" style="flex-wrap: wrap;">`;
+  if(game.current > 0){
+    html += `<button class="btn btn-ghost" onclick="prevTask()" style="padding: 10px 18px; font-size: 14px;">← Назад</button>`;
+  } else {
+    html += `<span></span>`;
+  }
+  if(T.type === 'theory'){
+    html += `<button class="btn" onclick="nextTask()">Понятно, дальше →</button>`;
+  } else if(isAnswered){
+    if(isLastTask()){
+      html += `<button class="btn" onclick="tryFinish()">Завершить 🌼</button>`;
+    } else {
+      html += `<button class="btn" onclick="nextTask()">Дальше →</button>`;
+    }
+  } else {
+    const skipBtn = isLastTask() ? '' : `<button class="btn btn-ghost" onclick="nextTask()" style="padding: 10px 18px; font-size: 14px;">Пропустить →</button>`;
+    let mainBtn = '';
+    if(T.type === 'multi'){
+      mainBtn = `<button class="btn" id="btnSubmit" onclick="submitMulti()" disabled>Ответить</button>`;
+    } else if(T.type === 'input'){
+      mainBtn = `<button class="btn" id="btnSubmit" onclick="submitInput()">Ответить</button>`;
+    }
+    html += skipBtn + mainBtn;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function isLastTask(){ return game.current === TASKS.length - 1; }
+
+function prevTask(){
+  if(game.current > 0){
+    game.current--;
+    renderTask();
+  }
+}
+
+function tryFinish(){
+  const unanswered = getUnansweredScored();
+  if(unanswered.length === 0){
+    finishGame();
+  } else {
+    const screen = document.getElementById('screenGame');
+    screen.innerHTML = `
+      <span class="q-label" style="background: #fff3cd; color: #856404;">⚠ Внимание</span>
+      <div class="q-text">Ещё не на все вопросы получены ответы.</div>
+      <div class="q-instruction">У тебя <strong>${unanswered.length}</strong> ${declOfNum(unanswered.length, ['неотвеченный вопрос', 'неотвеченных вопроса', 'неотвеченных вопросов'])}. Без ответов на все вопросы тест нельзя завершить.</div>
+      <div class="card-footer">
+        <button class="btn btn-ghost" onclick="prevTask()" style="padding: 10px 18px; font-size: 14px;">← Назад</button>
+        <button class="btn" onclick="jumpToFirstUnanswered()">Перейти к неотвеченным →</button>
+      </div>
+    `;
+  }
+}
+
+function jumpToFirstUnanswered(){
+  const unanswered = getUnansweredScored();
+  if(unanswered.length > 0){
+    game.current = unanswered[0];
+    renderTask();
+  }
+}
+
+function renderTheory(T){
+  const screen = document.getElementById('screenGame');
+  let html = `
+    <span class="q-label theory">${T.tag}</span>
+    <div class="q-task">${T.task}</div>
+    <div class="theory-title">${T.title}</div>
+    <div class="theory-sub">${T.sub}</div>
+  `;
+  T.sections.forEach(sec => {
+    html += `<div class="theory-section"><div class="theory-heading">${sec.heading}</div>`;
+    if(sec.type === 'words'){
+      html += '<div class="theory-list">';
+      sec.items.forEach(w => { html += `<span class="theory-word">${w}</span>`; });
+      html += '</div>';
+    } else if(sec.type === 'rules'){
+      sec.items.forEach(r => { html += `<div class="theory-rule">${r}</div>`; });
+    } else if(sec.type === 'pairs'){
+      sec.items.forEach(p => {
+        html += `<div class="theory-pair"><div class="pair-title">${p[0]}</div><div class="pair-ex">${p[1]}</div></div>`;
+      });
+    } else if(sec.type === 'note'){
+      sec.items.forEach(n => { html += `<div class="theory-note">${n}</div>`; });
+    }
+    html += '</div>';
+  });
+  html += buildFooter(T, true);
+  screen.innerHTML = html;
+}
+
+function toggleMulti(i){
+  if(game.taskStates[game.current] && game.taskStates[game.current].answered) return;
+  const opt = document.querySelector(`#opts .row-card[data-idx="${i}"]`);
+  if(!opt) return;
+  const pos = game.currentSelection.indexOf(i);
+  if(pos >= 0){
+    game.currentSelection.splice(pos, 1);
+    opt.classList.remove('selected');
+  } else {
+    game.currentSelection.push(i);
+    opt.classList.add('selected');
+  }
+  const btn = document.getElementById('btnSubmit');
+  if(btn) btn.disabled = game.currentSelection.length === 0;
+}
+
+function saveAnswer(T, data){
+  game.taskStates[game.current] = Object.assign({
+    answered: true,
+    task_id: game.current + 1,
+    task_type: T.task,
+    tag: T.tag
+  }, data);
+}
+
+function submitMulti(){
+  const T = TASKS[game.current];
+  const correct = T.correct.slice().sort();
+  const given = game.currentSelection.slice().sort();
+  const isCorrect = correct.length === given.length && correct.every((v, i) => v === given[i]);
+  saveAnswer(T, {
+    userSelection: given,
+    userAnswer: given.map(i => (i + 1)).join(',') || '—',
+    earned: isCorrect ? 1 : 0,
+    max: 1,
+    isCorrect,
+    correctStr: T.correct.map(i => (i + 1)).join(','),
+    explanation: T.explanation
+  });
+  renderTask();
+}
+
+function submitInput(){
+  const T = TASKS[game.current];
+  const val = document.getElementById('answerInput').value.trim().replace(/[\s,]/g, '');
+  const normalize = s => s.split('').sort().join('');
+  const correctList = T.correct.map(c => normalize(c.replace(/[\s,]/g, '')));
+  const isCorrect = correctList.includes(normalize(val));
+  saveAnswer(T, {
+    userAnswer: val || '—',
+    earned: isCorrect ? 1 : 0,
+    max: 1,
+    isCorrect,
+    correctStr: T.correct[0],
+    explanation: `<strong>Правильный ответ:</strong> ${T.correct[0]}. ${T.explanation}`
+  });
+  renderTask();
+}
+
+function nextTask(){
+  if(game.current < TASKS.length - 1){
+    game.current++;
+    renderTask();
+  } else {
+    tryFinish();
+  }
+}
+
+function finishGame(){
+  const elapsed = Math.round((Date.now() - game.startTime) / 1000);
+  document.getElementById('screenGame').classList.add('hidden');
+  document.getElementById('progress').classList.add('hidden');
+
+  game.wrongTasks = [];
+  for(const k in game.taskStates){
+    const s = game.taskStates[k];
+    if(s.answered && !s.isCorrect){
+      game.wrongTasks.push({
+        task_id: s.task_id, task_type: s.task_type, tag: s.tag,
+        correct: s.correctStr, user: s.userAnswer
+      });
+    }
+  }
+  game.totalScore = getTotalScore();
+
+  const screen = document.getElementById('screenFinal');
+  screen.classList.remove('hidden');
+
+  const pct = Math.round((game.totalScore / game.maxScore) * 100);
+  let grade, emoji, msg, gradeClass;
+  if(pct >= 90){ grade = 'Отлично!'; emoji = '🌼💚🌼'; msg = 'Пунктуация — твоя сильная сторона!'; gradeClass = 'grade-5'; }
+  else if(pct >= 75){ grade = 'Хорошо'; emoji = '🌻🌼🌻'; msg = 'Уверенный результат. Несколько мест стоит повторить.'; gradeClass = 'grade-4'; }
+  else if(pct >= 50){ grade = 'Можно лучше'; emoji = '🌿🌱'; msg = 'Есть пробелы. Разбери ошибки и пройди ещё раз.'; gradeClass = 'grade-3'; }
+  else { grade = 'Нужно тренироваться'; emoji = '🌱'; msg = 'Не расстраивайся — повтори правила и пройди тренажёр ещё раз.'; gradeClass = 'grade-2'; }
+
+  const mm = Math.floor(elapsed / 60), ss = elapsed % 60;
+  const timeStr = `${mm} мин ${ss < 10 ? '0' + ss : ss} с`;
+
+  let html = `
+    <span class="final-emoji">${emoji}</span>
+    <div style="font-size: 17px; color: var(--text-soft);">${game.userName}, твой результат:</div>
+    <div class="final-score">${game.totalScore}<span class="final-max"> / ${game.maxScore}</span></div>
+    <div class="final-grade ${gradeClass}">${grade} (${pct}%)</div>
+    <div class="final-msg">${msg}<br><small>⏱ Время: ${timeStr}</small></div>
+  `;
+
+  if(game.wrongTasks.length > 0){
+    html += '<div class="errors-section"><div class="errors-title">📝 Разбор ошибок (' + game.wrongTasks.length + '):</div>';
+    game.wrongTasks.forEach(w => {
+      html += `<div class="error-item">
+        <div class="label">${w.tag} · ${w.task_type}</div>
+        <div class="your">Твой ответ: ${w.user || '—'}</div>
+        <div class="right">Правильно: ${w.correct}</div>
+      </div>`;
+    });
+    html += '</div>';
+  } else {
+    html += '<div class="errors-section" style="background: #e8f5e9; text-align: center;"><div class="errors-title" style="color: var(--green-deep);">🌼 Ни одной ошибки!</div></div>';
+  }
+
+  if(isEmbed){
+    html += `<div style="background: var(--green-light); padding: 14px; border-radius: 14px; color: var(--green-text); font-size: 14px; margin-top: 18px;">
+      ✓ Результат сохранён на платформе ЗебРус.
+    </div>
+    <div class="final-actions">
+      <button class="btn" onclick="closeEmbed()">Закрыть</button>
+      <button class="btn btn-ghost" onclick="restartGame()">Пройти ещё раз</button>
+    </div>`;
+  } else {
+    html += `<div class="final-actions">
+      <button class="btn" onclick="downloadScreenshot()">📸 Сохранить результат как картинку</button>
+      <button class="btn btn-ghost" onclick="alert('Покажи скриншот своему преподавателю.')">Что делать дальше?</button>
+      <button class="btn btn-ghost" onclick="restartGame()">Пройти ещё раз</button>
+    </div>`;
+  }
+  screen.innerHTML = html;
+
+  if(isEmbed){ sendResultToZebrus(elapsed); }
+  else { saveHistory(elapsed, pct); }
+}
+
+function sendResultToZebrus(timeSeconds){
+  const wrongCompact = game.wrongTasks.map(w => ({
+    id: w.task_id, type: w.task_type, correct: w.correct, user: w.user
+  }));
+  window.parent.postMessage({
+    type: 'zebrus_game_result',
+    payload: { score: game.totalScore, max_score: game.maxScore, time_seconds: timeSeconds, wrong_tasks: wrongCompact }
+  }, '*');
+}
+
+function closeEmbed(){ window.parent.postMessage({ type: 'zebrus_game_close' }, '*'); }
+
+function restartGame(){
+  game.current = 0;
+  game.taskStates = {};
+  game.totalScore = 0;
+  game.wrongTasks = [];
+  game.startTime = Date.now();
+  document.getElementById('screenFinal').classList.add('hidden');
+  document.getElementById('progress').classList.remove('hidden');
+  renderTask();
+}
+
+function saveHistory(timeSeconds, pct){
+  try{
+    const history = JSON.parse(localStorage.getItem('intensiv_punkt_history') || '[]');
+    history.push({ name: game.userName, score: game.totalScore, max_score: game.maxScore, pct: pct, time: timeSeconds, date: new Date().toISOString() });
+    localStorage.setItem('intensiv_punkt_history', JSON.stringify(history.slice(-50)));
+  } catch(e){}
+}
+
+function downloadScreenshot(){
+  const canvas = document.createElement('canvas');
+  const W = 800, H = 1000;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#f1f8e9');
+  grad.addColorStop(0.5, '#dcedc8');
+  grad.addColorStop(1, '#c5e1a5');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, W, H);
+  // Ромашки
+  for(let i = 0; i < 18; i++){
+    const x = Math.random() * W, y = Math.random() * H, r = 10 + Math.random() * 8;
+    for(let k = 0; k < 8; k++){
+      const angle = (k / 8) * 2 * Math.PI;
+      ctx.fillStyle = `rgba(255, 255, 255, 0.75)`;
+      ctx.beginPath();
+      ctx.ellipse(x + Math.cos(angle - Math.PI/2) * r * 0.6, y + Math.sin(angle - Math.PI/2) * r * 0.6, r * 0.4, r * 0.7, angle, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+    ctx.fillStyle = '#fdd835';
+    ctx.beginPath(); ctx.arc(x, y, r * 0.35, 0, 2 * Math.PI); ctx.fill();
+  }
+  ctx.fillStyle = 'white';
+  roundRect(ctx, 60, 80, W - 120, H - 160, 28); ctx.fill();
+  ctx.fillStyle = '#1b5e20';
+  ctx.font = 'bold 28px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('🌼 Пунктуация ЕГЭ', W / 2, 150);
+  ctx.font = '18px sans-serif';
+  ctx.fillStyle = '#4a6b4a';
+  ctx.fillText('Тренажёр. Задания 16-21', W / 2, 180);
+  ctx.fillStyle = '#1b3a1d';
+  ctx.font = '22px sans-serif';
+  ctx.fillText(game.userName, W / 2, 240);
+  const pct = Math.round((game.totalScore / game.maxScore) * 100);
+  ctx.fillStyle = '#1b5e20';
+  ctx.font = 'bold 96px sans-serif';
+  ctx.fillText(game.totalScore + ' / ' + game.maxScore, W / 2, 360);
+  ctx.font = 'bold 36px sans-serif';
+  ctx.fillStyle = pct >= 75 ? '#2e7d32' : pct >= 50 ? '#f57f17' : '#c62828';
+  ctx.fillText(pct + '%', W / 2, 410);
+  ctx.fillStyle = '#4a6b4a';
+  ctx.font = '16px sans-serif';
+  const d = new Date();
+  const dateStr = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+  const elapsed = Math.round((Date.now() - game.startTime) / 1000);
+  const mm = Math.floor(elapsed / 60), ss = elapsed % 60;
+  ctx.fillText(dateStr + ' · ' + mm + ' мин ' + ss + ' с', W / 2, 460);
+  ctx.fillStyle = '#1b3a1d';
+  ctx.font = 'bold 20px sans-serif';
+  ctx.textAlign = 'left';
+  if(game.wrongTasks.length > 0){
+    ctx.fillText('Места для повторения:', 100, 530);
+    ctx.font = '15px sans-serif';
+    ctx.fillStyle = '#4a6b4a';
+    const toShow = game.wrongTasks.slice(0, 8);
+    toShow.forEach((w, i) => {
+      ctx.fillText('• ' + w.tag + ': ' + w.task_type, 100, 565 + i * 28);
+    });
+    if(game.wrongTasks.length > 8){
+      ctx.fillText('...и ещё ' + (game.wrongTasks.length - 8), 100, 565 + 8 * 28);
+    }
+  } else {
+    ctx.fillText('🌼 Ни одной ошибки!', 100, 530);
+  }
+  ctx.fillStyle = '#1b5e20';
+  ctx.font = 'italic 14px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('Покажи этот скриншот своему преподавателю', W / 2, H - 110);
+  ctx.font = 'bold 12px sans-serif';
+  ctx.fillStyle = '#bdbdbd';
+  ctx.fillText('zebrus.ru', W / 2, H - 80);
+
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'punktuacia_' + game.userName.replace(/[^а-яА-Яa-zA-Z0-9]/g, '_') + '.png';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+}
+
+function roundRect(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+</script>
+</body>
+</html>
