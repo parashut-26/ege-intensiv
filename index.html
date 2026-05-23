@@ -2529,17 +2529,10 @@ function startStudentRealtime(){
           const inThisWarmup  = newRow.day_id && STATE.openWarmupDayId === newRow.day_id;
           const inDaysTab     = STATE.view === 'student' && STATE.studentTab === 'days';
           if(!inThisWarmup){
-            /* Дружелюбный toast с CTA: показываем кнопкой на 7 секунд */
+            /* Дружелюбный toast — 7 сек, чтобы успели заметить и нажать «Дни» */
             const dayLabel = newRow.title || (newRow.day_id ? '«Разогрев»' : 'интенсиве');
             const emoji = newRow.emoji || '🔥';
-            STATE.toast = emoji + ' Новый пост в дне ' + dayLabel + ' — открой «Дни»';
-            if(typeof render === 'function') render();
-            setTimeout(() => {
-              if(STATE.toast && STATE.toast.startsWith(emoji)){
-                STATE.toast = '';
-                if(typeof render === 'function') render();
-              }
-            }, 7000);
+            showToast(emoji + ' Новый пост в дне ' + dayLabel + ' — открой «Дни»', 7000);
           } else {
             /* Уже в этом дне — просто render() чтобы новый блок появился без F5 */
             if(typeof render === 'function') render();
@@ -6413,7 +6406,7 @@ function el(tag, props, ...children){
   return n;
 }
 
-function showToast(text){
+function showToast(text, durationMs){
   /* ВАЖНО: НЕ дёргаем глобальный render() — он пересоздаёт DOM редактора
      поста (contenteditable) и стирает всё, что туда было вставлено: видео,
      iframe, форматирование, незавершённый ввод. Раньше showToast → render()
@@ -6421,8 +6414,12 @@ function showToast(text){
      в DOM, а в следующую микротаску — стирался render-ом, потому что тост
      «🎬 Видео добавлено» сам же его и убивал.
      Решение: тост рендерится через свой собственный фиксированный
-     div#zebrus-toast в body, независимо от STATE/render(). */
-  STATE.toast = text;  // оставляем для совместимости, если кто-то читает
+     div#zebrus-toast в body, независимо от STATE/render().
+
+     STATE.toast НЕ устанавливаем — раньше его ещё рендерил render() инлайн,
+     и инлайн-плашка зависала навсегда после того, как #zebrus-toast уже
+     скрылся (render() мог не вызваться, чтобы её снять). Инлайн-рендер
+     убран; теперь STATE.toast не используется вообще. */
   let el = document.getElementById('zebrus-toast');
   if(!el){
     el = document.createElement('div');
@@ -6438,12 +6435,12 @@ function showToast(text){
   /* Дать браузеру время отрендерить, прежде чем тригерить transition */
   requestAnimationFrame(() => { el.style.opacity = '1'; });
   if(showToast._hideTimer) clearTimeout(showToast._hideTimer);
+  const hideAfter = (typeof durationMs === 'number' && durationMs > 0) ? durationMs : 2400;
   showToast._hideTimer = setTimeout(() => {
     el.style.opacity = '0';
-    STATE.toast = null;
     /* убираем из DOM после fade-out */
     setTimeout(() => { if(el && el.style.opacity === '0') el.remove(); }, 250);
-  }, 2400);
+  }, hideAfter);
 }
 
 /* =======================================================================
@@ -28684,7 +28681,9 @@ function mountSolverOverlays(root){
   if(STATE.essayDraftOpen) root.append(modalEssayDraft());
   if(STATE.lightbox) root.append(modalLightbox());
   if(STATE.chatOpen && STATE.view !== 'login') root.append(chatPanel(STATE.view));
-  if(STATE.toast) root.append(el('div', { class:'toast' }, STATE.toast));
+  /* Тосты теперь полностью на showToast() → #zebrus-toast. Инлайн-рендер
+     STATE.toast убран: он не имел авто-исчезновения и плашка зависала после
+     того, как #zebrus-toast уже скрылся. */
 }
 
 /* Запоминаем последний «вид + вкладка» — если совпадает с прошлым
@@ -28703,8 +28702,7 @@ function _renderNow(){
     if(!STATE.testOpen){
       const restored = tryRestoreTestProgress();
       if(restored){
-        STATE.toast = '↩ Восстановлен прогресс тренажёра задания ' + STATE.testOpen;
-        setTimeout(() => { if(STATE.toast && STATE.toast.startsWith('↩')) { STATE.toast = ''; render(); } }, 3500);
+        showToast('↩ Восстановлен прогресс тренажёра задания ' + STATE.testOpen, 3500);
         /* Перерисуем сразу с восстановленным стейтом */
         setTimeout(render, 0);
       }
@@ -28742,7 +28740,7 @@ function _renderNow(){
 
   if(STATE.view === 'login'){
     root.append(viewLogin(), legalFooter());
-    if(STATE.toast) root.append(el('div', { class:'toast' }, STATE.toast));
+    /* Тосты теперь через showToast() → #zebrus-toast */
     return;
   }
 
@@ -28974,7 +28972,7 @@ function _renderNow(){
   if(STATE.sampleEditOpen != null) root.append(modalEssaySampleEdit());
   if(STATE.importStudentsOpen) root.append(modalImportStudents());
   if(STATE.chatOpen && STATE.view !== 'login') root.append(chatPanel(STATE.view));
-  if(STATE.toast) root.append(el('div', { class:'toast' }, STATE.toast));
+  /* Тосты теперь через showToast() → #zebrus-toast (см. функцию showToast). */
   /* Splash «Краш-тест» — крепится к body, а не root, чтобы НЕ пересоздаваться
      при каждом render() кабинета (иначе CSS-анимация прыгает обратно на 0%). */
   if(STATE.studentSplashActive && STATE.view === 'student'){
