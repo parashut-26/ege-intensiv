@@ -22850,7 +22850,11 @@ function viewVariantSummary(){
             style:{ fontSize:'10px', padding:'2px 7px', borderRadius:'999px',
                     background:'#DC2626', color:'#fff', fontWeight:'700',
                     animation:'pulse 1.6s infinite' }
-          }, '🔴 решает сейчас') : null,
+          }, '🔴 решает сейчас') : (a.finished_at ? el('span', {
+            style:{ fontSize:'10px', padding:'2px 7px', borderRadius:'999px',
+                    background:'#D1FAE5', color:'#065F46', fontWeight:'700' },
+            title: 'Пробник завершён: ' + new Date(a.finished_at).toLocaleString('ru-RU')
+          }, '🏁 сдал') : null),
           a.parent_attempt_id ? el('span', {
             style:{ fontSize:'9px', padding:'1px 5px', borderRadius:'999px',
                     background:'#FEF3C7', color:'#92400E', fontWeight:'700' }
@@ -27338,7 +27342,11 @@ function viewVariantsByStudent(){
           style:{ marginLeft:'6px', fontSize:'10px', padding:'2px 7px', borderRadius:'999px',
                   background:'#DC2626', color:'#fff', fontWeight:'700',
                   animation:'pulse 1.6s infinite' }
-        }, '🔴 решает сейчас') : null,
+        }, '🔴 решает сейчас') : (a.finished_at ? el('span', {
+          style:{ marginLeft:'6px', fontSize:'10px', padding:'2px 7px', borderRadius:'999px',
+                  background:'#D1FAE5', color:'#065F46', fontWeight:'700' },
+          title: 'Пробник завершён: ' + new Date(a.finished_at).toLocaleString('ru-RU')
+        }, '🏁 сдал') : null),
         a.parent_attempt_id ? el('span', {
           style:{ marginLeft:'6px', fontSize:'9px', padding:'1px 5px', borderRadius:'999px',
                   background:'#FEF3C7', color:'#92400E', fontWeight:'700' }
