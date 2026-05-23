@@ -1,0 +1,1338 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Интенсив ЕГЭ. Работа с текстом — тренажёр</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root{
+    --lavender-lightest: #f3e5f5;
+    --lavender-light: #e1bee7;
+    --lavender: #ab47bc;
+    --lavender-deep: #6a1b9a;
+    --lavender-text: #4a148c;
+    --gold: #ffc107;
+    --gold-light: #fff8e1;
+    --cream: #faf5ff;
+    --mint: #c8e6c9;
+    --red: #e53935;
+    --text: #311b92;
+    --text-soft: #5e3c8e;
+    --shadow: 0 8px 24px rgba(106, 27, 154, 0.18);
+  }
+  html, body{ height: 100%; }
+  body{
+    font-family: -apple-system, "Segoe UI", "Nunito", "Comfortaa", system-ui, sans-serif;
+    background: linear-gradient(180deg, #f8f0ff 0%, #e8d5f2 50%, #d1b3e0 100%);
+    color: var(--text);
+    line-height: 1.55;
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+  }
+  /* Лаванда — веточки с цветами */
+  .lavender-field{
+    position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden;
+  }
+  .lav-sprig{
+    position: absolute;
+    width: 32px; height: 48px;
+    animation: float linear infinite;
+    opacity: 0.7;
+  }
+  .lav-sprig svg{ width: 100%; height: 100%; display: block; }
+  @keyframes float{
+    0%{ transform: translateY(-15vh) rotate(0deg); }
+    100%{ transform: translateY(115vh) rotate(360deg); }
+  }
+  .container{
+    position: relative; z-index: 1;
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 24px 16px 48px;
+  }
+  .progress-bar{
+    position: sticky; top: 12px; z-index: 10;
+    background: rgba(255,255,255,0.94);
+    backdrop-filter: blur(6px);
+    border-radius: 16px;
+    padding: 12px 18px;
+    box-shadow: var(--shadow);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 600; color: var(--text-soft);
+    margin-bottom: 24px;
+    gap: 12px;
+  }
+  .progress-track{
+    flex: 1; height: 6px; background: var(--lavender-light); border-radius: 3px;
+    overflow: hidden;
+  }
+  .progress-fill{
+    height: 100%; background: linear-gradient(90deg, var(--lavender), var(--gold));
+    border-radius: 3px; transition: width 0.4s ease;
+    width: 0%;
+  }
+  .progress-label{ white-space: nowrap; }
+  .progress-score{ white-space: nowrap; }
+  .card{
+    background: white;
+    border-radius: 24px;
+    padding: 28px 24px;
+    box-shadow: var(--shadow);
+    animation: rise 0.5s ease both;
+  }
+  @keyframes rise{
+    from{ opacity: 0; transform: translateY(24px); }
+    to{ opacity: 1; transform: translateY(0); }
+  }
+  .start-screen{ text-align: center; }
+  .start-title{
+    font-size: 28px; font-weight: 800; color: var(--lavender-text);
+    margin-bottom: 8px;
+  }
+  .start-emoji{ font-size: 48px; display: block; margin: 4px 0 16px; }
+  .start-sub{ color: var(--text-soft); font-size: 16px; margin-bottom: 20px; }
+  .start-info{
+    background: var(--gold-light);
+    border-radius: 14px;
+    padding: 16px;
+    margin-bottom: 20px;
+    font-size: 14px;
+    color: var(--text-soft);
+    text-align: left;
+  }
+  .start-info ul{ padding-left: 18px; margin-top: 6px; }
+  .start-info li{ margin: 4px 0; }
+  input[type="text"]{
+    width: 100%;
+    padding: 14px 16px;
+    border: 2px solid var(--lavender-light);
+    border-radius: 14px;
+    font-size: 16px;
+    font-family: inherit;
+    background: white;
+    color: var(--text);
+    outline: none;
+    margin-bottom: 14px;
+    transition: border-color 0.2s;
+  }
+  input[type="text"]:focus{ border-color: var(--lavender); }
+  .btn{
+    display: inline-block;
+    background: linear-gradient(135deg, var(--lavender), var(--lavender-deep));
+    color: white;
+    font-family: inherit;
+    font-size: 17px;
+    font-weight: 700;
+    padding: 14px 32px;
+    border: none;
+    border-radius: 28px;
+    cursor: pointer;
+    box-shadow: 0 6px 16px rgba(106, 27, 154, 0.35);
+    transition: transform 0.15s, box-shadow 0.2s;
+  }
+  .btn:hover{ transform: translateY(-2px); box-shadow: 0 10px 20px rgba(106, 27, 154, 0.45); }
+  .btn:active{ transform: translateY(0); }
+  .btn:disabled{
+    background: #ccc; cursor: not-allowed; box-shadow: none; transform: none;
+  }
+  .btn-ghost{
+    background: white; color: var(--lavender-deep);
+    border: 2px solid var(--lavender-light);
+    box-shadow: none;
+  }
+  .q-label{
+    display: inline-block;
+    background: var(--mint);
+    color: #1b5e20;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 12px;
+  }
+  .q-label.theory{ background: var(--gold-light); color: #f57f17; }
+  .q-task{
+    color: var(--text-soft);
+    font-size: 14px;
+    margin-bottom: 12px;
+    font-style: italic;
+  }
+  .q-text{
+    font-size: 17px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: var(--text);
+  }
+  .q-instruction{
+    font-size: 14px;
+    color: var(--text-soft);
+    margin-bottom: 16px;
+    background: var(--gold-light);
+    border-radius: 10px;
+    padding: 10px 14px;
+    line-height: 1.6;
+  }
+  .text-passage{
+    background: var(--cream);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    font-size: 14px;
+    color: var(--text);
+    line-height: 1.65;
+    max-height: 280px;
+    overflow-y: auto;
+    border: 1px solid var(--lavender-light);
+  }
+  .theory-title{
+    font-size: 24px; font-weight: 800; color: var(--lavender-text);
+    margin-bottom: 6px;
+  }
+  .theory-sub{
+    color: var(--text-soft); font-size: 15px; margin-bottom: 18px;
+  }
+  .theory-section{
+    background: var(--cream);
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .theory-heading{
+    font-weight: 700; color: var(--lavender-text);
+    font-size: 15px; margin-bottom: 8px;
+  }
+  .theory-list{
+    display: flex; flex-wrap: wrap; gap: 6px 10px;
+    font-size: 14px;
+  }
+  .theory-word{
+    background: white; padding: 4px 10px; border-radius: 8px;
+    border: 1px solid var(--lavender-light);
+  }
+  .theory-rule{
+    background: white; border-left: 4px solid var(--lavender);
+    border-radius: 10px; padding: 10px 14px;
+    margin-bottom: 8px; font-size: 14px;
+  }
+  .theory-rule strong{ color: var(--lavender-text); }
+  .theory-note{
+    background: #fff3cd; border-left: 4px solid var(--gold);
+    border-radius: 10px; padding: 10px 14px;
+    margin-bottom: 8px; font-size: 13px; color: #856404;
+    font-style: italic;
+  }
+  .options{ display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+  .opt{
+    display: flex; align-items: center; gap: 12px;
+    background: white;
+    border: 2px solid var(--lavender-light);
+    border-radius: 14px;
+    padding: 12px 16px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-size: 15px;
+  }
+  .opt:hover{ background: var(--lavender-lightest); border-color: var(--lavender); }
+  .opt-num{
+    width: 26px; height: 26px;
+    background: var(--lavender-lightest); color: var(--lavender-text);
+    border-radius: 8px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .opt.selected{ background: var(--lavender-lightest); border-color: var(--lavender); }
+  .opt.selected .opt-num{ background: var(--lavender); color: white; }
+  .opt.correct{ background: #e8f5e9; border-color: #2e7d32; }
+  .opt.correct .opt-num{ background: #2e7d32; color: white; }
+  .opt.wrong{ background: #ffebee; border-color: var(--red); }
+  .opt.wrong .opt-num{ background: var(--red); color: white; }
+  .opt.disabled{ pointer-events: none; opacity: 0.7; }
+  .input-row{
+    display: flex; gap: 10px; align-items: center;
+    margin-bottom: 16px;
+  }
+  .input-row input{ margin-bottom: 0; }
+  .match-grid{
+    display: flex; flex-direction: column; gap: 10px;
+    margin-bottom: 16px;
+  }
+  .match-row{
+    display: flex; align-items: flex-start; gap: 10px;
+    background: var(--cream);
+    border: 2px solid var(--lavender-light);
+    border-radius: 12px;
+    padding: 10px 12px;
+  }
+  .match-letter{
+    width: 28px; height: 28px;
+    background: var(--lavender); color: white;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 14px;
+    flex-shrink: 0;
+  }
+  .match-text{ flex: 1; font-size: 14px; color: var(--text); line-height: 1.55; }
+  .match-select{
+    background: white;
+    border: 2px solid var(--lavender-light);
+    border-radius: 10px;
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 14px;
+    color: var(--text);
+    cursor: pointer;
+    min-width: 60px;
+    outline: none;
+  }
+  .match-select:focus{ border-color: var(--lavender); }
+  .options-box{
+    background: var(--lavender-lightest);
+    border-radius: 12px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    font-size: 14px;
+  }
+  .options-box .obox-title{
+    font-weight: 700; color: var(--lavender-text);
+    margin-bottom: 6px;
+  }
+  .feedback{
+    border-radius: 14px;
+    padding: 14px 16px;
+    margin-top: 12px;
+    font-size: 14px;
+    line-height: 1.55;
+    animation: rise 0.3s ease both;
+  }
+  .feedback.ok{
+    background: #e8f5e9; color: #1b5e20;
+    border-left: 4px solid #2e7d32;
+  }
+  .feedback.no{
+    background: #ffebee; color: #b71c1c;
+    border-left: 4px solid var(--red);
+  }
+  .feedback strong{ font-weight: 700; }
+  .card-footer{
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 18px;
+    gap: 12px;
+  }
+  .final{ text-align: center; }
+  .final-emoji{ font-size: 72px; display: block; margin-bottom: 8px; }
+  .final-score{
+    font-size: 64px; font-weight: 800;
+    color: var(--lavender-text);
+    line-height: 1;
+    margin: 8px 0;
+  }
+  .final-max{ font-size: 24px; color: var(--text-soft); font-weight: 500; }
+  .final-grade{
+    display: inline-block;
+    padding: 8px 20px;
+    border-radius: 20px;
+    font-weight: 700;
+    font-size: 18px;
+    margin: 12px 0 18px;
+  }
+  .grade-5{ background: linear-gradient(135deg, #66bb6a, #2e7d32); color: white; }
+  .grade-4{ background: linear-gradient(135deg, #ab47bc, #6a1b9a); color: white; }
+  .grade-3{ background: linear-gradient(135deg, #ffca28, #f57f17); color: white; }
+  .grade-2{ background: linear-gradient(135deg, #ef5350, #c62828); color: white; }
+  .final-msg{
+    font-size: 16px; color: var(--text-soft); margin-bottom: 20px;
+  }
+  .final-actions{ display: flex; flex-direction: column; gap: 12px; margin-top: 20px; }
+  .errors-section{
+    text-align: left;
+    background: var(--cream);
+    border-radius: 14px;
+    padding: 16px;
+    margin: 18px 0;
+  }
+  .errors-title{
+    font-weight: 700; color: var(--lavender-text);
+    margin-bottom: 8px;
+    font-size: 15px;
+  }
+  .error-item{
+    background: white;
+    border-radius: 10px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    font-size: 13px;
+  }
+  .error-item .label{ color: var(--text-soft); font-size: 12px; margin-bottom: 4px; }
+  .error-item .your{ color: var(--red); }
+  .error-item .right{ color: #2e7d32; font-weight: 600; }
+  .hidden{ display: none !important; }
+  @media (max-width: 480px){
+    .container{ padding: 16px 12px 32px; }
+    .card{ padding: 22px 18px; border-radius: 20px; }
+    .start-title{ font-size: 22px; }
+    .final-score{ font-size: 48px; }
+    .progress-bar{ font-size: 12px; padding: 10px 12px; }
+    .text-passage{ font-size: 13px; max-height: 240px; }
+  }
+</style>
+</head>
+<body>
+
+<div class="lavender-field" id="lavender"></div>
+
+<div class="container">
+
+  <div class="progress-bar hidden" id="progress">
+    <span class="progress-label" id="progressLabel">Задание 1</span>
+    <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+    <span class="progress-score" id="progressScore">⭐ 0</span>
+  </div>
+
+  <div class="card start-screen" id="screenStart">
+    <span class="start-emoji">💜</span>
+    <div class="start-title">Работа с текстом</div>
+    <div class="start-sub">Тренажёр ЕГЭ — задания 1, 2, 3, 22–26</div>
+
+    <div class="start-info">
+      <strong>Что внутри:</strong>
+      <ul>
+        <li>🪻 Теория и 2 задания на части речи и связь (1)</li>
+        <li>🪻 Теория и 2 на лексическое значение (2)</li>
+        <li>🪻 Теория и 2 на стили (3)</li>
+        <li>🪻 Теория и 3 на средства выразительности (22)</li>
+        <li>🪻 Теория и 2 на содержание текста (23)</li>
+        <li>🪻 Теория и 2 на типы речи (24)</li>
+        <li>🪻 Теория и 2 на антонимы / синонимы (25)</li>
+        <li>🪻 Теория и 2 на средства связи предложений (26)</li>
+      </ul>
+      <div style="margin-top: 10px;">⏱ Около 45&ndash;60 минут · 17 баллов максимум</div>
+    </div>
+
+    <input type="text" id="userName" placeholder="Как тебя зовут?" autocomplete="off">
+    <button class="btn" id="btnStart" onclick="startGame()">Начать 💜</button>
+  </div>
+
+  <div class="card hidden" id="screenGame"></div>
+  <div class="card final hidden" id="screenFinal"></div>
+
+</div>
+
+<script>
+/* ============ ЛАВАНДА ============ */
+function spawnLavender(){
+  const layer = document.getElementById('lavender');
+  // SVG ветка лаванды
+  const svgSprig = `<svg viewBox="0 0 40 60" xmlns="http://www.w3.org/2000/svg">
+    <g>
+      <!-- Стебель -->
+      <line x1="20" y1="58" x2="20" y2="30" stroke="#558b2f" stroke-width="1.5"/>
+      <!-- Листья -->
+      <ellipse cx="14" cy="44" rx="4" ry="1.5" fill="#7cb342" transform="rotate(-30 14 44)"/>
+      <ellipse cx="26" cy="48" rx="4" ry="1.5" fill="#7cb342" transform="rotate(30 26 48)"/>
+      <!-- Цветочки лаванды (колосок) -->
+      <ellipse cx="20" cy="28" rx="3" ry="2.5" fill="#9c27b0" opacity="0.85"/>
+      <ellipse cx="17" cy="22" rx="3" ry="2.5" fill="#ab47bc" opacity="0.85"/>
+      <ellipse cx="23" cy="22" rx="3" ry="2.5" fill="#ab47bc" opacity="0.85"/>
+      <ellipse cx="20" cy="16" rx="3" ry="2.5" fill="#ba68c8" opacity="0.85"/>
+      <ellipse cx="17" cy="11" rx="2.5" ry="2" fill="#ce93d8" opacity="0.85"/>
+      <ellipse cx="23" cy="11" rx="2.5" ry="2" fill="#ce93d8" opacity="0.85"/>
+      <ellipse cx="20" cy="6" rx="2.5" ry="2" fill="#e1bee7" opacity="0.85"/>
+    </g>
+  </svg>`;
+  for(let i = 0; i < 14; i++){
+    const f = document.createElement('div');
+    f.className = 'lav-sprig';
+    f.innerHTML = svgSprig;
+    f.style.left = Math.random() * 100 + 'vw';
+    f.style.animationDuration = (14 + Math.random() * 14) + 's';
+    f.style.animationDelay = (Math.random() * 16) + 's';
+    f.style.transform = `scale(${0.5 + Math.random() * 0.7})`;
+    f.style.opacity = 0.35 + Math.random() * 0.4;
+    layer.appendChild(f);
+  }
+}
+spawnLavender();
+
+const urlParams = new URLSearchParams(window.location.search);
+const isEmbed = urlParams.get('mode') === 'embed';
+const embedName = urlParams.get('name') || '';
+
+/* ============ ТЕКСТЫ ============ */
+const TEXT_LIZA = `(1) В какой-то момент здесь, в Америке, я услышала о русском «докторе Лизе» — и вдруг поняла, что это же она, наша Лиза Глинка. (2) Тогда Лиза занималась обустройством первых хосписов в России и на Украине. (3) Кто-то из журналистов в интервью назвал её «доктор Лиза», — памятуя о другом русском докторе — о Фёдоре Гаазе, устроителе первых в России домов призрения для отторженных, больных и обречённых. (4) Лиза возразила: «Доктор Гааз — святой, а я обыкновенная женщина». (5) Кажется, журналист, придя в восторг от этой фразы, не понял, что это — не скромность, которая «украшает великих», а правда, Лизина правда. (6) Да, она обыкновенная женщина, которая по-человечески относится к смерти.
+<br><br>(7) Из этого человеческого отношения к жизни и смерти и возникает, кажется, сила простой обычной женщины Лизы Глинки. (8) Елизаветы Петровны. (9) В 1999 году она, американский врач-реаниматолог, основала первый хоспис при онкологической больнице г. Киева. (10) А позднее, в 2007 году, в Москве создала благотворительный фонд «Справедливая помощь», который оказывает поддержку и врачебную помощь малообеспеченным и бездомным. (11) Чувство справедливости и определяет главное содержание работы Лизы. (12) Потому в нашем расчётливом, жёстком мире «доктор Лиза» всегда будет выглядеть «не от мира сего», &lt;...&gt; её деяния — норма именно для человека.
+<br><em>(По М.М. Адамович)</em>`;
+
+const TEXT_VADIM = `(1) Над письменным столом висит фотография отца: он без шапки, седоватые волосы вьются буйно и молодо над широким лбом, а глаза чуть прищурены, улыбаются насмешливо и проницательно, всё видя, всё понимая… (2) Глаза у отца были тёмно-синие, а на фотографии они совсем чёрные, южные, очень живые.
+<br><br>(7) Отец погиб в начале войны, в декабре сорок первого года. (8) Это была его третья война, хотя профессия у отца была самая мирная — учитель. (9) Последние пятнадцать лет он работал директором школы.
+<br><br>(20) Когда возвращались с вокзала, Вадим первый раз взял маму под руку. (21) Всю дорогу молчал. (22) Он думал о словах отца: «Ты теперь глава семьи, опора».
+<br><br>(28) А на следующей неделе «глава семьи» тайком от семьи пошёл в военкомат и попросился на фронт. (29) Ему отказали, так как у него ещё не было паспорта. (30) Об этой неудачной попытке он не сказал никому.
+<br><br>(31) Наступил сентябрь. (32) Вадим должен был бы заканчивать в этом году десятый класс. (33) Но занятий всё не было. (34) Он поступил в молодёжную пожарную команду и два месяца трудился: ночью стоял на дежурстве, тушил зажигалки, ловил ракетчиков, а днём работал вместе со всей командой на дровяном складе. (35) Спать приходилось мало.
+<br><br>(36) Стоя осенней ночью у чердачного окна, глядя на вспышки зениток в небе, Вадим проникался новым ощущением: он был уже опорой не только семьи, но и всей своей улицы, всего района. (37) Он отвечал за жизни тысяч людей, за целость их домов. (38) Позже, на фронте, это чувство ответственности ещё больше укрепилось.
+<br><br>(45) Два военных года закалили Вадима, научили его разбираться в людях, научили смелости — быть сильнее своего страха. (46) Они показали ему, на что способен он, Вадим Белов. (47) На войне он научился многому из того, что было необходимо не только для войны, но и просто для жизни.
+<br><em>(По Ю.В. Трифонову)</em>`;
+
+/* ============ ЗАДАНИЯ ============ */
+const TASKS = [
+
+  /* ===== ТЕОРИЯ: Задание 1 (части речи и средства связи) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 1',
+    title: 'Часть речи как средство связи',
+    sub: 'Нужно подобрать в текст подходящее слово определённой части речи.',
+    sections: [
+      { heading: 'Самые популярные наречия:', type: 'rules', items: [
+        '<strong>Так, Поэтому</strong> — встречаются чаще всего',
+        'Указательные: <em>этак, потом, затем, тогда, теперь, там, здесь, туда, тут, сюда, оттуда, отсюда, потому, оттого, настолько</em>',
+        'Вопросительно-относительные: <em>как, когда, где, куда, откуда, почему, отчего, зачем, насколько, сколько</em>'
+      ]},
+      { heading: 'Местоимения:', type: 'rules', items: [
+        '<strong>Личные</strong>: он, она, оно, они, я, мы, ты, вы',
+        '<strong>Притяжательные</strong>: мой, твой, свой, наш, ваш, его, её, их',
+        '<strong>Указательные</strong>: этот, тот, такой, таков, столько',
+        '<strong>Возвратное</strong>: себя',
+        '<strong>Определительные</strong>: весь, всякий, каждый, сам, самый, любой, иной, другой',
+        '<strong>Отрицательные</strong>: никто, ничто, никакой, никого, ничего, нисколько',
+        '<strong>Неопределённые</strong>: кто-то, что-нибудь, какой-либо, кое-кто, некто, нечто, некоторый'
+      ]},
+      { heading: 'Союзы:', type: 'rules', items: [
+        '<strong>Сочинительные</strong>: и, да, тоже, также, но, однако, зато, или, либо',
+        '<strong>Двойные</strong>: как...так и; не только...но и; не столько...сколько; если не...то; хотя и...но',
+        '<strong>Подчинительные</strong>: потому что, так как, чтобы, если, хотя, несмотря на то что, когда, пока'
+      ]},
+      { heading: 'Частицы:', type: 'rules', items: [
+        '<strong>Выделит.-огранич.</strong>: только, лишь, единственно, исключительно, почти',
+        '<strong>Уточняющие</strong>: именно, как раз, точно',
+        '<strong>Усилительные</strong>: ведь, даже, всё-таки, же, ни',
+        '<strong>Указательные</strong>: вот, вон, это',
+        '<strong>Вопросительные</strong>: разве, неужели, ли'
+      ]},
+      { heading: 'Как решать:', type: 'note', items: [
+        '1) Прочитай 2-3 предложения до пропуска и после. 2) Определи логическую связь (причина? противопоставление? пояснение? уточнение?). 3) Подбери слово нужной части речи с этим значением.'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 1 — 2 практики ===== */
+  { type: 'input', tag: 'Часть речи и связь', task: 'Задание 1',
+    text: 'Самостоятельно подбери <strong>подчинительный уступительный союз</strong>, который должен стоять на месте пропуска в последнем предложении текста.',
+    passage: TEXT_LIZA,
+    instruction: 'Найди в последнем предложении пропуск &lt;...&gt; и подбери подходящий уступительный союз.',
+    correct: ['хотя', 'несмотря на то что', 'хотяи'],
+    explanation: 'Уступительный союз показывает противоречие: «доктор Лиза будет казаться "не от мира сего", ХОТЯ её деяния — норма для человека». Это противопоставление субъективного восприятия и реальности.' },
+
+  { type: 'input', tag: 'Часть речи и связь', task: 'Задание 1',
+    text: 'Самостоятельно подбери <strong>указательное наречие</strong>, которое должно стоять на месте пропуска в последнем предложении.',
+    passage: 'Многие современные открытия в области медицины основаны на сочетании биологии и информатики. Учёные обрабатывают огромные массивы данных, чтобы найти закономерности в работе клеток. &lt;...&gt; уже сегодня врачи могут прогнозировать развитие болезни на ранних стадиях.',
+    instruction: 'Какое указательное наречие подойдёт по смыслу? Подсказка: между предложениями отношения причина → следствие.',
+    correct: ['поэтому'],
+    explanation: 'Подходит указательное наречие «поэтому» — оно вводит следствие из сказанного выше (сочетание биологии и информатики → возможность прогнозировать болезни).' },
+
+  /* ===== ТЕОРИЯ: Задание 2 (лексическое значение) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 2',
+    title: 'Лексическое значение слова',
+    sub: 'Дано слово из текста и несколько словарных значений. Нужно выбрать те, где значение соответствует смыслу в тексте.',
+    sections: [
+      { heading: 'Алгоритм:', type: 'rules', items: [
+        '1) Найди слово в тексте и прочитай предложение, где оно стоит',
+        '2) К каждому варианту значения подставь это слово в его контекст',
+        '3) Если смысл сохраняется и не искажается — значение подходит',
+        '4) Запиши номера всех подходящих вариантов'
+      ]},
+      { heading: 'Что важно:', type: 'note', items: [
+        'Обращай внимание не только на основное значение, но и на примеры в скобках и пометы (устар., разг., перен. и т.д.)'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 2 — 2 практики ===== */
+  { type: 'multi', tag: 'Лексика', task: 'Задание 2',
+    text: 'В тексте выделены 5 слов. Укажи варианты ответов, в которых лексическое значение слова соответствует его значению в данном тексте.',
+    passage: TEXT_LIZA,
+    instruction: '1) <strong>ПРИЗРЕНИЕ</strong> (устар.) — попечение, забота. 2) <strong>ЖИЗНЬ</strong> — физиологическое состояние живого организма. 3) <strong>СИЛА</strong> — способность выдерживать большие нагрузки. 4) <strong>СОДЕРЖАНИЕ</strong> — то, что составляет сущность чего-л. 5) <strong>НОРМА</strong> — установленная мера, средняя величина.',
+    options: [
+      'ПРИЗРЕНИЕ — попечение, забота',
+      'ЖИЗНЬ — физиологическое состояние живого организма',
+      'СИЛА — способность выдерживать большие нагрузки',
+      'СОДЕРЖАНИЕ — сущность чего-либо',
+      'НОРМА — установленная мера, средняя величина'
+    ],
+    correct: [0, 1, 2, 3],
+    explanation: '1) призрение в значении «попечение» — соответствует (домá призрения = домá попечения о бедных). 2) жизнь как состояние живого организма — да. 3) сила как способность выдерживать нагрузки — да. 4) содержание как сущность — да. 5) НЕ подходит: в тексте «норма» = пример, образец человеческого поведения, а не установленная мера.' },
+
+  { type: 'multi', tag: 'Лексика', task: 'Задание 2',
+    text: 'Какие значения слова <strong>ГЛАВА</strong> подходят к фразе из текста: «Ты, брат, глава семьи теперь, опора…»?',
+    instruction: 'Из контекста: отец говорит сыну при расставании, что тот теперь главный в семье. Выбери все значения, которые сюда подходят.',
+    options: [
+      'Часть тела человека или животного, в которой находится мозг (то же, что голова)',
+      'Руководитель, начальник, старший по положению',
+      'Раздел в книге или статье',
+      'Купол церкви',
+      'Самый главный человек в коллективе, в семье'
+    ],
+    correct: [1, 4],
+    explanation: '2) Руководитель, начальник — подходит. 5) Главный в коллективе/семье — точно подходит. 1) голова — переносное значение «глава» как «голова» здесь не подходит. 3) раздел книги, 4) купол — не подходят.' },
+
+  /* ===== ТЕОРИЯ: Задание 3 (стили речи) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 3',
+    title: 'Функциональные стили речи',
+    sub: 'Нужно выбрать верные характеристики текста — стиль, цели, средства.',
+    sections: [
+      { heading: 'Функциональные стили:', type: 'rules', items: [
+        '<strong>Разговорный</strong>: бытовое общение, неофициальная обстановка, простые предложения, диалог, лексика с пометой «разг.»',
+        '<strong>Научный</strong>: монография, статья, учебник; термины, абстрактная лексика, сложные предложения, объективность',
+        '<strong>Официально-деловой</strong>: законы, протоколы, заявления; точность, штампы, нет эмоций',
+        '<strong>Публицистический</strong>: пресса, выступления; общественно-политические темы, оценочная лексика, риторические вопросы, обращения, фразеологизмы',
+        '<strong>Художественный</strong>: проза, поэзия; образная лексика, изобразительно-выразительные средства, многоплановость'
+      ]},
+      { heading: 'Что проверять:', type: 'rules', items: [
+        'Стиль текста (главный признак — цель и сфера)',
+        'Тип речи (описание / повествование / рассуждение)',
+        'Конкретные изобразительно-выразительные средства',
+        'Синтаксические особенности (есть ли сложные предложения, обособленные члены, вводные)'
+      ]},
+      { heading: 'Внимание!', type: 'note', items: [
+        'Художественный и публицистический стили часто близки. Главное различие: художественный — эстетическое воздействие, публицистический — воздействие на убеждения, призыв к действию, разговор о социально значимом.'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 3 — 2 практики ===== */
+  { type: 'multi', tag: 'Стили', task: 'Задание 3',
+    text: 'Укажи варианты ответов, в которых даны <strong>верные</strong> характеристики фрагмента текста.',
+    passage: TEXT_LIZA,
+    instruction: 'Ниже даны пять утверждений. Выбери все верные.',
+    options: [
+      'Мнение, высказанное в последнем предложении первого абзаца, подтверждается примерами во втором абзаце.',
+      'Авторское отношение к Лизе Глинке выражается с помощью библейского фразеологизма (не от мира сего), эпитетов («святая»), противопоставления, книжной лексики (деяния), синонимов (поддержку – помощь).',
+      'Текст относится к официально-деловому стилю, что подтверждается сухостью изложения, отсутствием изобразительно-выразительных средств.',
+      'Чтобы сделать текст понятным широкому кругу читателей, автор избегает сложных предложений, обособленных членов, вводных конструкций.',
+      'Последнее предложение текста подводит итог авторским размышлениям.'
+    ],
+    correct: [0, 1, 4],
+    explanation: '1, 2, 5 — верно. 3 — НЕВЕРНО: текст публицистический, а не официально-деловой, есть много выразительных средств. 4 — НЕВЕРНО: в тексте много сложных предложений, обособленных членов, вводных конструкций.' },
+
+  { type: 'multi', tag: 'Стили', task: 'Задание 3',
+    text: 'Какие из утверждений верны для художественного текста?',
+    instruction: 'Выбери все характеристики, типичные для художественного стиля.',
+    options: [
+      'Главная цель — эмоционально-эстетическое воздействие на читателя',
+      'Использует термины и абстрактную лексику для объективного изложения',
+      'Свободно использует элементы других стилей (разговорный, диалектный)',
+      'Содержит штампы, устойчивые сочетания (принять решение, считать недействительным)',
+      'Богат изобразительно-выразительными средствами'
+    ],
+    correct: [0, 2, 4],
+    explanation: '1) Эстетическое воздействие — да, главная цель. 3) Свободно использует элементы других стилей — да. 5) Богат изобр.-выр. средствами — да. 2) — это научный стиль. 4) — это официально-деловой.' },
+
+  /* ===== ТЕОРИЯ: Задание 22 (средства выразительности) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 22',
+    title: 'Изобразительно-выразительные средства',
+    sub: 'Нужно подобрать к 5 примерам соответствующие средства из списка.',
+    sections: [
+      { heading: 'Тропы (лексические средства):', type: 'rules', items: [
+        '<strong>Эпитет</strong> — образное определение: <em>золотая листва</em>',
+        '<strong>Метафора</strong> — перенос по сходству: <em>дела шли в гору</em>',
+        '<strong>Метонимия</strong> — перенос по смежности: <em>знаю всего Есенина</em>',
+        '<strong>Сравнение</strong> — сопоставление (с «как», «словно», «будто», твор. п.): <em>сильнее кошки зверя нет</em>',
+        '<strong>Олицетворение</strong> — приписывание неживому свойств живого: <em>котелок сердится</em>',
+        '<strong>Гипербола</strong> — преувеличение: <em>сосна до звезды достаёт</em>',
+        '<strong>Литота</strong> — преуменьшение: <em>мальчик с пальчик</em>',
+        '<strong>Перифраз</strong> — описательный оборот: <em>царь зверей</em> (вместо «лев»)'
+      ]},
+      { heading: 'Фонетические средства:', type: 'rules', items: [
+        '<strong>Аллитерация</strong> — повторение согласных: <em>чуть слышно, бесшумно, шуршат камыши</em>',
+        '<strong>Ассонанс</strong> — повторение гласных: <em>буря на море и думы, много мучительных дум</em>',
+        '⚠ Аллитерация и ассонанс ВСЕГДА маркируются в тексте задания.'
+      ]},
+      { heading: 'Синтаксические средства и приёмы:', type: 'rules', items: [
+        '<strong>Анафора</strong> — повтор в НАЧАЛЕ: <em>Люблю зимы… Люблю воинственную живость…</em>',
+        '<strong>Эпифора</strong> — повтор в КОНЦЕ строк/предложений',
+        '<strong>Антитеза</strong> — противопоставление: <em>Ты и могучая, ты и бессильная…</em>',
+        '<strong>Градация</strong> — нарастание/ослабление: <em>не жалею, не зову, не плачу</em>',
+        '<strong>Инверсия</strong> — обратный порядок: <em>В большую уборную… заглядывали любопытные</em>',
+        '<strong>Парцелляция</strong> — расчленение предложения: <em>Был разбит полк. Наш. В бою неравном.</em>',
+        '<strong>Лексический повтор</strong> — повторение слова',
+        '<strong>Синтаксический параллелизм</strong> — одинаковая структура: <em>В синем небе звёзды блещут, В синем море волны хлещут</em>',
+        '<strong>Многосоюзие</strong> — повтор союза: <em>и сверкать, и обещать, и манить</em>',
+        '<strong>Бессоюзие</strong> — пропуск союзов: <em>Швед, русский — колет, рубит, режет</em>',
+        '<strong>Риторический вопрос</strong>, <strong>риторическое восклицание</strong>, <strong>риторическое обращение</strong>',
+        '<strong>Вопросно-ответная форма</strong> изложения'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 22 — 3 практики (сопоставление) ===== */
+  { type: 'match5', tag: 'Выразительность', task: 'Задание 22',
+    text: 'Установи соответствие между предложениями и средствами выразительности.',
+    items: [
+      ['А', 'Перед глазами ходил океан, и колыхался, и гремел, и сверкал, и угасал, и светился, и уходил куда-то в бесконечность. (В.Г. Короленко)'],
+      ['Б', 'Значит – кто-то хочет, чтобы они были? Значит – кто-то называет эти плево́чки жемчужиной? (В. Маяковский)'],
+      ['В', 'Передо мною стояла красавица, и я понял это с первого взгляда, как понимаю молнию. (А.П. Чехов)'],
+      ['Г', 'Россию поднял на дыбы. (А.С. Пушкин)'],
+      ['Д', 'Шины машин по брусчатке шуршат. (С.В. Михалков)']
+    ],
+    options: ['1) эпифора','2) сравнение','3) анафора','4) эпитет','5) метафора','6) парцелляция','7) аллитерация','8) литота','9) многосоюзие'],
+    correct: [9, 3, 2, 5, 7],
+    explanation: 'А — многосоюзие (повтор союза «и» 7 раз). Б — анафора (повтор «Значит – кто-то» в начале). В — сравнение (как понимаю молнию). Г — метафора (поднял на дыбы). Д — аллитерация (повтор «ш»).' },
+
+  { type: 'match5', tag: 'Выразительность', task: 'Задание 22',
+    text: 'Установи соответствие между предложениями и средствами выразительности.',
+    items: [
+      ['А', 'Давай какое-то время... Долгое. Совсем не будем общаться. Никак и нисколько. (Е.В. Гришковец)'],
+      ['Б', 'На Галла стал ногой Суворов, И горы треснули под ним. (Г.Р. Державин)'],
+      ['В', 'Сегодня у берега нашего бросил свой якорь досель неизвестный корабль. (Н.С. Гумилёв)'],
+      ['Г', 'Светлый и ясный, как дитя, он идёт через жизнь и не хочет знать никакого трагизма. (В.В. Вересаев)'],
+      ['Д', 'Мне хотелось путешествовать не официально, не приехать и «осматривать», а жить и смотреть на всё. (И.А. Гончаров)']
+    ],
+    options: ['1) метонимия','2) гипербола','3) лексический повтор','4) антитеза','5) градация','6) парцелляция','7) эпифора','8) инверсия','9) сравнение'],
+    correct: [6, 2, 8, 9, 4],
+    explanation: 'А — парцелляция (расчленение одной фразы на части). Б — гипербола (горы треснули). В — инверсия (обратный порядок: «у берега нашего» вместо «у нашего берега»). Г — сравнение (как дитя). Д — антитеза («не официально… а жить и смотреть»).' },
+
+  { type: 'match5', tag: 'Выразительность', task: 'Задание 22',
+    text: 'Установи соответствие между предложениями и средствами выразительности.',
+    items: [
+      ['А', 'Для этого понадобились удача, кадры и ещё раз удача. Для этого понадобились упорство, безжалостный, рисковый расчёт Чинкова. (О.М. Куваев)'],
+      ['Б', 'И дольше века длится день, И не кончается объятье. (Б.Л. Пастернак)'],
+      ['В', 'Над окошком месяц. Под окошком ветер. (С.А. Есенин)'],
+      ['Г', 'Из дома позвонили... Из гаража, ребята. (Е.В. Гришковец)'],
+      ['Д', 'Открой сомкнуты негой взоры. (А.С. Пушкин)']
+    ],
+    options: ['1) анафора','2) метонимия','3) антитеза','4) синтаксический параллелизм','5) гипербола','6) аллитерация','7) ассонанс','8) эпифора','9) парцелляция'],
+    correct: [0, 4, 3, 8, 6],
+    explanation: 'А — анафора (повтор «Для этого понадобились»). Б — гипербола (день длится дольше века). В — синтаксический параллелизм («Над окошком ... Под окошком ...»). Г — парцелляция (отрыв уточнения в отдельное предложение). Д — аллитерация (повтор согласных).' },
+
+  /* ===== ТЕОРИЯ: Задание 23 (содержание текста) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 23',
+    title: 'Соответствие содержанию текста',
+    sub: 'Дано 5 утверждений о тексте. Нужно выбрать те, которые соответствуют его содержанию.',
+    sections: [
+      { heading: 'Что проверять:', type: 'rules', items: [
+        '<strong>Факты</strong>: даты, цифры, события, имена, профессии — проверяй по тексту',
+        '<strong>Действия героев</strong>: что именно делал, не путать одного с другим',
+        '<strong>Причинно-следственные связи</strong>: даже если они не выражены прямо словами «потому что», важно понимать логику событий',
+        '<strong>Целостность восприятия</strong>: текст — это система, всё значимо'
+      ]},
+      { heading: 'Типичные ловушки:', type: 'rules', items: [
+        'Неверный <strong>срок</strong> (два месяца вместо двух лет)',
+        'Неверное <strong>название</strong> (танковый полк, а не пехотный)',
+        '<strong>Смешение героев</strong>: один сделал что-то — приписывают другому',
+        '<strong>Чрезмерное обобщение</strong>: то, что относится к одной ситуации, расширяют на весь текст'
+      ]},
+      { heading: 'Совет:', type: 'note', items: [
+        'Перед каждым утверждением спроси: «Где конкретно в тексте это написано?» Если не можешь найти — скорее всего, утверждение неверно.'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 23 — 2 практики ===== */
+  { type: 'multi', tag: 'Содержание', task: 'Задание 23',
+    text: 'Какие из высказываний соответствуют содержанию текста?',
+    passage: TEXT_VADIM,
+    instruction: 'Прочитай текст и выбери все верные утверждения.',
+    options: [
+      'Отец Вадима Белова, учитель и директор школы, погиб на фронте в 1941 году.',
+      'Вадим просился на фронт, но ему отказали и отправили в пожарную команду, где Вадим отслужил более двух лет.',
+      'Думая о словах отца, Вадим размышлял, с чего ему нужно начать новую жизнь.',
+      'Пехотный полк, в котором служил Вадим, при взятии и освобождении городов проходил маршем по их главным улицам.',
+      'Вадим Белов участвовал в боевых действиях по освобождению Европы и Дальнего Востока.'
+    ],
+    correct: [0, 2, 4],
+    explanation: '1, 3, 5 — верно (отец директор школы, погиб в 1941; Вадим размышлял о новой жизни; участвовал в боях в Европе и на Дальнем Востоке). 2 — неверно: в пожарной команде Вадим трудился ДВА МЕСЯЦА, а не два года. 4 — неверно: полк был ТАНКОВЫЙ, а не пехотный.' },
+
+  { type: 'multi', tag: 'Содержание', task: 'Задание 23',
+    text: 'Какие утверждения соответствуют содержанию текста о Лизе Глинке?',
+    passage: TEXT_LIZA,
+    instruction: 'Прочитай текст и выбери все верные утверждения.',
+    options: [
+      'Лиза Глинка — американский врач-реаниматолог.',
+      'Первый хоспис в Киеве она основала в 1999 году.',
+      'Благотворительный фонд «Справедливая помощь» был создан в Москве в 2007 году.',
+      'Доктор Гааз — это другой русский доктор, устроитель домов призрения.',
+      'Сама Лиза называла себя святой, как доктор Гааз.'
+    ],
+    correct: [0, 1, 2, 3],
+    explanation: '1, 2, 3, 4 — верно (точные факты из текста). 5 — НЕВЕРНО: Лиза, наоборот, возразила: «Доктор Гааз — святой, а я обыкновенная женщина».' },
+
+  /* ===== ТЕОРИЯ: Задание 24 (типы речи) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 24',
+    title: 'Функционально-смысловые типы речи',
+    sub: 'Описание, повествование, рассуждение — и связи между предложениями.',
+    sections: [
+      { heading: 'Три типа речи:', type: 'rules', items: [
+        '<strong>Описание</strong>: статичная картина (что? какой?). Можно сделать фотографию. <em>«Глаза у отца были тёмно-синие…»</em>',
+        '<strong>Повествование</strong>: действия во времени (что произошло? что сделал?). Можно снять видео. <em>«Вадим пошёл в военкомат…»</em>',
+        '<strong>Рассуждение</strong>: тезис → доказательства → вывод. Часто есть слова «потому что», «следовательно», «итак». <em>«Я думаю, что..., потому что...»</em>'
+      ]},
+      { heading: 'Различение формулировок:', type: 'rules', items: [
+        '«ПРЕДСТАВЛЕНО» — это ведущий тип речи во фрагменте',
+        '«СОДЕРЖИТСЯ» — этот тип есть, но не обязательно ведущий'
+      ]},
+      { heading: 'Связи между предложениями:', type: 'rules', items: [
+        'Предложение может ПОЯСНЯТЬ, ДОПОЛНЯТЬ, ПРОТИВОПОСТАВЛЯТЬ предыдущее',
+        'Часто в задании просят: какое предложение поясняет / противопоставляет / является следствием другого'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 24 — 2 практики ===== */
+  { type: 'multi', tag: 'Типы речи', task: 'Задание 24',
+    text: 'Какие из перечисленных утверждений являются <strong>верными</strong>?',
+    passage: TEXT_VADIM,
+    instruction: 'Выбери все верные утверждения о фрагментах текста.',
+    options: [
+      'В предложениях 1, 2 содержится описание.',
+      'В предложении 11 содержится описание действий.',
+      'В предложениях 20, 21 представлено рассуждение.',
+      'Предложение 37 поясняет содержание предложения 36.',
+      'В предложениях 45–47 представлено повествование.'
+    ],
+    correct: [0, 1, 3],
+    explanation: '1) Да — описание фотографии отца (статичная картина). 2) Да — описание действий («стояли, говорили, всплакнула»). 3) НЕТ — это повествование (Вадим взял маму под руку, молчал, шёл). 4) Да — 37 поясняет, КОНКРЕТИЗИРУЕТ 36. 5) НЕТ — это рассуждение («научили, показали»).' },
+
+  { type: 'multi', tag: 'Типы речи', task: 'Задание 24',
+    text: 'Прочитай короткие фрагменты и определи, какие утверждения верны.',
+    instruction: 'Фрагмент 1: «За окном тихо падал снег. Белые хлопья кружились в воздухе, оседая на крышах домов.»<br>Фрагмент 2: «Я считаю, что чтение книг развивает воображение. Когда мы читаем, мозг сам строит картинки. Поэтому привычка читать делает людей более творческими.»<br>Фрагмент 3: «Маша открыла дверь, вышла на улицу и побежала к остановке. Через минуту подошёл автобус, и она уехала.»',
+    options: [
+      'Во фрагменте 1 представлено описание.',
+      'Во фрагменте 2 представлено повествование.',
+      'Во фрагменте 2 представлено рассуждение.',
+      'Во фрагменте 3 представлено повествование.',
+      'Во фрагменте 1 представлено повествование.'
+    ],
+    correct: [0, 2, 3],
+    explanation: '1) Описание (статичная картина за окном). 3) Рассуждение (тезис «чтение развивает» + доказательство «мозг строит картинки» + вывод «поэтому...»). 4) Повествование (последовательность действий). 2 и 5 — неверно.' },
+
+  /* ===== ТЕОРИЯ: Задание 25 (антонимы и синонимы) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 25',
+    title: 'Антонимы, синонимы, фразеологизмы',
+    sub: 'Нужно найти в указанном фрагменте слова или выражения определённого типа.',
+    sections: [
+      { heading: 'Что искать:', type: 'rules', items: [
+        '<strong>Антонимы</strong> — слова с противоположным значением (одной части речи): <em>день — ночь, любить — ненавидеть, тёмный — светлый</em>',
+        '<strong>Синонимы</strong> — близкие по значению слова: <em>храбрый — смелый, бежать — мчаться</em>',
+        '<strong>Контекстные антонимы/синонимы</strong> — только в данном тексте (часто имена и характеристики)',
+        '<strong>Фразеологизмы</strong> — устойчивые выражения, см. список ФИПИ-2026'
+      ]},
+      { heading: 'Совет:', type: 'note', items: [
+        'Если в задании НЕ написано «контекстный» — ищи только языковые антонимы/синонимы. Местоимения языковыми антонимами/синонимами НЕ являются.'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 25 — 2 практики ===== */
+  { type: 'input', tag: 'Антонимы', task: 'Задание 25',
+    text: 'Из предложений 31–35 выпиши <strong>антонимы</strong> (антонимическую пару).',
+    passage: '(31) Наступил сентябрь. (32) Вадим должен был бы заканчивать в этом году десятый класс. (33) Но занятий всё не было. (34) Он поступил в молодёжную пожарную команду и два месяца трудился: ночью стоял на дежурстве, тушил зажигалки, ловил ракетчиков, а днём работал вместе со всей командой на дровяном складе. (35) Спать приходилось мало.',
+    instruction: 'Запиши пару без запятой и пробела, или через пробел.',
+    correct: ['ночьюднём', 'днёмночью', 'ночью днём', 'днём ночью', 'ночьюднем', 'днемночью'],
+    explanation: 'Антонимы: <strong>ночью — днём</strong>. В предложении 34: «ночью стоял на дежурстве... днём работал на дровяном складе».' },
+
+  { type: 'input', tag: 'Антонимы', task: 'Задание 25',
+    text: 'Из предложения найди <strong>фразеологизм</strong> и выпиши его.',
+    passage: 'Иван часами сидел над учебниками не покладая рук и в конце концов получил высший балл на экзамене. Преподаватели только разводили руками от удивления.',
+    instruction: 'Запиши фразеологизм без пробелов или с пробелами.',
+    correct: ['не покладая рук', 'непокладаярук'],
+    explanation: 'Фразеологизм: <strong>не покладая рук</strong> — значит усердно, упорно работать без отдыха. Включён в список фразеологизмов ФИПИ-2026.' },
+
+  /* ===== ТЕОРИЯ: Задание 26 (средства связи) ===== */
+  { type: 'theory', tag: 'Теория', task: 'Задание 26',
+    title: 'Средства связи предложений в тексте',
+    sub: 'Нужно найти предложение, связанное с предыдущим определённым средством связи.',
+    sections: [
+      { heading: 'Основные средства связи:', type: 'rules', items: [
+        '<strong>Лексический повтор</strong> — повтор слова в той же форме: <em>«мама — мама»</em>',
+        '<strong>Формы слова</strong> — то же слово в другой форме: <em>«мама — маму»</em>',
+        '<strong>Однокоренные слова</strong>: <em>«читать — чтение»</em>',
+        '<strong>Синонимы / антонимы</strong> (в т.ч. контекстные)',
+        '<strong>Местоимения</strong> (личное, притяжательное, указательное) — заменяют существительное',
+        '<strong>Наречия</strong> (особенно местоименные: там, тогда, поэтому, потом)',
+        '<strong>Числительные</strong>: <em>«мальчиков было трое — второй из них...»</em>',
+        '<strong>Союзы</strong> (сочинительные: и, но, или)',
+        '<strong>Частицы и вводные слова</strong>'
+      ]},
+      { heading: 'Важно:', type: 'note', items: [
+        'Местоимения «он», «она» считаются разными словами. Формы слова «оно» — «ему» — это форма слова. Притяжательное «его» — отдельное местоимение.'
+      ]},
+      { heading: 'НЕ являются средствами связи в задании 26:', type: 'rules', items: [
+        'Видо-временные формы глагола',
+        'Слова одной тематической группы',
+        'Синтаксический параллелизм, анафора, эпифора'
+      ]}
+    ]
+  },
+
+  /* ===== Задание 26 — 2 практики ===== */
+  { type: 'input', tag: 'Связь', task: 'Задание 26',
+    text: 'Среди предложений 3–11 найди такое, которое связано с предыдущим <strong>при помощи личного местоимения и форм слова</strong>. Напиши номер этого предложения.',
+    passage: '(3) Старые знакомые часто говорят матери: − Дима стал очень похож на отца. (4) Вылитый Пётр Андреевич! (5) Вадиму приятно это слышать: ему хочется быть похожим на отца. (6) А Вера Фадеевна, улыбаясь грустно и сдержанно, отвечает: − Да, много общего есть… (7) Отец погиб в начале войны, в декабре сорок первого года. (8) Это была его третья война, хотя профессия у отца была самая мирная − учитель. (9) Последние пятнадцать лет он работал директором школы. (10) И когда отец вместе с другими ополченцами уезжал на фронт − провожать его пришло много учителей. (11) Они стояли вокруг отца шумной, тесной толпой, говорили, перебивая друг друга, тёплые прощальные слова.',
+    instruction: 'Запиши только номер.',
+    correct: ['11'],
+    explanation: 'Предложение 11 связано с предложением 10 двумя средствами: 1) личным местоимением «Они» (заменяет «учителей и школьной молодёжи» из 10), 2) формой слова «отца» (та же форма от «отец», что и в 10).' },
+
+  { type: 'input', tag: 'Связь', task: 'Задание 26',
+    text: 'Найди предложение, которое связано с предыдущим <strong>при помощи указательного наречия</strong>. Напиши его номер.',
+    passage: '(1) Книги — это удивительное изобретение человечества. (2) С их помощью люди передают опыт от поколения к поколению. (3) Поэтому чтение — важнейшая часть нашей культуры. (4) Каждый из нас может найти в библиотеке то, что ему интересно.',
+    instruction: 'Запиши только номер.',
+    correct: ['3'],
+    explanation: 'Предложение 3 связано с предложением 2 указательным наречием «Поэтому» (= по причине того, что сказано выше).' }
+];
+
+/* ============ ИГРА ============ */
+const game = {
+  current: 0,
+  taskStates: {},
+  startTime: 0,
+  userName: embedName || '',
+  maxScore: 17
+};
+
+function getTotalScore(){
+  let s = 0;
+  for(const k in game.taskStates) s += game.taskStates[k].earned || 0;
+  return s;
+}
+function getAnsweredCount(){
+  return Object.keys(game.taskStates).filter(k => game.taskStates[k].answered).length;
+}
+function getUnansweredScored(){
+  return SCORED_INDICES.filter(i => !game.taskStates[i] || !game.taskStates[i].answered);
+}
+function declOfNum(n, titles){
+  const cases = [2, 0, 1, 1, 1, 2];
+  return titles[(n % 100 > 4 && n % 100 < 20) ? 2 : cases[Math.min(n % 10, 5)]];
+}
+
+const SCORED_INDICES = TASKS.map((t, i) => t.type === 'theory' ? -1 : i).filter(i => i >= 0);
+const TOTAL_SCORED = SCORED_INDICES.length;
+
+function currentScoredIndex(){
+  const pos = SCORED_INDICES.indexOf(game.current);
+  if(pos >= 0) return pos + 1;
+  for(let i = game.current; i < TASKS.length; i++){
+    const p = SCORED_INDICES.indexOf(i);
+    if(p >= 0) return p + 1;
+  }
+  return TOTAL_SCORED;
+}
+
+if(isEmbed && embedName){
+  document.getElementById('userName').value = embedName;
+  document.getElementById('screenStart').classList.add('hidden');
+  document.getElementById('progress').classList.remove('hidden');
+  startGame(true);
+}
+
+function startGame(skipName){
+  if(!skipName){
+    const name = document.getElementById('userName').value.trim();
+    if(!name){
+      document.getElementById('userName').focus();
+      document.getElementById('userName').style.borderColor = 'var(--red)';
+      return;
+    }
+    game.userName = name;
+  }
+  game.startTime = Date.now();
+  document.getElementById('screenStart').classList.add('hidden');
+  document.getElementById('progress').classList.remove('hidden');
+  renderTask();
+}
+
+function updateProgress(){
+  const T = TASKS[game.current];
+  const answered = getAnsweredCount();
+  const pct = (answered / TOTAL_SCORED) * 100;
+  let label;
+  if(T && T.type === 'theory') label = '📚 Теория';
+  else label = `Задание ${currentScoredIndex()} из ${TOTAL_SCORED}`;
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressLabel').textContent = label;
+  document.getElementById('progressScore').innerHTML = `⭐ ${getTotalScore()}`;
+}
+
+function renderTask(){
+  if(game.current >= TASKS.length){ tryFinish(); return; }
+  updateProgress();
+  const T = TASKS[game.current];
+  const screen = document.getElementById('screenGame');
+  screen.classList.remove('hidden');
+  screen.style.animation = 'none';
+  void screen.offsetWidth;
+  screen.style.animation = 'rise 0.5s ease both';
+
+  if(T.type === 'theory'){ renderTheory(T); return; }
+
+  const state = game.taskStates[game.current];
+  const isAnswered = state && state.answered;
+
+  let html = `
+    <span class="q-label">${T.tag}</span>
+    <div class="q-task">${T.task}</div>
+    <div class="q-text">${T.text}</div>
+  `;
+  if(T.passage) html += `<div class="text-passage">${T.passage}</div>`;
+  if(T.instruction) html += `<div class="q-instruction">${T.instruction}</div>`;
+
+  if(T.type === 'multi'){
+    html += '<div class="options" id="opts">';
+    T.options.forEach((o, i) => {
+      let cls = 'opt';
+      if(isAnswered){
+        cls += ' disabled';
+        if(T.correct.includes(i)) cls += ' correct';
+        else if(state.userSelection && state.userSelection.includes(i)) cls += ' wrong';
+      }
+      html += `<div class="${cls}" onclick="toggleMulti(${i})" data-idx="${i}">
+        <span class="opt-num">${i + 1}</span><span>${o}</span></div>`;
+    });
+    html += '</div>';
+  }
+  else if(T.type === 'input'){
+    const val = isAnswered ? (state.userAnswer || '') : '';
+    const disabled = isAnswered ? 'disabled' : '';
+    let borderStyle = '';
+    if(isAnswered) borderStyle = state.isCorrect ? 'border-color: #2e7d32;' : 'border-color: var(--red);';
+    html += `<div class="input-row">
+      <input type="text" id="answerInput" placeholder="Твой ответ" autocomplete="off" value="${val}" ${disabled} style="${borderStyle}" onkeypress="if(event.key==='Enter') submitInput()">
+    </div>`;
+  }
+  else if(T.type === 'match5'){
+    // Сопоставление А-Д с вариантами 1-9
+    html += '<div class="options-box"><div class="obox-title">Варианты:</div>';
+    T.options.forEach(o => { html += `<div>${o}</div>`; });
+    html += '</div>';
+    html += '<div class="match-grid">';
+    T.items.forEach((item, i) => {
+      const val = isAnswered ? (state.userMatch ? state.userMatch[i] || '' : '') : '';
+      const dis = isAnswered ? 'disabled' : '';
+      let style = '';
+      if(isAnswered){
+        const isOk = state.userMatch && state.userMatch[i] - 1 === T.correct[i];
+        style = isOk ? 'border-color: #2e7d32; background: #e8f5e9;' : 'border-color: var(--red); background: #ffebee;';
+      }
+      html += `<div class="match-row">
+        <span class="match-letter">${item[0]}</span>
+        <span class="match-text">${item[1]}</span>
+        <select class="match-select" id="match${i}" ${dis} style="${style}">
+          <option value="">—</option>
+          ${T.options.map((o, j) => `<option value="${j + 1}" ${val == (j + 1) ? 'selected' : ''}>${j + 1}</option>`).join('')}
+        </select>
+      </div>`;
+    });
+    html += '</div>';
+  }
+
+  if(isAnswered){
+    const cls = state.isCorrect ? 'ok' : 'no';
+    const label = state.isCorrect ? '💜 Верно! +' + state.earned : '🍂 Не совсем (' + state.earned + '/' + state.max + ')';
+    html += `<div class="feedback ${cls}"><strong>${label}</strong><br>${state.explanation}</div>`;
+  }
+
+  html += buildFooter(T, isAnswered);
+  screen.innerHTML = html;
+  game.currentSelection = [];
+}
+
+function buildFooter(T, isAnswered){
+  let html = `<div class="card-footer" id="footer" style="flex-wrap: wrap;">`;
+  if(game.current > 0) html += `<button class="btn btn-ghost" onclick="prevTask()" style="padding: 10px 18px; font-size: 14px;">← Назад</button>`;
+  else html += `<span></span>`;
+  if(T.type === 'theory'){
+    html += `<button class="btn" onclick="nextTask()">Понятно, дальше →</button>`;
+  } else if(isAnswered){
+    if(isLastTask()) html += `<button class="btn" onclick="tryFinish()">Завершить 💜</button>`;
+    else html += `<button class="btn" onclick="nextTask()">Дальше →</button>`;
+  } else {
+    const skipBtn = isLastTask() ? '' : `<button class="btn btn-ghost" onclick="nextTask()" style="padding: 10px 18px; font-size: 14px;">Пропустить →</button>`;
+    let mainBtn = '';
+    if(T.type === 'multi') mainBtn = `<button class="btn" id="btnSubmit" onclick="submitMulti()" disabled>Ответить</button>`;
+    else if(T.type === 'input') mainBtn = `<button class="btn" id="btnSubmit" onclick="submitInput()">Ответить</button>`;
+    else if(T.type === 'match5') mainBtn = `<button class="btn" id="btnSubmit" onclick="submitMatch5()">Ответить</button>`;
+    html += skipBtn + mainBtn;
+  }
+  html += `</div>`;
+  return html;
+}
+
+function isLastTask(){ return game.current === TASKS.length - 1; }
+function prevTask(){ if(game.current > 0){ game.current--; renderTask(); } }
+
+function tryFinish(){
+  const unanswered = getUnansweredScored();
+  if(unanswered.length === 0){ finishGame(); }
+  else {
+    document.getElementById('screenGame').innerHTML = `
+      <span class="q-label" style="background: #fff3cd; color: #856404;">⚠ Внимание</span>
+      <div class="q-text">Ещё не на все вопросы получены ответы.</div>
+      <div class="q-instruction">У тебя <strong>${unanswered.length}</strong> ${declOfNum(unanswered.length, ['неотвеченный вопрос', 'неотвеченных вопроса', 'неотвеченных вопросов'])}.</div>
+      <div class="card-footer">
+        <button class="btn btn-ghost" onclick="prevTask()" style="padding: 10px 18px; font-size: 14px;">← Назад</button>
+        <button class="btn" onclick="jumpToFirstUnanswered()">Перейти к неотвеченным →</button>
+      </div>`;
+  }
+}
+function jumpToFirstUnanswered(){
+  const unanswered = getUnansweredScored();
+  if(unanswered.length > 0){ game.current = unanswered[0]; renderTask(); }
+}
+
+function renderTheory(T){
+  const screen = document.getElementById('screenGame');
+  let html = `
+    <span class="q-label theory">${T.tag}</span>
+    <div class="q-task">${T.task}</div>
+    <div class="theory-title">${T.title}</div>
+    <div class="theory-sub">${T.sub}</div>`;
+  T.sections.forEach(sec => {
+    html += `<div class="theory-section"><div class="theory-heading">${sec.heading}</div>`;
+    if(sec.type === 'words'){
+      html += '<div class="theory-list">';
+      sec.items.forEach(w => { html += `<span class="theory-word">${w}</span>`; });
+      html += '</div>';
+    } else if(sec.type === 'rules'){
+      sec.items.forEach(r => { html += `<div class="theory-rule">${r}</div>`; });
+    } else if(sec.type === 'note'){
+      sec.items.forEach(n => { html += `<div class="theory-note">${n}</div>`; });
+    }
+    html += '</div>';
+  });
+  html += buildFooter(T, true);
+  screen.innerHTML = html;
+}
+
+function toggleMulti(i){
+  if(game.taskStates[game.current] && game.taskStates[game.current].answered) return;
+  const opt = document.querySelector(`#opts .opt[data-idx="${i}"]`);
+  if(!opt) return;
+  const pos = game.currentSelection.indexOf(i);
+  if(pos >= 0){ game.currentSelection.splice(pos, 1); opt.classList.remove('selected'); }
+  else { game.currentSelection.push(i); opt.classList.add('selected'); }
+  const btn = document.getElementById('btnSubmit');
+  if(btn) btn.disabled = game.currentSelection.length === 0;
+}
+
+function saveAnswer(T, data){
+  game.taskStates[game.current] = Object.assign({
+    answered: true, task_id: game.current + 1, task_type: T.task, tag: T.tag
+  }, data);
+}
+
+function submitMulti(){
+  const T = TASKS[game.current];
+  const correct = T.correct.slice().sort();
+  const given = game.currentSelection.slice().sort();
+  const isCorrect = correct.length === given.length && correct.every((v, i) => v === given[i]);
+  saveAnswer(T, {
+    userSelection: given,
+    userAnswer: given.map(i => (i + 1)).join(',') || '—',
+    earned: isCorrect ? 1 : 0, max: 1, isCorrect,
+    correctStr: T.correct.map(i => (i + 1)).join(','),
+    explanation: T.explanation
+  });
+  renderTask();
+}
+
+function submitInput(){
+  const T = TASKS[game.current];
+  const val = document.getElementById('answerInput').value.trim().toLowerCase().replace(/ё/g, 'е').replace(/[\s,]/g, '');
+  const correctList = T.correct.map(c => c.toLowerCase().replace(/ё/g, 'е').replace(/[\s,]/g, ''));
+  const isCorrect = correctList.includes(val);
+  saveAnswer(T, {
+    userAnswer: document.getElementById('answerInput').value.trim() || '—',
+    earned: isCorrect ? 1 : 0, max: 1, isCorrect,
+    correctStr: T.correct[0],
+    explanation: `<strong>Правильный ответ:</strong> ${T.correct[0]}. ${T.explanation}`
+  });
+  renderTask();
+}
+
+function submitMatch5(){
+  const T = TASKS[game.current];
+  const given = T.items.map((_, i) => parseInt(document.getElementById('match' + i).value) || 0);
+  // Сравниваем: given[i] (1-based) с T.correct[i] (0-based) + 1
+  let scored = 0;
+  given.forEach((g, i) => { if(g - 1 === T.correct[i]) scored++; });
+  const isFullyCorrect = scored === T.correct.length;
+  saveAnswer(T, {
+    userMatch: given,
+    userAnswer: given.join(''),
+    earned: isFullyCorrect ? 1 : 0, max: 1, isCorrect: isFullyCorrect,
+    correctStr: T.correct.map(c => c + 1).join(''),
+    explanation: T.explanation
+  });
+  renderTask();
+}
+
+function nextTask(){
+  if(game.current < TASKS.length - 1){ game.current++; renderTask(); }
+  else tryFinish();
+}
+
+function finishGame(){
+  const elapsed = Math.round((Date.now() - game.startTime) / 1000);
+  document.getElementById('screenGame').classList.add('hidden');
+  document.getElementById('progress').classList.add('hidden');
+
+  game.wrongTasks = [];
+  for(const k in game.taskStates){
+    const s = game.taskStates[k];
+    if(s.answered && !s.isCorrect){
+      game.wrongTasks.push({ task_id: s.task_id, task_type: s.task_type, tag: s.tag, correct: s.correctStr, user: s.userAnswer });
+    }
+  }
+  game.totalScore = getTotalScore();
+
+  const screen = document.getElementById('screenFinal');
+  screen.classList.remove('hidden');
+  const pct = Math.round((game.totalScore / game.maxScore) * 100);
+  let grade, emoji, msg, gradeClass;
+  if(pct >= 90){ grade = 'Отлично!'; emoji = '💜🪻💜'; msg = 'Работа с текстом — твоя сильная сторона!'; gradeClass = 'grade-5'; }
+  else if(pct >= 75){ grade = 'Хорошо'; emoji = '🪻💐🪻'; msg = 'Уверенный результат. Несколько мест стоит повторить.'; gradeClass = 'grade-4'; }
+  else if(pct >= 50){ grade = 'Можно лучше'; emoji = '🌿🌱'; msg = 'Есть пробелы. Разбери ошибки и пройди ещё раз.'; gradeClass = 'grade-3'; }
+  else { grade = 'Нужно тренироваться'; emoji = '🌱'; msg = 'Не расстраивайся — повтори правила и пройди тренажёр ещё раз.'; gradeClass = 'grade-2'; }
+
+  const mm = Math.floor(elapsed / 60), ss = elapsed % 60;
+  let html = `
+    <span class="final-emoji">${emoji}</span>
+    <div style="font-size: 17px; color: var(--text-soft);">${game.userName}, твой результат:</div>
+    <div class="final-score">${game.totalScore}<span class="final-max"> / ${game.maxScore}</span></div>
+    <div class="final-grade ${gradeClass}">${grade} (${pct}%)</div>
+    <div class="final-msg">${msg}<br><small>⏱ Время: ${mm} мин ${ss < 10 ? '0' + ss : ss} с</small></div>`;
+
+  if(game.wrongTasks.length > 0){
+    html += '<div class="errors-section"><div class="errors-title">📝 Разбор ошибок (' + game.wrongTasks.length + '):</div>';
+    game.wrongTasks.forEach(w => {
+      html += `<div class="error-item">
+        <div class="label">${w.tag} · ${w.task_type}</div>
+        <div class="your">Твой ответ: ${w.user || '—'}</div>
+        <div class="right">Правильно: ${w.correct}</div>
+      </div>`;
+    });
+    html += '</div>';
+  } else {
+    html += '<div class="errors-section" style="background: #e8f5e9; text-align: center;"><div class="errors-title" style="color: #2e7d32;">💜 Ни одной ошибки!</div></div>';
+  }
+
+  if(isEmbed){
+    html += `<div style="background: var(--lavender-light); padding: 14px; border-radius: 14px; color: var(--lavender-text); font-size: 14px; margin-top: 18px;">✓ Результат сохранён на платформе ЗебРус.</div>
+      <div class="final-actions">
+        <button class="btn" onclick="closeEmbed()">Закрыть</button>
+        <button class="btn btn-ghost" onclick="restartGame()">Пройти ещё раз</button>
+      </div>`;
+  } else {
+    html += `<div class="final-actions">
+      <button class="btn" onclick="downloadScreenshot()">📸 Сохранить результат как картинку</button>
+      <button class="btn btn-ghost" onclick="alert('Покажи скриншот своему преподавателю.')">Что делать дальше?</button>
+      <button class="btn btn-ghost" onclick="restartGame()">Пройти ещё раз</button>
+    </div>`;
+  }
+  screen.innerHTML = html;
+
+  if(isEmbed) sendResultToZebrus(elapsed);
+  else saveHistory(elapsed, pct);
+}
+
+function sendResultToZebrus(timeSeconds){
+  const wrongCompact = game.wrongTasks.map(w => ({ id: w.task_id, type: w.task_type, correct: w.correct, user: w.user }));
+  window.parent.postMessage({
+    type: 'zebrus_game_result',
+    payload: { score: game.totalScore, max_score: game.maxScore, time_seconds: timeSeconds, wrong_tasks: wrongCompact }
+  }, '*');
+}
+function closeEmbed(){ window.parent.postMessage({ type: 'zebrus_game_close' }, '*'); }
+function restartGame(){
+  game.current = 0; game.taskStates = {}; game.totalScore = 0; game.wrongTasks = [];
+  game.startTime = Date.now();
+  document.getElementById('screenFinal').classList.add('hidden');
+  document.getElementById('progress').classList.remove('hidden');
+  renderTask();
+}
+function saveHistory(timeSeconds, pct){
+  try{
+    const h = JSON.parse(localStorage.getItem('intensiv_text_history') || '[]');
+    h.push({ name: game.userName, score: game.totalScore, max_score: game.maxScore, pct, time: timeSeconds, date: new Date().toISOString() });
+    localStorage.setItem('intensiv_text_history', JSON.stringify(h.slice(-50)));
+  } catch(e){}
+}
+
+function downloadScreenshot(){
+  const canvas = document.createElement('canvas');
+  const W = 800, H = 1000;
+  canvas.width = W; canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, '#f8f0ff'); grad.addColorStop(0.5, '#e8d5f2'); grad.addColorStop(1, '#d1b3e0');
+  ctx.fillStyle = grad; ctx.fillRect(0, 0, W, H);
+  // Веточки лаванды
+  for(let i = 0; i < 12; i++){
+    const x = Math.random() * W, y = Math.random() * H;
+    ctx.strokeStyle = '#558b2f'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - 30); ctx.stroke();
+    for(let k = 0; k < 6; k++){
+      ctx.fillStyle = `rgba(156, 39, 176, ${0.4 + Math.random() * 0.3})`;
+      ctx.beginPath();
+      ctx.ellipse(x + (k%2 ? -3 : 3), y - 30 + k * 5, 2.5, 2, 0, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }
+  ctx.fillStyle = 'white';
+  roundRect(ctx, 60, 80, W - 120, H - 160, 28); ctx.fill();
+  ctx.fillStyle = '#4a148c';
+  ctx.font = 'bold 28px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('💜 Работа с текстом', W / 2, 150);
+  ctx.font = '18px sans-serif'; ctx.fillStyle = '#5e3c8e';
+  ctx.fillText('Тренажёр ЕГЭ. Задания 1-3, 22-26', W / 2, 180);
+  ctx.fillStyle = '#311b92'; ctx.font = '22px sans-serif';
+  ctx.fillText(game.userName, W / 2, 240);
+  const pct = Math.round((game.totalScore / game.maxScore) * 100);
+  ctx.fillStyle = '#4a148c'; ctx.font = 'bold 96px sans-serif';
+  ctx.fillText(game.totalScore + ' / ' + game.maxScore, W / 2, 360);
+  ctx.font = 'bold 36px sans-serif';
+  ctx.fillStyle = pct >= 75 ? '#2e7d32' : pct >= 50 ? '#f57f17' : '#c62828';
+  ctx.fillText(pct + '%', W / 2, 410);
+  ctx.fillStyle = '#5e3c8e'; ctx.font = '16px sans-serif';
+  const d = new Date();
+  const dateStr = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+  const elapsed = Math.round((Date.now() - game.startTime) / 1000);
+  const mm = Math.floor(elapsed / 60), ss = elapsed % 60;
+  ctx.fillText(dateStr + ' · ' + mm + ' мин ' + ss + ' с', W / 2, 460);
+  ctx.fillStyle = '#311b92'; ctx.font = 'bold 20px sans-serif'; ctx.textAlign = 'left';
+  if(game.wrongTasks.length > 0){
+    ctx.fillText('Места для повторения:', 100, 530);
+    ctx.font = '15px sans-serif'; ctx.fillStyle = '#5e3c8e';
+    const toShow = game.wrongTasks.slice(0, 8);
+    toShow.forEach((w, i) => { ctx.fillText('• ' + w.tag + ': ' + w.task_type, 100, 565 + i * 28); });
+    if(game.wrongTasks.length > 8) ctx.fillText('...и ещё ' + (game.wrongTasks.length - 8), 100, 565 + 8 * 28);
+  } else {
+    ctx.fillText('💜 Ни одной ошибки!', 100, 530);
+  }
+  ctx.fillStyle = '#4a148c'; ctx.font = 'italic 14px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('Покажи этот скриншот своему преподавателю', W / 2, H - 110);
+  ctx.font = 'bold 12px sans-serif'; ctx.fillStyle = '#bdbdbd';
+  ctx.fillText('zebrus.ru', W / 2, H - 80);
+
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'tekst_' + game.userName.replace(/[^а-яА-Яa-zA-Z0-9]/g, '_') + '.png';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+}
+
+function roundRect(ctx, x, y, w, h, r){
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+</script>
+</body>
+</html>
