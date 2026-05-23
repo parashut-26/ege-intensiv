@@ -24230,8 +24230,9 @@ function makeTask16Field(q){
                         marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }},
       '📌 Расставь запятые и отметь нужные предложения'),
     el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
-      'Сначала рисуй запятые точками (·) между словами — это твой черновик. ' +
-      'Потом нажми ☐ слева у тех предложений, где запятая ровно ОДНА — они пойдут в ответ.'));
+      'Тапай между словами, чтобы поставить запятые (·). Предложение с ровно ОДНОЙ запятой ' +
+      'автоматически попадает в ответ — это видно по ☑ слева и подсказке справа. ' +
+      'Можно дополнительно нажать ☐ вручную, чтобы добавить предложение в ответ и без запятых.'));
 
   const statusEl = el('div', { style:{ fontSize:'12px', color:'var(--ink-2)',
     fontWeight:'700', marginTop:'10px', padding:'8px 10px', background:'#FFF',
@@ -24239,9 +24240,32 @@ function makeTask16Field(q){
 
   const autoFill = STATE.solverAutoFillDigits !== false;
 
+  /* Число «настоящих» запятых в предложении — игнорируем служебный _picked. */
+  const countCommas = (sn) => {
+    const d = data[sn];
+    if(!d) return 0;
+    let c = 0;
+    for(const k of Object.keys(d)){
+      if(k === '_picked') continue;
+      if(d[k]) c++;
+    }
+    return c;
+  };
+
   const updateAnswer = () => {
+    /* Предложение попадает в ответ если:
+       — ровно 1 запятая поставлена (естественный сигнал «здесь однородные»), ИЛИ
+       — ручная отметка ☑ (_picked) — для редких случаев когда задание
+         сформулировано иначе или ученик хочет отметить без запятых.
+       До 23 мая 2026 ответ собирался ТОЛЬКО по ☑, и дети, расставив запятые
+       но не нажав ☑, теряли балл с пустым ответом. */
     const matched = sentences
-      .filter(s => data[s.num] && data[s.num]._picked === true)
+      .filter(s => {
+        const d = data[s.num];
+        if(!d) return false;
+        if(d._picked === true) return true;
+        return countCommas(s.num) === 1;
+      })
       .map(s => s.num)
       .sort((a,b) => a-b);
     const result = matched.join('');
@@ -24274,6 +24298,11 @@ function makeTask16Field(q){
   /* Список предложений — карточки как в тренажёре */
   const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'8px',
     marginTop:'8px' }});
+
+  /* Колбэки refreshCard для всех карточек — чтобы при тапе одной запятой
+     перерисовать ☑/☐ на всех (updateAnswer мог изменить _picked у других). */
+  const cardRefreshers = [];
+  const refreshAll = () => cardRefreshers.forEach(fn => fn());
 
   sentences.forEach(sent => {
     if(!data[sent.num]) data[sent.num] = {};
@@ -24330,6 +24359,10 @@ function makeTask16Field(q){
               if(sentData[wi]) delete sentData[wi];
               else sentData[wi] = true;
               renderSent();
+              /* Авто-синхрон ответа: 1 запятая ↔ ☑, иначе ☐ (если не ручной).
+                 updateAnswer меняет _picked сразу у всех — обновляем все ☑/☐. */
+              updateAnswer();
+              refreshAll();
               saveSolverDraft();
             }
           }, active ? ',' : '·');
@@ -24351,24 +24384,37 @@ function makeTask16Field(q){
       }
     };
 
-    /* Обновление карточки: галка + цвет фона */
+    /* Обновление карточки: галка + цвет фона.
+       ☑ показывается если предложение в ответе — либо ручной _picked, либо
+       авто-логика (ровно 1 запятая). */
     const refreshCard = () => {
-      const picked = sentData._picked === true;
-      toggle.textContent = picked ? '☑' : '☐';
-      toggle.style.color = picked ? 'var(--p-deep)' : 'var(--ink-3)';
-      toggle.style.background = picked ? '#EEF2FF' : '#fff';
-      toggle.style.borderColor = picked ? 'var(--p)' : 'var(--border-2)';
-      card.style.background = picked ? '#EEF2FF' : '#FFF';
-      card.style.borderColor = picked ? 'var(--p)' : 'var(--border-2)';
+      const inAnswer = sentData._picked === true || countCommas(sent.num) === 1;
+      toggle.textContent = inAnswer ? '☑' : '☐';
+      toggle.style.color = inAnswer ? 'var(--p-deep)' : 'var(--ink-3)';
+      toggle.style.background = inAnswer ? '#EEF2FF' : '#fff';
+      toggle.style.borderColor = inAnswer ? 'var(--p)' : 'var(--border-2)';
+      card.style.background = inAnswer ? '#EEF2FF' : '#FFF';
+      card.style.borderColor = inAnswer ? 'var(--p)' : 'var(--border-2)';
     };
     toggle.onclick = () => {
-      sentData._picked = !(sentData._picked === true);
-      if(!sentData._picked) delete sentData._picked;
-      refreshCard();
+      /* Ручная отметка ☑/☐ — игнорируется авто-логикой:
+         _picked=true принудительно добавит предложение в ответ даже без запятых.
+         Снятие ☑ работает только если запятых не ровно 1 (иначе авто всё равно
+         засчитает); показываем подсказку. */
+      const wasManual = sentData._picked === true;
+      if(wasManual){
+        delete sentData._picked;
+      } else {
+        sentData._picked = true;
+      }
+      refreshAll();
       updateAnswer();
+      refreshAll();
+      saveSolverDraft();
     };
     refreshCard();
     renderSent();
+    cardRefreshers.push(refreshCard);
 
     card.append(toggle, right);
     list.append(card);
