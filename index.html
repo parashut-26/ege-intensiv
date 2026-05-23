@@ -14782,12 +14782,49 @@ function modalStudentDetail(){
 
   const close = () => { STATE.studentDetailOpen = null; render(); };
 
+  /* Email — кликабельный для редактирования. Меняем только profiles.email
+     (для отображения в кабинете); auth.users.email не трогаем — ученик
+     продолжает входить по прежнему email/OTP. */
+  const isRealProfile = /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(s.id || '');
+  const emailLabel = el('span', {
+    style:{ cursor: isRealProfile ? 'pointer' : 'default',
+            padding:'2px 6px', borderRadius:'5px',
+            background:'transparent', transition:'background .1s' },
+    title: isRealProfile ? '✏️ Клик — изменить email' : 'Email редактируется только у реальных профилей'
+  }, s.email || '— email не указан —');
+  if(isRealProfile){
+    emailLabel.onmouseover = () => { emailLabel.style.background = '#F3F4F6'; };
+    emailLabel.onmouseout  = () => { emailLabel.style.background = 'transparent'; };
+    emailLabel.onclick = async () => {
+      const cur = s.email && !s.email.endsWith('@invite.zebrus.online') ? s.email : '';
+      const next = prompt('Новый email ученика (пусто = очистить):\n\n' +
+        'Это меняет только отображение в кабинете. Логин ученика (auth) не изменится — ' +
+        'если хочешь чтобы он входил по новому email, потребуется отдельная миграция.',
+        cur);
+      if(next == null) return;   // Cancel
+      const trimmed = next.trim();
+      if(trimmed && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)){
+        showToast('⚠ Не похоже на email — проверь @ и точку');
+        return;
+      }
+      try {
+        await restRequest('PATCH', '/profiles?id=eq.' + s.id,
+          { email: trimmed || null }, { prefer: 'return=minimal' });
+        s.email = trimmed || null;
+        emailLabel.textContent = trimmed || '— email не указан —';
+        showToast('✓ Email сохранён');
+      } catch(e){
+        showToast('⚠ Не удалось: ' + (e && e.message || 'ошибка'));
+      }
+    };
+  }
   const head = el('div', { class:'modal-head' },
     el('div', { style:{ display:'flex', alignItems:'center', gap:'14px' }},
       avatarChip(s.name, s.color, 56, s.avatarUrl),
       el('div', null,
         el('h2', { style:{ marginBottom:'2px' }}, s.name),
-        el('div', { style:{ color:'var(--ink-2)', fontSize:'13px' }}, s.email))),
+        el('div', { style:{ color:'var(--ink-2)', fontSize:'13px' }}, emailLabel,
+          isRealProfile ? el('span', { style:{ marginLeft:'4px', color:'var(--ink-3)', fontSize:'11px' }}, '· клик чтобы изменить') : null))),
     el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
       /* Кнопка «Написать» — открывает чат-панель и стартует ЛС с этим учеником */
       s.id && /^[0-9a-f]{8}-[0-9a-f]{4}/i.test(s.id) ? el('button', {
