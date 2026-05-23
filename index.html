@@ -11413,9 +11413,26 @@ function renderTeacherMarksReadOnly(opts){
    Возвращает DOM-элемент или null если показывать нечего.
    Поддерживает 9-12 (буквы в боксах + чекбоксы), 15 (Н/НН по позициям),
    16 (запятые между словами), 17-20 (цифры по позициям), 13-14 (формы слов). */
-function renderStructuredAnswer(num, q, structured){
+function renderStructuredAnswer(num, q, structured, reference){
   if(!structured) return null;
   const txt = q && q.question_text || '';
+  const ref = reference || null;
+  /* Хелпер: одинаковые ли множества (без учёта порядка) */
+  const arraysEqualSet = (a, b) => {
+    if(!Array.isArray(a) || !Array.isArray(b)) return false;
+    if(a.length !== b.length) return false;
+    const sa = new Set(a), sb = new Set(b);
+    for(const x of sa) if(!sb.has(x)) return false;
+    return true;
+  };
+  /* Цвета сравнения: ученик совпал с эталоном → зелёный, ошибся → красный,
+     пропустил а должно было быть → жёлтый «не выбрано», эталона нет → серый. */
+  const DIFF = {
+    ok:    { bg:'#D1FAE5', fg:'#065F46', border:'#10B981', icon:'✓' },
+    bad:   { bg:'#FEE2E2', fg:'#991B1B', border:'#EF4444', icon:'✗' },
+    miss:  { bg:'#FEF3C7', fg:'#92400E', border:'#F59E0B', icon:'⚠' },
+    plain: { bg:'#F9FAFB', fg:'var(--ink-2)', border:'#E5E7EB', icon:'' }
+  };
 
   /* === №9-12: буквы по рядам + чекбоксы какие ряды отмечены === */
   if(num >= 9 && num <= 12 && (structured.letters || structured.checks9_12)){
@@ -11423,11 +11440,16 @@ function renderStructuredAnswer(num, q, structured){
     if(!sentences.length) return null;
     const letters = structured.letters || {};
     const picks = structured.checks9_12 || {};
+    /* Эталон учителя — буквы и чекбоксы из reference */
+    const refLetters = (ref && ref.letters) || null;
+    const refPicks   = (ref && ref.checks9_12) || null;
+    const hasRef = !!(refLetters || refPicks);
     const wrap = el('div', { style:{ padding:'10px 12px', background:'#F0F9FF',
       border:'1px solid #93C5FD', borderRadius:'10px', marginBottom:'14px' }},
       el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
                           marginBottom:'8px' }},
-        '📋 Что ученик расставил по рядам'));
+        '📋 Что ученик расставил по рядам' +
+        (hasRef ? ' (с подсветкой по твоему эталону)' : '')));
     sentences.forEach(sent => {
       const t = sent.text || '';
       const re = /\.{2,}|_{2,}/g;
@@ -11445,41 +11467,67 @@ function renderStructuredAnswer(num, q, structured){
       }
       const allFilled = vals.length > 0 && vals.every(v => v.length > 0);
       const allSame = allFilled && vals.every(v => v === vals[0]);
+      /* Должен ли быть отмечен этот ряд по эталону? */
+      const refRowChecked = refPicks ? !!refPicks[sent.num] : null;
+      const studRowChecked = !!picks[sent.num];
+      let rowDiff = 'plain';
+      if(hasRef){
+        if(refRowChecked && studRowChecked) rowDiff = 'ok';
+        else if(refRowChecked && !studRowChecked) rowDiff = 'miss';   // пропустил нужный ряд
+        else if(!refRowChecked && studRowChecked) rowDiff = 'bad';    // отметил лишний ряд
+        else rowDiff = 'plain';
+      }
       const row = el('div', { style:{ display:'flex', alignItems:'center', gap:'6px',
         flexWrap:'wrap', padding:'6px 4px', borderTop:'1px dashed #BFDBFE',
         fontSize:'13px', lineHeight:'1.5' }});
-      /* Чекбокс — отмечал ли ученик ряд */
+      /* Чекбокс ряда + статус сравнения */
       row.append(el('span', {
         style:{ display:'inline-flex', alignItems:'center', justifyContent:'center',
                 width:'20px', height:'20px', borderRadius:'4px',
-                background: picks[sent.num] ? '#2563EB' : '#fff',
+                background: studRowChecked ? '#2563EB' : '#fff',
                 border:'2px solid #2563EB', color:'#fff', fontSize:'13px',
                 fontWeight:'700', flexShrink:'0' }
-      }, picks[sent.num] ? '✓' : ''));
+      }, studRowChecked ? '✓' : ''));
       row.append(el('b', { style:{ color:'#1E40AF', flexShrink:'0' }}, sent.num + ')'));
       parts.forEach(p => {
         if(p.type === 'text'){
           row.append(document.createTextNode(p.value));
         } else {
-          const v = (letters[sent.num + '-' + p.idx] || '').trim();
+          const v = (letters[sent.num + '-' + p.idx] || '').trim().toLowerCase();
+          const refV = refLetters ? (refLetters[sent.num + '-' + p.idx] || '').toString().trim().toLowerCase() : null;
+          let cellBorder = v ? '#F59E0B' : '#E5E7EB';
+          let cellBg = v ? '#FFFBEB' : '#F9FAFB';
+          let cellFg = '#92400E';
+          let hint = '';
+          if(hasRef && refV){
+            if(v && v === refV){ cellBorder = DIFF.ok.border; cellBg = DIFF.ok.bg; cellFg = DIFF.ok.fg; }
+            else if(v && v !== refV){ cellBorder = DIFF.bad.border; cellBg = DIFF.bad.bg; cellFg = DIFF.bad.fg; hint = refV; }
+            else if(!v){ cellBorder = DIFF.miss.border; cellBg = DIFF.miss.bg; cellFg = DIFF.miss.fg; hint = refV; }
+          }
           row.append(el('span', {
             style:{ display:'inline-block', minWidth:'28px', padding:'1px 6px',
-                    border:'2px solid ' + (v ? '#F59E0B' : '#E5E7EB'),
-                    borderRadius:'4px', background: v ? '#FFFBEB' : '#F9FAFB',
-                    color:'#92400E', fontWeight:'700', textAlign:'center',
-                    margin:'0 2px', fontSize:'14px' }
-          }, v || '·'));
+                    border:'2px solid ' + cellBorder,
+                    borderRadius:'4px', background: cellBg,
+                    color: cellFg, fontWeight:'700', textAlign:'center',
+                    margin:'0 2px', fontSize:'14px' },
+            title: hint ? ('Эталон: ' + hint.toUpperCase()) : ''
+          }, (v || '·').toUpperCase() + (hint ? ' (→' + hint.toUpperCase() + ')' : '')));
         }
       });
-      /* Статус «одна буква / разные / пусто» */
-      const statusTxt = allSame ? '✓ одна буква: ' + vals[0]
-                      : allFilled ? '⚠ разные буквы'
-                      : gapIdx > 0 ? '— не заполнено'
-                      : '';
+      /* Статус «одна буква / разные / пусто» + сравнение строки */
+      let statusTxt = allSame ? '✓ одна буква: ' + vals[0]
+                    : allFilled ? '⚠ разные буквы'
+                    : gapIdx > 0 ? '— не заполнено'
+                    : '';
+      let statusColor = allSame ? '#065F46' : (allFilled ? '#92400E' : 'var(--ink-3)');
+      if(hasRef){
+        if(rowDiff === 'ok')   { statusTxt += ' · ✓ совпало с эталоном'; statusColor = DIFF.ok.fg; }
+        else if(rowDiff === 'bad'){ statusTxt += ' · ✗ ряд не должен быть отмечен'; statusColor = DIFF.bad.fg; }
+        else if(rowDiff === 'miss'){ statusTxt += ' · ⚠ ряд ДОЛЖЕН быть отмечен'; statusColor = DIFF.miss.fg; }
+      }
       if(statusTxt){
         row.append(el('span', {
-          style:{ fontSize:'11px', color: allSame ? '#065F46' : (allFilled ? '#92400E' : 'var(--ink-3)'),
-                  fontWeight:'600', marginLeft:'auto' }
+          style:{ fontSize:'11px', color: statusColor, fontWeight:'600', marginLeft:'auto' }
         }, statusTxt));
       }
       wrap.append(row);
@@ -11490,24 +11538,40 @@ function renderStructuredAnswer(num, q, structured){
   /* === №15: Н / НН по позициям === */
   if(num === 15 && structured.gaps){
     const g = structured.gaps;
-    const positions = Object.keys(g).map(Number).sort((a,b) => a-b);
+    const refG = (ref && ref.gaps) || null;
+    /* Объединяем позиции ученика и эталона — чтобы показать в т.ч. те,
+       которые ученик пропустил, но в эталоне есть */
+    const positionsSet = new Set(Object.keys(g).map(Number));
+    if(refG) Object.keys(refG).forEach(k => positionsSet.add(Number(k)));
+    const positions = Array.from(positionsSet).sort((a,b) => a-b);
     if(!positions.length) return null;
+    const norm = (v) => (v === true || v === 'НН') ? 'НН' : (v === 'Н' ? 'Н' : null);
     const wrap = el('div', { style:{ padding:'10px 12px', background:'#F0F9FF',
       border:'1px solid #93C5FD', borderRadius:'10px', marginBottom:'14px' }},
       el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
                           marginBottom:'8px' }},
-        '📋 Н или НН в каждой позиции'));
+        '📋 Н или НН в каждой позиции' + (refG ? ' · с эталоном' : '')));
     const grid = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'6px' }});
     positions.forEach(pos => {
-      const v = g[pos];
-      const label = v === 'НН' || v === true ? 'НН' : (v === 'Н' ? 'Н' : '—');
-      const bg = label === 'НН' ? '#86EFAC' : label === 'Н' ? '#BFDBFE' : '#F3F4F6';
-      const col = label === 'НН' ? '#065F46' : label === 'Н' ? '#1E40AF' : '#9CA3AF';
+      const studV = norm(g[pos]);
+      const refV  = refG ? norm(refG[pos]) : null;
+      const label = studV || '—';
+      let bg, col, border, hint = '';
+      if(refV){
+        if(studV === refV){ bg = DIFF.ok.bg; col = DIFF.ok.fg; border = DIFF.ok.border; }
+        else if(studV){ bg = DIFF.bad.bg; col = DIFF.bad.fg; border = DIFF.bad.border; hint = ' (→' + refV + ')'; }
+        else { bg = DIFF.miss.bg; col = DIFF.miss.fg; border = DIFF.miss.border; hint = ' (→' + refV + ')'; }
+      } else {
+        bg = studV === 'НН' ? '#86EFAC' : studV === 'Н' ? '#BFDBFE' : '#F3F4F6';
+        col = studV === 'НН' ? '#065F46' : studV === 'Н' ? '#1E40AF' : '#9CA3AF';
+        border = 'transparent';
+      }
       grid.append(el('span', {
         style:{ display:'inline-flex', alignItems:'center', gap:'4px',
                 padding:'3px 8px', borderRadius:'12px', background:bg, color:col,
+                border:'2px solid ' + border,
                 fontSize:'13px', fontWeight:'700' }
-      }, '(' + pos + ') ' + label));
+      }, '(' + pos + ') ' + label + hint));
     });
     wrap.append(grid);
     return wrap;
@@ -11516,15 +11580,34 @@ function renderStructuredAnswer(num, q, structured){
   /* === №17-20: цифры в выбранных позициях === */
   if(num >= 17 && num <= 20 && structured.gaps){
     const g = structured.gaps;
-    const picked = Object.keys(g).map(Number).filter(n => g[n]).sort((a,b) => a-b);
-    if(!picked.length) return null;
+    const refG = (ref && ref.gaps) || null;
+    const positionsSet = new Set(Object.keys(g).filter(k => g[k]).map(Number));
+    if(refG) Object.keys(refG).filter(k => refG[k]).forEach(k => positionsSet.add(Number(k)));
+    const positions = Array.from(positionsSet).sort((a,b) => a-b);
+    if(!positions.length) return null;
     const wrap = el('div', { style:{ padding:'10px 12px', background:'#F0F9FF',
       border:'1px solid #93C5FD', borderRadius:'10px', marginBottom:'14px' }},
       el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
                           marginBottom:'8px' }},
-        '📋 Позиции, отмеченные учеником'),
-      el('div', { style:{ fontSize:'14px', color:'#1E40AF', fontWeight:'700' }},
-        picked.map(p => '(' + p + ')').join('  ')));
+        '📋 Позиции, отмеченные учеником' + (refG ? ' · с эталоном' : '')));
+    const grid = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'6px' }});
+    positions.forEach(pos => {
+      const studPicked = !!g[pos];
+      const refPicked  = refG ? !!refG[pos] : null;
+      let bg = '#DBEAFE', col = '#1E40AF', border = 'transparent', label = '(' + pos + ')';
+      if(refG){
+        if(refPicked && studPicked){ bg = DIFF.ok.bg; col = DIFF.ok.fg; border = DIFF.ok.border; label += ' ✓'; }
+        else if(!refPicked && studPicked){ bg = DIFF.bad.bg; col = DIFF.bad.fg; border = DIFF.bad.border; label += ' ✗ лишняя'; }
+        else if(refPicked && !studPicked){ bg = DIFF.miss.bg; col = DIFF.miss.fg; border = DIFF.miss.border; label += ' ⚠ пропущена'; }
+      }
+      grid.append(el('span', {
+        style:{ display:'inline-flex', alignItems:'center',
+                padding:'3px 8px', borderRadius:'12px', background:bg, color:col,
+                border:'2px solid ' + border,
+                fontSize:'13px', fontWeight:'700' }
+      }, label));
+    });
+    wrap.append(grid);
     return wrap;
   }
 
@@ -11541,9 +11624,12 @@ function renderStructuredAnswer(num, q, structured){
       el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
                           marginBottom:'8px' }},
         '📋 Где ученик поставил запятые'));
+    const refCh = (ref && ref.checks16) || null;
     sentences.forEach(sent => {
       const gaps = ch[sent.num] || {};
+      const refGaps = refCh ? (refCh[sent.num] || {}) : null;
       const picked = gaps._picked === true;
+      const refPicked = refGaps ? refGaps._picked === true : null;
       const words = sent.text.split(/\s+/).filter(w => w.length);
       const cnt = Object.keys(gaps).filter(k => k !== '_picked' && gaps[k]).length;
       const row = el('div', { style:{ display:'flex', gap:'8px',
@@ -11559,25 +11645,33 @@ function renderStructuredAnswer(num, q, structured){
       const txtBox = el('div', { style:{ flex:1, minWidth:0 }});
       txtBox.append(el('b', { style:{ color:'#1E40AF', marginRight:'4px' }},
         sent.num + ')'));
-      /* Слова с подсветкой запятых от ученика в местах wi (между словами).
-         Если запятая стоит — красный пробел-точка → активный «,». Если нет —
-         показываем точку «·» бледно-серым (для контекста где могла быть). */
+      /* Слова с подсветкой запятых ученика + при наличии эталона —
+         сравнение по каждой позиции wi: совпало/лишняя/пропущена. */
       words.forEach((w, wi) => {
         if(wi > 0){
-          const active = !!gaps[wi];
+          const studActive = !!gaps[wi];
+          const refActive  = refGaps ? !!refGaps[wi] : null;
+          let color = studActive ? '#DC2626' : 'var(--ink-3)';
+          let chSym = studActive ? ',' : '·';
+          let sz = studActive ? '15px' : '11px';
+          let weight = studActive ? '700' : '400';
+          let op = studActive ? 1 : 0.4;
+          if(refGaps){
+            if(refActive && studActive){ color = DIFF.ok.fg; chSym = ','; sz = '15px'; weight = '700'; op = 1; }
+            else if(!refActive && studActive){ color = DIFF.bad.fg; chSym = ',✗'; sz = '14px'; weight = '700'; op = 1; }
+            else if(refActive && !studActive){ color = DIFF.miss.fg; chSym = ',⚠'; sz = '14px'; weight = '700'; op = 1; }
+          }
           txtBox.append(el('span', {
             style:{ display:'inline-block', padding:'0 2px',
-                    color: active ? '#DC2626' : 'var(--ink-3)',
-                    fontWeight: active ? '700' : '400',
-                    fontSize: active ? '15px' : '11px',
-                    opacity: active ? 1 : 0.4 }
-          }, active ? ',' : '·'));
+                    color: color, fontWeight: weight,
+                    fontSize: sz, opacity: op }
+          }, chSym));
           txtBox.append(document.createTextNode(' '));
         }
         txtBox.append(document.createTextNode(w));
         if(wi < words.length - 1) txtBox.append(document.createTextNode(' '));
       });
-      /* Чип-счётчик справа */
+      /* Чип-счётчик справа + сравнение чекбокса */
       const chipBg = cnt === 1 ? '#D1FAE5' : cnt > 1 ? '#FEF3C7' : '#F3F4F6';
       const chipFg = cnt === 1 ? '#065F46' : cnt > 1 ? '#92400E' : '#9CA3AF';
       txtBox.append(el('span', {
@@ -11588,23 +11682,33 @@ function renderStructuredAnswer(num, q, structured){
       }, cnt === 0 ? 'без запятых'
          : cnt === 1 ? '✓ 1 запятая (засчитано)'
          : cnt + ' запятых (нужно ровно 1)'));
+      if(refGaps && refPicked !== null){
+        if(refPicked && picked){
+          txtBox.append(el('span', { style:{ marginLeft:'6px', fontSize:'10px',
+            fontWeight:'700', color:DIFF.ok.fg }}, '· ✓ строка в ответе'));
+        } else if(refPicked && !picked){
+          txtBox.append(el('span', { style:{ marginLeft:'6px', fontSize:'10px',
+            fontWeight:'700', color:DIFF.miss.fg }}, '· ⚠ ДОЛЖНА быть в ответе'));
+        } else if(!refPicked && picked){
+          txtBox.append(el('span', { style:{ marginLeft:'6px', fontSize:'10px',
+            fontWeight:'700', color:DIFF.bad.fg }}, '· ✗ лишняя в ответе'));
+        }
+      }
       row.append(txtBox);
       wrap.append(row);
     });
     return wrap;
   }
 
-  /* === №13/14: слитно/раздельно/через дефис по каждому слову ===
-     В формулировке есть слова (НЕ)ТОРОПЛИВЫ, КАК(БЫ) и т.п. Для каждого
-     ученик выбирает форму. Показываем подсвеченные плашки рядом со
-     словом, плюс целевую форму из формулировки и в каких предложениях
-     все слова получили нужную форму. */
+  /* === №13/14: слитно/раздельно/через дефис по каждому слову === */
   if((num === 13 || num === 14) && structured.words13_14
        && typeof parseTask21Sentences === 'function'
        && typeof parseParensWords === 'function'){
     const sentences = parseTask21Sentences(txt);
     if(sentences.length){
       const picks = structured.words13_14;
+      const refPicks = (ref && ref.words13_14) || null;
+      const hasRef = !!refPicks;
       const FORM = (typeof FORM_COLORS_13_14 !== 'undefined') ? FORM_COLORS_13_14 : {
         s:{bg:'#D1FAE5',fg:'#065F46',label:'слитно'},
         r:{bg:'#FEE2E2',fg:'#991B1B',label:'раздельно'},
@@ -11620,7 +11724,8 @@ function renderStructuredAnswer(num, q, structured){
         el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
                             marginBottom:'8px' }},
           '📋 Что ученик выбрал по словам' +
-          (targetCode ? ' (целевая форма: «' + FORM[targetCode].label + '»)' : '')));
+          (targetCode ? ' (целевая форма: «' + FORM[targetCode].label + '»)' : '') +
+          (hasRef ? ' · с подсветкой по эталону' : '')));
       sentences.forEach(sent => {
         const tokens = parseParensWords(sent.text);
         const wordIdxs = tokens.map((t, i) => t.type === 'word' ? i : -1).filter(i => i >= 0);
@@ -11638,18 +11743,33 @@ function renderStructuredAnswer(num, q, structured){
               ? (t.root + '(' + t.prefix + ')')
               : ('(' + t.prefix + ')' + t.root);
             const code = picks[sent.num + '-' + i];
+            const refCode = refPicks ? refPicks[sent.num + '-' + i] : null;
             const f = code ? FORM[code] : null;
-            if(f){
-              row.append(el('span', {
-                style:{ display:'inline-flex', alignItems:'center', gap:'4px',
-                        padding:'1px 6px', background:f.bg, color:f.fg,
-                        borderRadius:'4px', fontWeight:'700', margin:'0 1px' }
-              }, wordText + ' · ' + f.label));
+            /* Если есть эталон — рисуем диф: совпало/ошибка/пропуск */
+            let style, label;
+            if(hasRef && refCode){
+              if(code && code === refCode){
+                style = { background: DIFF.ok.bg, color: DIFF.ok.fg, border:'2px solid ' + DIFF.ok.border };
+                label = wordText + ' · ✓ ' + FORM[code].label;
+              } else if(code && code !== refCode){
+                style = { background: DIFF.bad.bg, color: DIFF.bad.fg, border:'2px solid ' + DIFF.bad.border };
+                label = wordText + ' · ✗ ' + FORM[code].label + ' (→' + FORM[refCode].label + ')';
+              } else {
+                style = { background: DIFF.miss.bg, color: DIFF.miss.fg, border:'2px solid ' + DIFF.miss.border };
+                label = wordText + ' · ⚠ не выбрано (→' + FORM[refCode].label + ')';
+              }
+            } else if(f){
+              style = { background:f.bg, color:f.fg, border:'1.5px solid transparent' };
+              label = wordText + ' · ' + f.label;
             } else {
-              row.append(el('span', {
-                style:{ color:'var(--ink-3)', fontStyle:'italic', margin:'0 1px' }
-              }, wordText + ' · ?'));
+              style = { color:'var(--ink-3)', fontStyle:'italic', border:'1.5px solid transparent' };
+              label = wordText + ' · ?';
             }
+            row.append(el('span', {
+              style: Object.assign({ display:'inline-flex', alignItems:'center',
+                gap:'4px', padding:'1px 6px', borderRadius:'4px',
+                fontWeight:'700', margin:'0 1px' }, style)
+            }, label));
           }
         });
         if(targetCode && wordIdxs.length){
@@ -11664,26 +11784,42 @@ function renderStructuredAnswer(num, q, structured){
     }
   }
 
-  /* === №8 и №22: матчинг А-Д → 1-9 ===
-     Учителю нужно сразу видеть: для каждой буквы (грам. ошибка) — какую
-     цифру (предложение) выбрал ученик. Берём parsing формулировки через
-     parseTask22Matching, получаем letters[{letter,text}] и terms[{num,text}],
-     показываем парами. */
+  /* === №8 и №22: матчинг А-Д → 1-9 === */
   if((num === 8 || num === 22) && structured.matching22
        && typeof parseTask22Matching === 'function'){
     const parsed = parseTask22Matching(txt);
     if(parsed && parsed.letters && parsed.letters.length){
       const picks = structured.matching22;
+      const refPicks = (ref && ref.matching22) || null;
+      const hasRef = !!refPicks;
       const termsByNum = {};
       (parsed.terms || []).forEach(t => { termsByNum[t.num] = t.text; });
       const wrap = el('div', { style:{ padding:'10px 12px', background:'#F0F9FF',
         border:'1px solid #93C5FD', borderRadius:'10px', marginBottom:'14px' }},
         el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
                             marginBottom:'8px' }},
-          '📋 Что ученик подобрал к каждой букве'));
+          '📋 Что ученик подобрал к каждой букве' + (hasRef ? ' · с эталоном' : '')));
       parsed.letters.forEach(lt => {
         const pick = picks[lt.letter];
+        const refPick = refPicks ? refPicks[lt.letter] : null;
         const termText = pick != null ? termsByNum[pick] : null;
+        const refTermText = refPick != null ? termsByNum[refPick] : null;
+        let chipBg = '#FCD34D', chipFg = '#92400E', chipBorder = '#F59E0B';
+        let statusLabel = '';
+        if(hasRef && refPick != null){
+          if(pick === refPick){
+            chipBg = DIFF.ok.bg; chipFg = DIFF.ok.fg; chipBorder = DIFF.ok.border;
+            statusLabel = ' ✓';
+          } else if(pick != null){
+            chipBg = DIFF.bad.bg; chipFg = DIFF.bad.fg; chipBorder = DIFF.bad.border;
+            statusLabel = ' ✗ → ' + refPick;
+          } else {
+            chipBg = DIFF.miss.bg; chipFg = DIFF.miss.fg; chipBorder = DIFF.miss.border;
+            statusLabel = ' ⚠ → ' + refPick;
+          }
+        } else if(pick == null){
+          chipBg = '#F3F4F6'; chipFg = '#9CA3AF'; chipBorder = '#E5E7EB';
+        }
         const row = el('div', { style:{ display:'flex', gap:'8px',
           padding:'6px 4px', borderTop:'1px dashed #BFDBFE',
           fontSize:'13px', lineHeight:'1.5', alignItems:'flex-start' }});
@@ -11693,11 +11829,10 @@ function renderStructuredAnswer(num, q, structured){
             el('span', {
               style:{ display:'inline-flex', alignItems:'center', justifyContent:'center',
                       minWidth:'22px', height:'22px', padding:'0 6px',
-                      background: pick != null ? '#FCD34D' : '#F3F4F6',
-                      color: pick != null ? '#92400E' : '#9CA3AF',
-                      border:'2px solid ' + (pick != null ? '#F59E0B' : '#E5E7EB'),
+                      background: chipBg, color: chipFg,
+                      border:'2px solid ' + chipBorder,
                       borderRadius:'4px', fontWeight:'700', fontSize:'13px' }
-            }, pick != null ? String(pick) : '—')),
+            }, (pick != null ? String(pick) : '—') + statusLabel)),
           el('div', { style:{ flex:1, minWidth:0 }},
             el('div', { style:{ fontWeight:'600', color:'var(--ink-2)', fontSize:'12px',
                                 marginBottom:'2px' }}, lt.text),
@@ -11705,32 +11840,56 @@ function renderStructuredAnswer(num, q, structured){
               ? el('div', { style:{ color:'#1E40AF', fontSize:'12px', fontStyle:'italic' }},
                   '→ ' + termText)
               : el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', fontStyle:'italic' }},
-                  '— не выбрано')));
+                  '— не выбрано'),
+            (hasRef && refPick != null && pick !== refPick && refTermText)
+              ? el('div', { style:{ color:DIFF.ok.fg, fontSize:'11px', marginTop:'2px' }},
+                  '✓ эталон: ' + refPick + ' — ' + refTermText)
+              : null));
         wrap.append(row);
       });
       return wrap;
     }
   }
 
-  /* === №21: выбор правил под предложениями ===
-     Парсим предложения формулировки, для каждого показываем выбранные правила
-     ученика. picks._target — целевое правило из формулировки (например, 'запятая').
-     picks[sent.num] = ['rule1', 'rule2'] — список выбранных учеником правил. */
+  /* === №21: выбор правил под предложениями === */
   if(num === 21 && structured.dropdowns21
        && typeof parseTask21Sentences === 'function'){
     const sentences = parseTask21Sentences(txt);
     const picks = structured.dropdowns21;
+    const refPicks = (ref && ref.dropdowns21) || null;
+    const hasRef = !!refPicks;
     if(sentences.length){
-      const target = picks._target || null;
+      const target = picks._target || (refPicks && refPicks._target) || null;
       const wrap = el('div', { style:{ padding:'10px 12px', background:'#F0F9FF',
         border:'1px solid #93C5FD', borderRadius:'10px', marginBottom:'14px' }},
         el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#1E40AF',
                             marginBottom:'8px' }},
           '📋 Что ученик выбрал в каждом предложении' +
-          (target ? ' (целевое: «' + target + '»)' : '')));
+          (target ? ' (целевое: «' + target + '»)' : '') +
+          (hasRef ? ' · с эталоном' : '')));
       sentences.forEach(sent => {
         const chosen = Array.isArray(picks[sent.num]) ? picks[sent.num] : [];
+        const refChosen = refPicks && Array.isArray(refPicks[sent.num]) ? refPicks[sent.num] : null;
         const isMatched = target && chosen.includes(target);
+        const refHasTarget = target && refChosen && refChosen.includes(target);
+        /* Сравнение по правилам */
+        let statusEl = null;
+        if(hasRef && refChosen){
+          if(refHasTarget && isMatched){
+            statusEl = el('span', { style:{ marginLeft:'auto', fontSize:'11px',
+              fontWeight:'700', color:DIFF.ok.fg }}, '✓ совпало');
+          } else if(refHasTarget && !isMatched){
+            statusEl = el('span', { style:{ marginLeft:'auto', fontSize:'11px',
+              fontWeight:'700', color:DIFF.miss.fg }}, '⚠ должно быть «' + target + '»');
+          } else if(!refHasTarget && isMatched){
+            statusEl = el('span', { style:{ marginLeft:'auto', fontSize:'11px',
+              fontWeight:'700', color:DIFF.bad.fg }}, '✗ тут не «' + target + '»');
+          }
+        } else if(target && chosen.length){
+          statusEl = el('span', { style:{ marginLeft:'auto', fontSize:'11px',
+            fontWeight:'700', color: isMatched ? '#065F46' : 'var(--ink-3)' }},
+            isMatched ? '✓ совпало' : '');
+        }
         const row = el('div', { style:{ padding:'6px 4px', borderTop:'1px dashed #BFDBFE',
           fontSize:'13px', lineHeight:'1.5' }});
         row.append(
@@ -11740,11 +11899,13 @@ function renderStructuredAnswer(num, q, structured){
               ? el('span', { style:{ color:'var(--ink)', fontSize:'12px' }}, chosen.join(', '))
               : el('span', { style:{ color:'var(--ink-3)', fontStyle:'italic', fontSize:'12px' }},
                   '— не выбрано'),
-            target && chosen.length
-              ? el('span', { style:{ marginLeft:'auto', fontSize:'11px', fontWeight:'700',
-                                      color: isMatched ? '#065F46' : 'var(--ink-3)' }},
-                  isMatched ? '✓ совпало' : '')
-              : null));
+            statusEl));
+        if(hasRef && refChosen && !arraysEqualSet(chosen, refChosen)){
+          row.append(el('div', {
+            style:{ fontSize:'11px', color:DIFF.ok.fg, marginTop:'2px',
+                    paddingLeft:'18px' }
+          }, '✓ эталон: ' + refChosen.join(', ')));
+        }
         wrap.append(row);
       });
       return wrap;
@@ -12009,9 +12170,14 @@ function modalExamineQuestion(){
           el('span', { style:{ float:'right', fontSize:'12px' }}, 'Балл: ' + points + ' / ' + max)));
     }
 
-    /* === Детализация ответа: что именно ученик расставлял по рядам/позициям === */
+    /* === Детализация ответа: что именно ученик расставлял по рядам/позициям ===
+       Передаём q.structured как эталон — это сохранённый учительский выбор
+       по позициям (буквы по рядам, запятые, dropdown'ы). Если эталона нет
+       (учитель ещё не прошёл задание в режиме «✎ в стиле ученика»), рендер
+       просто покажет ответ ученика без сравнения. */
     if(structuredState){
-      const structBlock = renderStructuredAnswer(num, q, structuredState);
+      const reference = q && q.structured ? q.structured : null;
+      const structBlock = renderStructuredAnswer(num, q, structuredState, reference);
       if(structBlock) body.append(structBlock);
     }
 
@@ -24804,13 +24970,19 @@ function scheduleTeacherAutoSync(num){
   _teacherAutoSyncTimers[num] = setTimeout(async () => {
     /* На момент таймера могут быть свежие picks. Пересчитываем answer */
     const computed = computeAnswerFromStructured(q);
-    if(computed == null) return;
-    STATE.solverAnswers[num] = computed;
+    STATE.solverAnswers[num] = computed || '';
     saveSolverDraft();
+    /* Помимо итогового correct_answer — сохраняем сам учительский выбор
+       по позициям (буквы по рядам, запятые, чекбоксы, dropdown'ы) в
+       test_variant_questions.structured. Это эталон, по которому потом
+       в разборе у ученика будем подсвечивать конкретные ошибки. */
+    const ref = collectStructuredForNum(num);
     try {
+      const payload = { structured: ref };
+      if(computed != null) payload.correct_answer = computed || null;
       await restRequest('PATCH', '/test_variant_questions?id=eq.' + q.id,
-        { correct_answer: computed || null }, { prefer: 'return=minimal' });
-    } catch(e){ console.warn('[autosync correct_answer]', num, e.message); }
+        payload, { prefer: 'return=minimal' });
+    } catch(e){ console.warn('[autosync ref+answer]', num, e.message); }
   }, 600);
 }
 
