@@ -23617,10 +23617,32 @@ function saveSolverDraft(){
 }
 
 /* === Собрать всё структурированное состояние для одного задания ===
-   Возвращает plain-object для JSONB, либо null если ничего не выбрано. */
+   Возвращает plain-object для JSONB, либо null если ничего не выбрано.
+   ВАЖНО: makeTaskXX-функции инициализируют пустые подобъекты в STATE.solver*
+   при рендере (например data[sent.num] = {} для каждого предложения в задании
+   16). Это раздувало object так что has() видел «есть данные» и
+   scheduleStructuredSync создавал пустую строку в test_variant_answers →
+   учитель видел «нулёвку-фантом» в навигации. Здесь рекурсивно фильтруем
+   пустые подобъекты, и считаем «есть данные» только если есть хоть одно
+   реально не-пустое значение. */
 function collectStructuredForNum(num){
+  /* True если значение «реальное»: не null/undefined/'' /{} /false / пустой массив.
+     Объект считаем непустым если хоть один его ключ имеет «реальное» значение
+     (рекурсивно). */
+  const isMeaningful = (v) => {
+    if(v === null || v === undefined) return false;
+    if(v === false || v === '') return false;
+    if(Array.isArray(v)) return v.some(isMeaningful);
+    if(typeof v === 'object'){
+      for(const k of Object.keys(v)){
+        if(isMeaningful(v[k])) return true;
+      }
+      return false;
+    }
+    return true;  // true, число !=0, непустая строка
+  };
+  const has = (obj) => isMeaningful(obj);
   const out = {};
-  const has = (obj) => obj && Object.keys(obj).length > 0;
   if(STATE.solverLetters && has(STATE.solverLetters[num]))      out.letters = STATE.solverLetters[num];
   if(STATE.solverChecks9_12 && has(STATE.solverChecks9_12[num])) out.checks9_12 = STATE.solverChecks9_12[num];
   if(STATE.solverWords13_14 && has(STATE.solverWords13_14[num])) out.words13_14 = STATE.solverWords13_14[num];
