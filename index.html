@@ -804,12 +804,11 @@ const STATE = {
   solverParentAttemptId: null,   // если это работа над ошибками — id первой попытки
   solverFilteredNums: null,      // если работа над ошибками — массив номеров
   /* Автозапись цифр в поле ответа для №15/17-20.
-     Восстанавливается из localStorage при старте. Если выкл (false),
-     ученик САМ выписывает цифры в поле — мы только показываем эталон-подсказку.
-     Учитель/ольга использует выкл-режим для тренировки внимательности перед ЕГЭ. */
-  solverAutoFillDigits: (typeof localStorage !== 'undefined' &&
-                        localStorage.getItem('zebrus_solver_autofill') === 'off')
-    ? false : true,
+     С 23 мая 2026 (краш-тест) принудительно ВКЛ для всех, не читаем
+     localStorage — иначе дети теряли баллы из-за случайно/прежде выключенной
+     галки. Тумблер в UI остался, но при следующем рендере STATE возвращает
+     true. После интенсива можно вернуть localStorage-логику если нужно. */
+  solverAutoFillDigits: true,
   contentEditTaskN: null,  // открыта модалка редактирования теории по номеру
   chatOpen: false,
   chatChannel: 'group',
@@ -26075,8 +26074,15 @@ function viewSolverVariant(){
   });
   autoFillCb.checked = (STATE.solverAutoFillDigits !== false);
   autoFillCb.onchange = () => {
-    STATE.solverAutoFillDigits = autoFillCb.checked;
-    try { localStorage.setItem('zebrus_solver_autofill', autoFillCb.checked ? 'on' : 'off'); } catch(_){}
+    /* Во время краш-теста выключение запрещено — иначе дети снова потеряют
+       баллы. UI-чекбокс возвращаем в ON и показываем тост-подсказку. */
+    if(!autoFillCb.checked){
+      autoFillCb.checked = true;
+      showToast('Авто-запись цифр сейчас принудительно ВКЛ — нельзя выключить во время интенсива', 3500);
+      return;
+    }
+    STATE.solverAutoFillDigits = true;
+    try { localStorage.setItem('zebrus_solver_autofill', 'on'); } catch(_){}
     render();   // перерисуем — все панели подхватят флаг
   };
   wrap.append(el('div', { class:'card', style:{ background:'#FFFDF7', borderColor:'#FACC15', marginBottom:'14px' }},
