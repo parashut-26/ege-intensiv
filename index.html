@@ -22499,27 +22499,29 @@ function viewTeacherVariants(){
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'18px' }},
       'Загружай экспорт результатов из Online Test Pad — увидишь сводную по варианту или по ученику. Этап 1: импорт; решалка внутри платформы будет позже.'));
 
-  /* Переключатель: По вариантам / По ученикам */
+  /* Переключатель: По вариантам / По ученикам / По темам */
   const view = STATE.variantsView || 'by_variant';
-  wrap.append(el('div', { style:{ display:'flex', gap:'4px', background:'var(--bg)', borderRadius:'10px', padding:'4px', marginBottom:'14px', maxWidth:'400px' }},
-    el('button', {
-      style:{ flex:1, padding:'8px 14px', borderRadius:'8px', fontWeight:'700', fontSize:'13px',
-              background: view === 'by_variant' ? 'var(--surface)' : 'transparent',
-              color: view === 'by_variant' ? 'var(--ink)' : 'var(--ink-3)',
-              boxShadow: view === 'by_variant' ? '0 1px 2px rgba(0,0,0,.06)' : 'none' },
-      onclick: () => { STATE.variantsView = 'by_variant'; render(); }
-    }, '📋 По вариантам'),
-    el('button', {
-      style:{ flex:1, padding:'8px 14px', borderRadius:'8px', fontWeight:'700', fontSize:'13px',
-              background: view === 'by_student' ? 'var(--surface)' : 'transparent',
-              color: view === 'by_student' ? 'var(--ink)' : 'var(--ink-3)',
-              boxShadow: view === 'by_student' ? '0 1px 2px rgba(0,0,0,.06)' : 'none' },
-      onclick: () => { STATE.variantsView = 'by_student'; render(); }
-    }, '👤 По ученикам')));
+  const tabBtn = (key, label) => el('button', {
+    style:{ flex:1, padding:'8px 14px', borderRadius:'8px', fontWeight:'700', fontSize:'13px',
+            background: view === key ? 'var(--surface)' : 'transparent',
+            color: view === key ? 'var(--ink)' : 'var(--ink-3)',
+            boxShadow: view === key ? '0 1px 2px rgba(0,0,0,.06)' : 'none' },
+    onclick: () => { STATE.variantsView = key; render(); }
+  }, label);
+  wrap.append(el('div', { style:{ display:'flex', gap:'4px', background:'var(--bg)', borderRadius:'10px', padding:'4px', marginBottom:'14px', maxWidth:'560px' }},
+    tabBtn('by_variant', '📋 По вариантам'),
+    tabBtn('by_student', '👤 По ученикам'),
+    tabBtn('by_topic',   '📊 По темам')));
 
   /* В режиме «По ученикам» — рисуем выбор ученика и заканчиваем */
   if(view === 'by_student'){
     wrap.append(studentPickerForVariants());
+    return wrap;
+  }
+
+  /* В режиме «По темам» — групповая таблица % усвоения */
+  if(view === 'by_topic'){
+    wrap.append(viewGroupMastery());
     return wrap;
   }
 
@@ -27705,6 +27707,7 @@ function viewVariantsByStudent(){
       el('td', null, ''),
       el('td', null, ''));
     for(let q = 1; q <= maxQ; q++) avgRow.append(el('td', null, ''));
+    avgRow.append(el('td', { style:{ background:'#FFFDF7' }}, ''));   /* Поз — для выравнивания */
     Object.keys(K_LIMITS).forEach(_ => avgRow.append(el('td', null, '')));
     avgRow.append(
       el('td', { style:{ background:'#EFF6FF', textAlign:'center', color:'var(--ink-2)', fontWeight:'600' }}, ''),
@@ -27713,6 +27716,58 @@ function viewVariantsByStudent(){
       el('td', { style:{ background:'#D1FAE5', textAlign:'center', color:'var(--ink-2)', fontWeight:'700' }}, avgTest == null ? '—' : avgTest.toFixed(1)),
       el('td', { style:{ background:'#FFEDD5', textAlign:'center' }}, ''));
     tbody.append(avgRow);
+
+    /* Строка «% усвоения» — для каждого задания процент попыток с
+       максимальным баллом (correct / попыток). Сразу видно, какие темы
+       у ученика проседают. Цвет: ≥80% зелёный, 50-79% жёлтый, <50% красный. */
+    const pctCell = (correct, cnt, hint) => {
+      const pct = cnt > 0 ? Math.round(correct / cnt * 100) : null;
+      const bg = pct == null ? '#FAFAFA' : pct >= 80 ? '#D1FAE5' : pct >= 50 ? '#FEF3C7' : '#FEE2E2';
+      const fg = pct == null ? '#9CA3AF' : pct >= 80 ? '#065F46' : pct >= 50 ? '#92400E' : '#991B1B';
+      return el('td', {
+        style:{ background:bg, color:fg, textAlign:'center', fontWeight:'700', fontSize:'11px' },
+        title: cnt === 0 ? 'нет попыток' : (correct + ' из ' + cnt + ' на максимум' + (hint ? ' · ' + hint : ''))
+      }, pct == null ? '—' : (pct + '%'));
+    };
+    const pctRow = el('tr', { style:{ background:'#F0FDFA', borderTop:'2px solid #14B8A6' }});
+    pctRow.append(
+      el('td', { class:'vh-sticky vh-name',
+        style:{ background:'#F0FDFA', fontWeight:'800', color:'#0F766E', fontSize:'12px' },
+        title: '% попыток, где ученик получил максимальный балл за задание' },
+        '% усвоения'),
+      el('td', null, ''),
+      el('td', null, ''));
+    for(let q = 1; q <= maxQ; q++){
+      let cnt = 0, correct = 0;
+      attempts.forEach(a => {
+        const ans = (answersByAttempt[a.id] || {})[q];
+        if(!ans || ans.max_points == null || Number(ans.max_points) === 0) return;
+        cnt++;
+        if(Number(ans.points || 0) >= Number(ans.max_points)) correct++;
+      });
+      pctRow.append(pctCell(correct, cnt));
+    }
+    pctRow.append(el('td', { style:{ background:'#FFFDF7' }}, ''));   /* Поз — пусто */
+    Object.keys(K_LIMITS).forEach(k => {
+      let cnt = 0, correct = 0;
+      attempts.forEach(a => {
+        const r = computeAttemptRow(a, Object.values(answersByAttempt[a.id] || {}));
+        const review = r.essay && r.essay.review;
+        const val = review && review[k];
+        if(val == null) return;
+        cnt++;
+        if(Number(val) >= K_LIMITS[k]) correct++;
+      });
+      pctRow.append(pctCell(correct, cnt, K_TITLES[k]));
+    });
+    /* Итоговые колонки тест/соч/Прв/Тст/★ — пустые в pctRow */
+    pctRow.append(
+      el('td', { style:{ background:'#EFF6FF' }}, ''),
+      el('td', { style:{ background:'#FEF3C7' }}, ''),
+      el('td', { style:{ background:'#DBEAFE' }}, ''),
+      el('td', { style:{ background:'#D1FAE5' }}, ''),
+      el('td', { style:{ background:'#FFEDD5' }}, ''));
+    tbody.append(pctRow);
   }
 
   table.append(tbody);
@@ -27728,6 +27783,183 @@ function avgOf(arr){
   const nums = (arr || []).filter(v => v != null && !isNaN(v));
   if(!nums.length) return null;
   return nums.reduce((s, v) => s + v, 0) / nums.length;
+}
+
+/* ===== Групповая сводная «% усвоения по темам» =====================
+   Загружает ВСЕ попытки + ответы, аггрегирует по (ученик × задание) и
+   выдаёт процент попыток с максимальным баллом. Внизу — строка
+   «⌀ Группа» с общим процентом по теме (помогает видеть слабые места). */
+async function loadGroupMasteryData(){
+  const attempts = await restRequest('GET',
+    '/test_variant_attempts' +
+    '?select=id,profile_id,otp_full_name,otp_user,started_at,finished_at,variant:test_variants(id,title)' +
+    '&order=imported_at.desc.nullslast,started_at.desc');
+  const attIds = (attempts || []).map(a => a.id);
+  let answers = [];
+  if(attIds.length){
+    /* Чанкуем по 200 id'шников чтобы не упереться в длину URL */
+    const chunkSize = 200;
+    for(let i = 0; i < attIds.length; i += chunkSize){
+      const slice = attIds.slice(i, i + chunkSize);
+      const part = await restRequest('GET',
+        '/test_variant_answers?attempt_id=in.(' + slice.join(',') + ')' +
+        '&select=attempt_id,question_num,points,max_points');
+      if(Array.isArray(part)) answers.push(...part);
+    }
+  }
+  STATE.groupMasteryData = {
+    attempts: attempts || [],
+    answers: answers
+  };
+}
+
+function viewGroupMastery(){
+  const wrap = el('div', { class:'fade-in' });
+
+  if(!STATE.groupMasteryData){
+    wrap.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px' }},
+      '⏳ Загружаю результаты группы…'));
+    loadGroupMasteryData()
+      .then(() => render())
+      .catch(e => { showToast('⚠ ' + (e && e.message || 'ошибка загрузки')); });
+    return wrap;
+  }
+
+  const { attempts, answers } = STATE.groupMasteryData;
+  const ansByAtt = {};
+  answers.forEach(ans => {
+    if(!ansByAtt[ans.attempt_id]) ansByAtt[ans.attempt_id] = {};
+    ansByAtt[ans.attempt_id][ans.question_num] = ans;
+  });
+
+  /* Группируем попытки по ученику: ключ = profile_id или otp_имя */
+  const byStudent = {};
+  attempts.forEach(a => {
+    const key = a.profile_id || ('otp:' + (a.otp_full_name || a.otp_user || '?'));
+    let name = a.otp_full_name || a.otp_user || '?';
+    if(a.profile_id){
+      const s = (STUDENTS || []).find(st => st.id === a.profile_id);
+      if(s && s.name) name = s.name;
+    }
+    if(!byStudent[key]) byStudent[key] = { name, attempts: [], linked: !!a.profile_id };
+    byStudent[key].attempts.push(a);
+  });
+
+  const students = Object.values(byStudent)
+    .filter(s => s.attempts.length > 0)
+    .sort((a, b) => a.name.localeCompare(b.name, 'ru'));
+
+  wrap.append(
+    el('h2', { style:{ marginTop:0 }}, '📊 % усвоения по темам'),
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'14px' }},
+      'Для каждого ученика — % попыток, где он получил максимальный балл по этому заданию. ' +
+      'Внизу строка «⌀ Группа» — общий процент по всем ученикам, видно какая тема западает у всей группы. ' +
+      'Цвета: 🟢 ≥80%  ·  🟡 50–79%  ·  🔴 <50%.'));
+
+  if(!students.length){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)' }},
+      'Нет попыток. Загрузи xlsx из OTP или дождись пока ученики порешают пробники.'));
+    return wrap;
+  }
+
+  /* Кнопка «обновить» — на случай если только что появились новые попытки */
+  wrap.append(el('div', { style:{ marginBottom:'10px' }},
+    el('button', { class:'btn btn-secondary btn-sm',
+      onclick: () => {
+        STATE.groupMasteryData = null;
+        render();
+      }
+    }, '🔄 Обновить')));
+
+  const maxQ = 26;
+  const tableWrap = el('div', { style:{ overflowX:'auto', background:'var(--surface)',
+    borderRadius:'12px', border:'1px solid var(--border)' }});
+  const table = el('table', { class:'variants-summary', style:{ borderCollapse:'collapse', minWidth:'100%' }});
+  const thead = el('thead', null);
+  const trHead = el('tr', null,
+    el('th', { class:'vh-sticky vh-name' }, 'Ученик'),
+    el('th', { title:'Попыток у этого ученика всего' }, '№'));
+  for(let q = 1; q <= maxQ; q++){
+    trHead.append(el('th', { class:'vh-q', title:'Задание №' + q }, q));
+  }
+  thead.append(trHead);
+  table.append(thead);
+
+  const tbody = el('tbody', null);
+  const groupCnt = new Array(maxQ + 1).fill(0);
+  const groupCor = new Array(maxQ + 1).fill(0);
+
+  const pctCell = (cnt, correct, fontSize) => {
+    const pct = cnt > 0 ? Math.round(correct / cnt * 100) : null;
+    const bg = pct == null ? '#FAFAFA' : pct >= 80 ? '#D1FAE5' : pct >= 50 ? '#FEF3C7' : '#FEE2E2';
+    const fg = pct == null ? '#9CA3AF' : pct >= 80 ? '#065F46' : pct >= 50 ? '#92400E' : '#991B1B';
+    return el('td', {
+      style:{ background:bg, color:fg, textAlign:'center', fontWeight:'700',
+              fontSize: (fontSize || '11px') },
+      title: cnt === 0 ? 'нет попыток' : (correct + ' из ' + cnt + ' на максимум')
+    }, pct == null ? '—' : (pct + '%'));
+  };
+
+  students.forEach(s => {
+    const tr = el('tr', null);
+    tr.append(
+      el('td', { class:'vh-sticky vh-name', style:{ fontWeight:'600', cursor: s.linked ? 'pointer' : 'default' },
+        title: s.linked ? 'Клик — открыть индивидуальную сводную' : 'OTP-ник не привязан к ученику',
+        onclick: s.linked ? async () => {
+          /* Прыгаем в по-ученика вкладку, выбираем этого ученика */
+          STATE.variantsView = 'by_student';
+          const pid = s.attempts[0] && s.attempts[0].profile_id;
+          if(pid){
+            STATE.selectedStudentForVariants = pid;
+            STATE.studentVariantsData = null;
+            render();
+            try { await loadVariantsByStudent(pid); }
+            catch(e){ showToast('⚠ ' + e.message); }
+            render();
+          } else {
+            render();
+          }
+        } : null
+      }, s.name),
+      el('td', { style:{ color:'var(--ink-3)', fontSize:'11px', textAlign:'center' }}, String(s.attempts.length)));
+    for(let q = 1; q <= maxQ; q++){
+      let cnt = 0, correct = 0;
+      s.attempts.forEach(a => {
+        const ans = (ansByAtt[a.id] || {})[q];
+        if(!ans || ans.max_points == null || Number(ans.max_points) === 0) return;
+        cnt++;
+        groupCnt[q]++;
+        if(Number(ans.points || 0) >= Number(ans.max_points)){
+          correct++;
+          groupCor[q]++;
+        }
+      });
+      tr.append(pctCell(cnt, correct));
+    }
+    tbody.append(tr);
+  });
+
+  /* Строка «⌀ Группа» — общий процент по теме у всей группы */
+  const groupRow = el('tr', { style:{ background:'#F0FDFA', borderTop:'3px solid #14B8A6' }});
+  groupRow.append(
+    el('td', { class:'vh-sticky vh-name',
+      style:{ background:'#F0FDFA', fontWeight:'800', color:'#0F766E', fontSize:'13px' }},
+      '⌀ Группа'),
+    el('td', { style:{ background:'#F0FDFA' }}, ''));
+  for(let q = 1; q <= maxQ; q++){
+    groupRow.append(pctCell(groupCnt[q], groupCor[q], '12px'));
+  }
+  tbody.append(groupRow);
+
+  table.append(tbody);
+  tableWrap.append(table);
+  wrap.append(tableWrap);
+
+  /* Подсказка под таблицей */
+  wrap.append(el('div', { style:{ marginTop:'12px', color:'var(--ink-3)', fontSize:'12px' }},
+    '💡 Клик по фамилии ученика — открыть его индивидуальную сводную.'));
+
+  return wrap;
 }
 
 /* ===== Расчёты для расширенной сводной варианта ============
