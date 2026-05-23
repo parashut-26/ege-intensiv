@@ -22800,6 +22800,83 @@ function viewVariantSummary(){
     return wrap;
   }
 
+  /* === Баннер «❔ Вопросы ожидают ответа» ===
+     Перечисляет ВСЕ задания, где ученик задал вопрос (student_note есть),
+     а учитель ещё не ответил (teacher_comment пуст). Клик по строке —
+     открывает examineQuestion-модалку. */
+  const pending = [];
+  attempts.forEach(a => {
+    const ansMap = byAttempt[a.id] || {};
+    const studName = (a.profile && a.profile.full_name) || a.otp_full_name || a.otp_user || '?';
+    Object.keys(ansMap).forEach(qNum => {
+      const ans = ansMap[qNum];
+      if(!ans) return;
+      const hasNote = ans.student_note && String(ans.student_note).trim();
+      const hasReply = ans.teacher_comment && String(ans.teacher_comment).trim();
+      if(hasNote && !hasReply){
+        pending.push({
+          attemptId: a.id,
+          variantId: v.id,
+          num: Number(qNum),
+          studentName: studName,
+          note: String(ans.student_note).trim(),
+          ans: ans
+        });
+      }
+    });
+  });
+  if(pending.length){
+    const banner = el('div', { style:{ marginBottom:'12px', padding:'10px 14px',
+      background:'#FFFBEB', border:'2px solid #F59E0B', borderRadius:'12px' }});
+    banner.append(el('div', { style:{ fontSize:'13px', fontWeight:'700',
+      color:'#92400E', marginBottom:'6px', display:'flex', alignItems:'center', gap:'8px' }},
+      el('span', null, '❔ Вопросы ожидают ответа · ' + pending.length),
+      el('span', { style:{ fontSize:'11px', fontWeight:'500', color:'#A16207' }},
+        '(клик — открыть разбор задания, написать ответ)')));
+    /* Сортируем: сначала ученики решающие сейчас (по imported_at/started_at), потом завершившие */
+    pending.sort((a, b) => a.studentName.localeCompare(b.studentName, 'ru') || a.num - b.num);
+    const list = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'6px' }});
+    pending.forEach(p => {
+      const chip = el('button', {
+        type:'button',
+        title: p.note,
+        style:{ padding:'5px 10px', borderRadius:'8px', cursor:'pointer',
+                background:'#FFF', border:'1px solid #F59E0B',
+                color:'#92400E', fontSize:'12px', fontWeight:'700',
+                fontFamily:'inherit', display:'inline-flex', alignItems:'center', gap:'6px' },
+        onclick: (ev) => {
+          ev.stopPropagation();
+          const ans = p.ans;
+          STATE.examineQuestion = {
+            variantId: p.variantId, num: p.num,
+            userAnswer: ans.user_answer,
+            points: Number(ans.points) || 0,
+            max: Number(ans.max_points) || 0,
+            attemptId: p.attemptId,
+            studentNote: ans.student_note || null,
+            teacherComment: ans.teacher_comment || null,
+            scratch: ans.scratch || null,
+            studentDrawing: ans.student_drawing || null,
+            teacherScratch: ans.teacher_scratch || null,
+            teacherDrawing: ans.teacher_drawing || null,
+            structuredState: ans.structured_state || null,
+            isStudent: false
+          };
+          render();
+        }
+      },
+        el('span', null, p.studentName),
+        el('span', { style:{ background:'#FEF3C7', padding:'1px 6px', borderRadius:'4px',
+          color:'#78350F' }}, '№' + p.num),
+        el('span', { style:{ fontWeight:'500', color:'#A16207', maxWidth:'200px',
+          whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }},
+          '— ' + (p.note.length > 40 ? p.note.slice(0, 40) + '…' : p.note)));
+      list.append(chip);
+    });
+    banner.append(list);
+    wrap.append(banner);
+  }
+
   /* Таблица: строки = ученики, колонки = №1..N + К1..К10 + тест + сочинение + первичный + тестовый + отметка */
   const tableWrap = el('div', { style:{ overflowX:'auto', background:'var(--surface)', borderRadius:'12px', border:'1px solid var(--border)' }});
   const table = el('table', { class:'variants-summary', style:{ borderCollapse:'collapse', minWidth:'100%' }});
@@ -23016,8 +23093,27 @@ function variantCell(ans, opts){
                 status +
                 (opts.variantId ? '\nКлик — открыть разбор' : '');
   const points = pointsSet ? Number(ans.points) || 0 : 0;
+  const hasStudentNote   = !!(ans.student_note   && String(ans.student_note).trim());
+  const hasTeacherReply  = !!(ans.teacher_comment && String(ans.teacher_comment).trim());
+  /* Если ученик задал вопрос — добавляем в title подсказку и помечаем
+     ячейку маленькой «❔» в углу (или «💬» если учитель уже ответил). */
+  const noteHint = hasStudentNote
+    ? ('\n❔ Вопрос ученика: ' + String(ans.student_note).trim().slice(0, 120) +
+       (String(ans.student_note).length > 120 ? '…' : '') +
+       (hasTeacherReply ? '\n💬 Ты уже ответил(а)' : '\n→ Клик чтобы ответить'))
+    : '';
   const td = el('td', { class:'vc', style:{ background:bg, color, textAlign:'center', fontWeight:'700', fontSize:'12px',
-    cursor: opts.variantId ? 'pointer' : 'default' }, title }, String(label));
+    position:'relative',
+    cursor: opts.variantId ? 'pointer' : 'default' }, title: title + noteHint }, String(label));
+  if(hasStudentNote){
+    /* Маленький значок-метка в углу — ❔ если ответа нет, 💬 если ответил */
+    td.append(el('span', {
+      style:{ position:'absolute', top:'-1px', right:'1px',
+              fontSize:'10px', lineHeight:'1',
+              color: hasTeacherReply ? '#10B981' : '#DC2626',
+              pointerEvents:'none' }
+    }, hasTeacherReply ? '💬' : '❔'));
+  }
   if(opts.variantId && opts.num){
     td.onclick = (ev) => {
       ev.stopPropagation();
@@ -25830,16 +25926,20 @@ function startSolverTeacherMarksPolling(){
     try {
       const rows = await restRequest('GET',
         '/test_variant_answers?attempt_id=eq.' + attId +
-        '&select=question_num,teacher_scratch,teacher_drawing,teacher_comment,points,max_points,user_answer');
+        '&select=question_num,teacher_scratch,teacher_drawing,teacher_comment,points,max_points,user_answer,student_note');
       if(!Array.isArray(rows)) return;
       const next = {};
       let pointsChanged = false;
       rows.forEach(r => {
-        if(r.teacher_scratch || r.teacher_drawing || r.teacher_comment){
+        /* Если есть пометки учителя ИЛИ student_note — кладём в next, чтобы
+           ❔/💬-кнопка и блок ответа учителя отрисовались. student_note нужен
+           чтобы при перезаходе ученик увидел свой ранее заданный вопрос. */
+        if(r.teacher_scratch || r.teacher_drawing || r.teacher_comment || r.student_note){
           next[r.question_num] = {
             teacher_scratch: r.teacher_scratch || null,
             teacher_drawing: r.teacher_drawing || null,
-            teacher_comment: r.teacher_comment || null
+            teacher_comment: r.teacher_comment || null,
+            student_note:    r.student_note    || null
           };
         }
         /* Если учитель пересчитал баллы в БД (или скорректировал эталон),
@@ -26301,6 +26401,117 @@ function viewSolverVariant(){
       resultBox.append(block);
     };
     if(checkedInfo) renderResult(checkedInfo);
+
+    /* === «❔ Спросить учителя» — задать вопрос по этому заданию ===
+       Сохраняется в test_variant_answers.student_note. Учитель видит ❔
+       на ячейке в сводной и может ответить через examineQuestion-модалку
+       (поле teacher_comment). Ответ учителя прилетит ученику обратно через
+       тот же solverTeacherMarks-polling раз в 15 секунд. */
+    if(!isTeacherMode){
+      if(!STATE.solverQuestions) STATE.solverQuestions = {};
+      /* Подтягиваем уже сохранённый вопрос из live-полла (на случай если
+         ученик перезашёл) или из локальной памяти этой сессии. */
+      const liveNote = (STATE.solverTeacherMarks || {})[q.num] || {};
+      const currentNote = STATE.solverQuestions[q.num] != null
+        ? STATE.solverQuestions[q.num]
+        : (liveNote.student_note || '');
+
+      const isOpen = !!STATE._solverQuestionOpen && STATE._solverQuestionOpen[q.num];
+      const hasNote = (currentNote || '').trim().length > 0;
+      const hasReply = !!(liveNote.teacher_comment && liveNote.teacher_comment.trim());
+
+      const askBtn = el('button', {
+        type:'button',
+        style:{ marginTop:'8px', marginLeft:'8px', padding:'6px 12px',
+                fontSize:'13px', fontWeight:'700', borderRadius:'8px',
+                border:'1px solid ' + (hasReply ? '#10B981' : hasNote ? '#F59E0B' : 'var(--border-2)'),
+                background: hasReply ? '#D1FAE5' : hasNote ? '#FEF3C7' : '#fff',
+                color: hasReply ? '#065F46' : hasNote ? '#92400E' : 'var(--ink-2)',
+                cursor:'pointer', fontFamily:'inherit' }
+      }, hasReply ? '💬 Учитель ответил' : hasNote ? '❔ Вопрос задан' : '❔ Спросить учителя');
+
+      const askPanel = el('div', { style:{ marginTop:'8px', display: isOpen ? 'block' : 'none',
+        padding:'10px 12px', background:'#FFFDF7', border:'1px solid #FACC15',
+        borderRadius:'10px' }});
+
+      const askTa = el('textarea', {
+        placeholder:'Что именно непонятно? Учитель увидит твой вопрос и ответит — ответ появится тут же.',
+        rows: 3,
+        style:{ width:'100%', padding:'8px 10px', borderRadius:'8px',
+                border:'1px solid var(--border-2)', fontSize:'13px', lineHeight:'1.4',
+                boxSizing:'border-box', resize:'vertical', fontFamily:'inherit' }
+      });
+      askTa.value = currentNote;
+
+      const askStatus = el('span', { style:{ fontSize:'11px', color:'var(--ink-3)',
+        marginLeft:'8px' }}, '');
+
+      let askSaveTimer = null;
+      const saveAskNote = async (text) => {
+        const attId = await ensureLiveAttempt();
+        if(!attId){
+          askStatus.textContent = '— нет авторизации';
+          return;
+        }
+        try {
+          /* PATCH; если строки нет — INSERT через saveLiveStructured-логику */
+          const resp = await restRequest('PATCH',
+            '/test_variant_answers?attempt_id=eq.' + attId + '&question_num=eq.' + q.num,
+            { student_note: text || null },
+            { prefer: 'return=representation' });
+          if(!Array.isArray(resp) || resp.length === 0){
+            await restRequest('POST', '/test_variant_answers', {
+              attempt_id: attId, question_num: q.num,
+              student_note: text || null,
+              user_answer: null, points: null, max_points: null
+            }, { prefer: 'return=minimal' });
+          }
+          askStatus.textContent = '✓ учитель видит';
+          askStatus.style.color = '#065F46';
+          setTimeout(() => { askStatus.textContent = ''; }, 2000);
+        } catch(e){
+          askStatus.textContent = '⚠ не сохранилось';
+          askStatus.style.color = '#991B1B';
+        }
+      };
+      askTa.oninput = () => {
+        STATE.solverQuestions[q.num] = askTa.value;
+        askStatus.textContent = '⏳';
+        askStatus.style.color = 'var(--ink-3)';
+        clearTimeout(askSaveTimer);
+        askSaveTimer = setTimeout(() => saveAskNote(askTa.value), 700);
+      };
+
+      askPanel.append(
+        el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#92400E',
+          marginBottom:'6px' }}, '❔ Вопрос к учителю по этому заданию'),
+        askTa,
+        el('div', { style:{ marginTop:'4px' }}, askStatus));
+
+      /* Если есть ответ учителя — показываем зелёным внутри панели */
+      if(hasReply){
+        askPanel.append(el('div', { style:{ marginTop:'10px', padding:'8px 10px',
+          background:'#D1FAE5', borderRadius:'8px',
+          border:'1px solid #10B981', fontSize:'13px', lineHeight:'1.5',
+          color:'#065F46' }},
+          el('div', { style:{ fontWeight:'700', marginBottom:'4px', fontSize:'11px',
+            textTransform:'uppercase', letterSpacing:'.06em' }}, '💬 Ответ учителя'),
+          el('div', null, liveNote.teacher_comment)));
+      }
+
+      askBtn.onclick = () => {
+        if(!STATE._solverQuestionOpen) STATE._solverQuestionOpen = {};
+        STATE._solverQuestionOpen[q.num] = !STATE._solverQuestionOpen[q.num];
+        askPanel.style.display = STATE._solverQuestionOpen[q.num] ? 'block' : 'none';
+        if(STATE._solverQuestionOpen[q.num]){
+          setTimeout(() => askTa.focus(), 50);
+        }
+      };
+
+      card.append(askBtn);
+      card.append(askPanel);
+    }
+
     checkBtn = el('button', {
       class:'btn btn-secondary btn-sm',
       style:{ marginTop:'8px', padding:'6px 14px', fontSize:'13px' },
