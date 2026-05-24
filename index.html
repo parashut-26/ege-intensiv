@@ -704,6 +704,60 @@ function markDayAsSeen(scopeKey){
     localStorage.setItem(_seenDaysKey(), JSON.stringify(map));
   } catch(_){}
 }
+/* ============================================================
+   Отметка прочитанности ответов учителя на вопросы ученика.
+   Когда учитель отвечает на вопрос ребёнка (test_variant_answers.
+   teacher_comment), на странице ученика загорается «💬 Учитель
+   ответил» — баннер в раскрытой попытке, бейдж в свёрнутой строке,
+   зелёная рамка вокруг плашки задания. Раньше эти индикаторы
+   висели вечно, даже после того как ученик прочитал ответ.
+
+   Решение: храним fingerprint текста (len + первые/последние 16
+   символов) per profileId+attemptId+num. Когда ученик открывает
+   модалку с teacher_comment — сохраняем fingerprint. На фронте
+   считаем «непрочитано» = fingerprint в БД != сохранённого.
+
+   Так если учитель в дальнейшем перепишет ответ — fingerprint
+   изменится → снова покажется как «новое». Ученик не пропустит.
+   ============================================================ */
+function _studentReadRepliesKey(){
+  const uid = (MY_PROFILE && MY_PROFILE.id) ? MY_PROFILE.id : 'anon';
+  return 'studentReadReplies_' + uid;
+}
+function _replyFingerprint(comment){
+  const s = String(comment || '').trim();
+  if(!s) return '';
+  /* Длина + первые 16 + последние 16 символов. Дёшево, при любом
+     значимом изменении меняется. */
+  return s.length + ':' + s.slice(0, 16) + ':' + s.slice(-16);
+}
+function getStudentReadReplies(){
+  try {
+    const raw = localStorage.getItem(_studentReadRepliesKey());
+    if(!raw) return {};
+    const p = JSON.parse(raw);
+    return (p && typeof p === 'object') ? p : {};
+  } catch(_){ return {}; }
+}
+function markTeacherReplyAsRead(attemptId, num, comment){
+  if(!attemptId || num == null) return;
+  const fp = _replyFingerprint(comment);
+  if(!fp) return;
+  try {
+    const map = getStudentReadReplies();
+    map[attemptId + '_' + num] = fp;
+    localStorage.setItem(_studentReadRepliesKey(), JSON.stringify(map));
+  } catch(_){}
+}
+function isTeacherReplyUnread(attemptId, num, comment){
+  const fp = _replyFingerprint(comment);
+  if(!fp) return false;  /* нет ответа учителя → нечего показывать */
+  try {
+    const map = getStudentReadReplies();
+    return map[attemptId + '_' + num] !== fp;
+  } catch(_){ return true; }
+}
+
 /* Возвращает массив постов в warmup-дне, опубликованных после lastSeen
    (либо все опубликованные, если день ни разу не открывали). */
 function getUnreadWarmupPosts(dayId){
@@ -794,6 +848,7 @@ const STATE = {
   /* Сводная по ученику в кабинете учителя: 'by_variant' | 'by_student' */
   variantsView: 'by_variant',
   variantSummarySort: 'score',  // 'score' | 'name' — сортировка строк в сводной по варианту
+  studentVariantsViewMode: 'table',  // 'table' | 'tiles' — режим показа сводной по ученику (учителю): таблица или плашки для скрина родителям
   selectedStudentForVariants: null,   // профайл-id выбранного ученика
   studentVariantsData: null,          // { student, attempts, answersByAttempt }
   /* Модалка ручной привязки попытки к ученику */
@@ -12891,14 +12946,17 @@ function studentVariantsCard(){
       STATE.myExpandedAttemptId = isOpen ? null : a.id;
       render();
     };
-    /* Считаем количество ответов учителя по этой попытке — чтобы показать
-       зелёный бейдж в свёрнутой строке и ученик сразу видел, где учитель
-       ответил, без необходимости разворачивать каждую попытку. */
+    /* Считаем НЕПРОЧИТАННЫЕ ответы учителя по этой попытке — чтобы показать
+       зелёный бейдж в свёрнутой строке. Когда ученик откроет вопрос и
+       прочитает ответ, fingerprint сохранится, бейдж исчезнет. */
     let teacherRepliesCount = 0;
     if(byA[a.id]){
       for(const qn in byA[a.id]){
         const an = byA[a.id][qn];
-        if(an && an.teacher_comment && String(an.teacher_comment).trim()) teacherRepliesCount++;
+        if(an && an.teacher_comment && String(an.teacher_comment).trim()
+            && isTeacherReplyUnread(a.id, Number(qn), an.teacher_comment)){
+          teacherRepliesCount++;
+        }
       }
     }
     const trMain = el('tr', { style:{ cursor:'pointer', background: isOpen ? '#F9FAFB' : 'transparent' },
@@ -12971,6 +13029,8 @@ function studentVariantsCard(){
          Ученик задавал вопросы кнопкой «❔ Спросить учителя» в решалке.
          Здесь собираем сколько из них уже получили teacher_comment — чтобы
          ребёнок не искал руками, где учитель ответил, а сразу увидел список. */
+      /* Только НЕПРОЧИТАННЫЕ — прочитанные исчезают из баннера, чтобы не
+         отвлекать ученика после того, как он ознакомился с ответом. */
       const repliedNums = [];
       const pendingNums = [];
       for(let q = 1; q <= 26; q++){
@@ -12978,8 +13038,8 @@ function studentVariantsCard(){
         if(!ans) continue;
         const hasNote = !!(ans.student_note && String(ans.student_note).trim());
         const hasReply = !!(ans.teacher_comment && String(ans.teacher_comment).trim());
-        if(hasReply) repliedNums.push(q);
-        else if(hasNote) pendingNums.push(q);
+        if(hasReply && isTeacherReplyUnread(a.id, q, ans.teacher_comment)) repliedNums.push(q);
+        else if(hasNote && !hasReply) pendingNums.push(q);
       }
       const openQuestionFor = (qNum) => {
         const ans = byA[a.id] && byA[a.id][qNum];
@@ -12999,6 +13059,11 @@ function studentVariantsCard(){
           structuredState: ans ? (ans.structured_state || null) : null,
           isStudent: true
         };
+        /* Отмечаем ответ учителя прочитанным — fingerprint сохраняется в
+           localStorage, бейджи/баннер исчезают на следующем render. */
+        if(ans && ans.teacher_comment && String(ans.teacher_comment).trim()){
+          markTeacherReplyAsRead(a.id, qNum, ans.teacher_comment);
+        }
         render();
       };
       if(repliedNums.length || pendingNums.length){
@@ -13048,10 +13113,17 @@ function studentVariantsCard(){
         else { bg='#FEF3C7'; color='#92400E'; }
         const variantId = (a.variant && a.variant.id) || a.variant_id;
         const hasStudentNote = !!(ans && ans.student_note && String(ans.student_note).trim());
-        const hasTeacherReply = !!(ans && ans.teacher_comment && String(ans.teacher_comment).trim());
+        const hasTeacherReplyRaw = !!(ans && ans.teacher_comment && String(ans.teacher_comment).trim());
+        /* Зелёный «💬 новый ответ» индикатор гаснет после того, как ученик
+           откроет вопрос. Для уже прочитанных оставляем только тонкую серую
+           точку — чтобы при желании можно было вернуться и перечитать. */
+        const isUnreadReply = hasTeacherReplyRaw && isTeacherReplyUnread(a.id, q, ans.teacher_comment);
+        const hasTeacherReply = isUnreadReply;
+        const hasReadTeacherReply = hasTeacherReplyRaw && !isUnreadReply;
         const noteHint = hasTeacherReply
           ? '\n💬 Учитель ответил — клик чтобы прочитать'
-          : (hasStudentNote ? '\n⏳ Твой вопрос ждёт ответа учителя' : '');
+          : (hasReadTeacherReply ? '\n✓ Ответ учителя прочитан — клик чтобы перечитать'
+             : (hasStudentNote ? '\n⏳ Твой вопрос ждёт ответа учителя' : ''));
         const titleStr = ans
           ? ('Клик — увидеть текст задания\nТвой ответ: ' +
              (ans.user_answer == null ? '(пусто)' : ans.user_answer) +
@@ -13061,7 +13133,8 @@ function studentVariantsCard(){
           style:{ padding:'6px 4px', borderRadius:'6px', background:bg, color,
                   textAlign:'center', fontSize:'11px', fontWeight:'700',
                   cursor:'pointer', position:'relative',
-                  border: hasTeacherReply ? '2px solid #10B981' : (hasStudentNote ? '2px solid #F59E0B' : 'none'),
+                  border: hasTeacherReply ? '2px solid #10B981'
+                          : (hasStudentNote && !hasReadTeacherReply ? '2px solid #F59E0B' : 'none'),
                   boxSizing:'border-box' },
           title: titleStr,
           onclick: (ev) => { ev.stopPropagation(); openQuestionFor(q); }
@@ -13069,12 +13142,19 @@ function studentVariantsCard(){
           el('div', { style:{ fontSize:'10px', opacity:.7 }}, '№' + q),
           el('div', null, ans && max > 0 ? (pts + '/' + max) : '—'));
         if(hasTeacherReply){
-          /* Зелёная 💬 в углу — учитель ответил, ученик может прочитать */
+          /* Зелёная 💬 в углу — учитель ответил, ученик ещё не прочитал */
           c.append(el('span', {
             style:{ position:'absolute', top:'-6px', right:'-4px',
                     fontSize:'12px', lineHeight:'1', pointerEvents:'none',
                     filter:'drop-shadow(0 1px 2px rgba(0,0,0,.2))' }
           }, '💬'));
+        } else if(hasReadTeacherReply){
+          /* Тонкая серая «✓» — ответ есть и прочитан; ученик может перечитать */
+          c.append(el('span', {
+            style:{ position:'absolute', top:'-5px', right:'-3px',
+                    fontSize:'10px', lineHeight:'1', pointerEvents:'none',
+                    color:'#6B7280', opacity:.7, fontWeight:'700' }
+          }, '✓'));
         } else if(hasStudentNote){
           /* Жёлтая ⏳ — ученик задал вопрос, ответ ещё не пришёл */
           c.append(el('span', {
@@ -28233,10 +28313,200 @@ function viewVariantsByStudent(){
 
   if(!attempts.length) return wrap;
 
-  /* Всегда 26 колонок — задания 1-26. №27 = сочинение, не показываем,
-     оно учитывается через К1-К10. */
+  /* === Тумблер режима показа: «📊 Таблица» (по умолчанию) / «🧱 Плашки» ===
+     Плашечный вид нужен для скриншотов родителям — узкий вертикальный
+     блок с цветными квадратиками №N, помещается на экран телефона
+     целиком, не надо листать горизонтально. Таблица остаётся для
+     детального анализа: проще сравнивать % усвоения по заданиям. */
+  const viewMode = STATE.studentVariantsViewMode === 'tiles' ? 'tiles' : 'table';
+  const modeBtn = (key, label, title) => el('button', {
+    title,
+    style:{ padding:'5px 11px', borderRadius:'7px', fontWeight:'700', fontSize:'12px',
+            background: viewMode === key ? 'var(--surface)' : 'transparent',
+            color: viewMode === key ? 'var(--ink)' : 'var(--ink-3)',
+            boxShadow: viewMode === key ? '0 1px 2px rgba(0,0,0,.08)' : 'none',
+            border:'none', cursor:'pointer', fontFamily:'inherit' },
+    onclick: () => { STATE.studentVariantsViewMode = key; render(); }
+  }, label);
+  wrap.append(el('div', { style:{ display:'flex', alignItems:'center', gap:'10px',
+    marginBottom:'14px', fontSize:'12px', color:'var(--ink-3)', flexWrap:'wrap' }},
+    el('span', null, 'Вид:'),
+    el('div', { style:{ display:'flex', gap:'3px', background:'var(--bg)',
+      borderRadius:'9px', padding:'3px' }},
+      modeBtn('table', '📊 Таблица', 'Подробная горизонтальная таблица — для анализа'),
+      modeBtn('tiles', '🧱 Плашки',  'Вертикальные карточки с квадратиками — удобно скриншотить родителям')),
+    viewMode === 'tiles' ? el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }},
+      '📸 готово к скриншоту') : null));
+
+  /* Всегда 26 квадратиков — задания 1-26. №27 = сочинение,
+     не показываем, оно учитывается через К1-К10. */
   const maxQ = 26;
 
+  /* === Режим ПЛАШКИ — вертикальный стек карточек, ширина ≤ 560px (экран телефона) === */
+  if(viewMode === 'tiles'){
+    const tilesWrap = el('div', { style:{ maxWidth:'560px', margin:'0 auto' }});
+    /* Краткая шапка с именем для скрина */
+    tilesWrap.append(el('div', { style:{ marginBottom:'14px', padding:'12px 14px',
+      background:'#F0F9FF', border:'1px solid #BAE6FD', borderRadius:'10px',
+      fontSize:'13px', color:'#0C4A6E' }},
+      el('b', null, '👤 ' + (student.name || '—')),
+      el('span', { style:{ color:'#075985', marginLeft:'8px' }},
+        '· ' + attempts.length + ' ' + pluralRu(attempts.length, ['попытка','попытки','попыток']))));
+
+    attempts.forEach(a => {
+      const v = a.variant || {};
+      const ansForAttempt = answersByAttempt[a.id] || {};
+      const row = computeAttemptRow(a, Object.values(ansForAttempt));
+      const isLive = a.started_at && !a.finished_at;
+      const dateStr = a.finished_at
+        ? new Date(a.finished_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' })
+        : (a.imported_at ? new Date(a.imported_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit', year:'2-digit' })
+          : (isLive ? '🔴 решает сейчас' : '—'));
+      const card = el('div', { class:'card', style:{ marginBottom:'14px',
+        background: isLive ? '#FEF2F2' : 'var(--surface)' }});
+      /* Шапка карточки: вариант + дата + статус */
+      card.append(el('div', { style:{ display:'flex', justifyContent:'space-between',
+        alignItems:'flex-start', gap:'10px', flexWrap:'wrap', marginBottom:'10px' }},
+        el('div', null,
+          el('div', { style:{ fontWeight:'800', fontSize:'15px' }},
+            v.title || 'Вариант'),
+          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }},
+            dateStr +
+            (a.time_spent_seconds != null && !isLive ? ' · ⏱ ' + otpFormatTime(a.time_spent_seconds) : ''),
+            a.parent_attempt_id ? el('span', {
+              style:{ marginLeft:'6px', fontSize:'10px', padding:'1px 5px', borderRadius:'999px',
+                      background:'#FEF3C7', color:'#92400E', fontWeight:'700' }
+            }, '🔁 РНО') : null,
+            (a.finished_at && !isLive) ? el('span', {
+              style:{ marginLeft:'6px', fontSize:'10px', padding:'1px 6px', borderRadius:'999px',
+                      background:'#D1FAE5', color:'#065F46', fontWeight:'700' }
+            }, '🏁 сдал') : null)),
+        /* Сводка справа: первичный → тестовый → отметка */
+        el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap' }},
+          row.testSum != null ? el('div', {
+            style:{ padding:'4px 10px', borderRadius:'7px', background:'#EFF6FF',
+                    fontSize:'12px', fontWeight:'700', color:'#1E40AF' },
+            title:'Сумма по заданиям 1-26'
+          }, 'тест ' + row.testSum) : null,
+          row.essaySum != null ? el('div', {
+            style:{ padding:'4px 10px', borderRadius:'7px', background:'#FEF3C7',
+                    fontSize:'12px', fontWeight:'700', color:'#92400E' },
+            title:'Сумма К1-К10'
+          }, 'соч ' + row.essaySum) : null,
+          row.primary != null ? el('div', {
+            style:{ padding:'4px 10px', borderRadius:'7px', background:'#DBEAFE',
+                    fontSize:'12px', fontWeight:'700', color:'#1E40AF' },
+            title:'Первичный = тест + сочинение'
+          }, 'Прв ' + row.primary) : null,
+          row.testScore != null ? el('div', {
+            style:{ padding:'4px 10px', borderRadius:'7px', background:'#D1FAE5',
+                    fontSize:'12px', fontWeight:'800', color:'#065F46' },
+            title:'Тестовый по шкале ФИПИ 2026'
+          }, 'Тст ' + row.testScore) : null,
+          row.grade != null ? el('div', {
+            style:{ padding:'4px 11px', borderRadius:'7px', background:'#FFEDD5',
+                    fontSize:'15px', fontWeight:'900',
+                    color: row.grade === 5 ? '#065F46' : row.grade === 4 ? '#92400E'
+                           : row.grade === 3 ? '#9A3412' : '#991B1B' },
+            title:'Школьная отметка'
+          }, '★ ' + row.grade) : null)));
+
+      /* Сетка 26 заданий — 6 в ряд */
+      card.append(el('div', { style:{ fontSize:'11px', fontWeight:'700',
+        color:'var(--ink-3)', marginBottom:'6px' }}, 'Задания 1–26'));
+      const grid = el('div', { style:{ display:'grid',
+        gridTemplateColumns:'repeat(6, 1fr)', gap:'4px' }});
+      for(let q = 1; q <= maxQ; q++){
+        const ans = ansForAttempt[q];
+        const max = ans ? Number(ans.max_points || 0) : 0;
+        const pts = ans ? Number(ans.points || 0) : 0;
+        let bg, color;
+        if(!ans || max === 0){ bg='#F3F4F6'; color='#9CA3AF'; }
+        else if(pts >= max){ bg='#D1FAE5'; color='#065F46'; }
+        else if(pts <= 0){ bg='#FEE2E2'; color='#991B1B'; }
+        else { bg='#FEF3C7'; color='#92400E'; }
+        grid.append(el('div', {
+          style:{ padding:'7px 4px', borderRadius:'6px', background:bg, color,
+                  textAlign:'center', fontSize:'11px', fontWeight:'700',
+                  boxSizing:'border-box', cursor:'pointer' },
+          title: 'Клик — открыть детали задания',
+          onclick: () => {
+            STATE.examineQuestion = {
+              variantId: v.id, num: q,
+              userAnswer: ans ? ans.user_answer : null,
+              points: pts, max: max,
+              attemptId: a.id,
+              studentNote: ans ? (ans.student_note || null) : null,
+              teacherComment: ans ? (ans.teacher_comment || null) : null,
+              scratch: ans ? (ans.scratch || null) : null,
+              studentDrawing: ans ? (ans.student_drawing || null) : null,
+              teacherScratch: ans ? (ans.teacher_scratch || null) : null,
+              teacherDrawing: ans ? (ans.teacher_drawing || null) : null,
+              structuredState: ans ? (ans.structured_state || null) : null,
+              isStudent: false
+            };
+            render();
+          }
+        },
+          el('div', { style:{ fontSize:'10px', opacity:.7 }}, '№' + q),
+          el('div', null, ans && max > 0 ? (pts + '/' + max) : '—')));
+      }
+      card.append(grid);
+
+      /* К1-К10 — если есть проверенное сочинение */
+      const review = row.essay && row.essay.review;
+      if(row.essay){
+        card.append(el('div', { style:{ fontSize:'11px', fontWeight:'700',
+          color:'var(--ink-3)', marginTop:'12px', marginBottom:'6px' }},
+          '✍️ Сочинение' +
+          (row.essay.submittedAt ? ' от ' + new Date(row.essay.submittedAt).toLocaleDateString('ru-RU') : '')));
+        const kGrid = el('div', { style:{ display:'grid',
+          gridTemplateColumns:'repeat(5, 1fr)', gap:'4px' }});
+        Object.keys(K_LIMITS).forEach(k => {
+          const val = review && review[k];
+          const max = K_LIMITS[k];
+          const cc = essayCellColor(val, max);
+          kGrid.append(el('div', {
+            style:{ padding:'6px 4px', borderRadius:'6px', background:cc.bg, color:cc.fg,
+                    textAlign:'center', fontSize:'11px', fontWeight:'700' },
+            title: K_TITLES[k] + ': ' + (val == null ? '—' : (val + '/' + max))
+          },
+            el('div', { style:{ fontSize:'10px', opacity:.7 }}, k.toUpperCase()),
+            el('div', null, val == null ? '—' : (val + '/' + max))));
+        });
+        card.append(kGrid);
+        if(review && review.general_comment){
+          card.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px',
+            background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px',
+            fontSize:'12px', color:'var(--ink-2)', whiteSpace:'pre-wrap' }},
+            '💬 ' + review.general_comment));
+        }
+      }
+
+      tilesWrap.append(card);
+    });
+
+    /* Общий итог по всем попыткам — для скрина родителям полезно */
+    if(attempts.length > 1){
+      const avgTest = avgOf(attempts.map(a => computeAttemptRow(a, Object.values(answersByAttempt[a.id] || {})).testScore));
+      const avgPrim = avgOf(attempts.map(a => computeAttemptRow(a, Object.values(answersByAttempt[a.id] || {})).primary));
+      tilesWrap.append(el('div', { class:'card',
+        style:{ background:'#F0FDFA', border:'2px solid #14B8A6',
+                display:'flex', justifyContent:'space-around', flexWrap:'wrap', gap:'10px',
+                fontSize:'13px', fontWeight:'700', color:'#0F766E' }},
+        el('div', null, '⌀ В среднем (' + attempts.length + ' попыток)'),
+        avgPrim != null ? el('div', null, 'Прв ' + avgPrim.toFixed(1)) : null,
+        avgTest != null ? el('div', null, 'Тст ' + avgTest.toFixed(1)) : null));
+    }
+
+    wrap.append(tilesWrap);
+    wrap.append(el('div', { style:{ marginTop:'12px', color:'var(--ink-3)',
+      fontSize:'12px', textAlign:'center' }},
+      '💡 Сделай скриншот этой страницы — карточки умещаются на экран телефона целиком.'));
+    return wrap;
+  }
+
+  /* === Режим ТАБЛИЦА (исходный код) === */
   const tableWrap = el('div', { style:{ overflowX:'auto', background:'var(--surface)', borderRadius:'12px', border:'1px solid var(--border)' }});
   const table = el('table', { class:'variants-summary', style:{ borderCollapse:'collapse', minWidth:'100%' }});
   const thead = el('thead', null);
