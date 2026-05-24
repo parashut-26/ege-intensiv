@@ -807,9 +807,22 @@ if(typeof document !== 'undefined'){
     }
     return { pending, dueNow };
   }
+  /* ВАЖНО: render() пересоздаёт DOM, а с ним contenteditable-редакторы
+     постов и инлайн-редактор дня. Если учитель что-то печатает —
+     несохранённое слетит. Поэтому пропускаем тик, пока открыт любой
+     редактор (та же логика, что в rerenderPostsView, см. [[bug-polling-wipes-editor]]).
+     Пропущенный пост «дозреет» через render() при сохранении/отмене
+     редактора или при следующем тике, когда редактор закрыт. */
+  function editorIsOpen(){
+    return STATE.editingBlockId != null
+        || STATE.addingPostToDayId != null
+        || STATE.addingPostToIntensiveOrd != null
+        || STATE.editingWarmupDayId != null;
+  }
   setInterval(() => {
     if(typeof STATE === 'undefined' || typeof render !== 'function') return;
     if(document.visibilityState === 'hidden') return;
+    if(editorIsOpen()) return;  /* не дёргаем редактор — потеряются правки */
     const { pending, dueNow } = hasUpcomingScheduled();
     /* Если кто-то «созрел» в последние 30 секунд — обновляем рендер */
     if(dueNow > 0){
@@ -22529,8 +22542,9 @@ function rerenderPostsView(){
      save/cancel редактор закрывается, и render() произойдёт штатно. */
   if(STATE.editingBlockId != null ||
      STATE.addingPostToDayId != null ||
-     STATE.addingPostToIntensiveOrd != null){
-    console.log('[polling] пропускаем rerender — открыт редактор поста');
+     STATE.addingPostToIntensiveOrd != null ||
+     STATE.editingWarmupDayId != null){
+    console.log('[polling] пропускаем rerender — открыт редактор поста/дня');
     return;
   }
   if(STATE.openWarmupDayId != null){
