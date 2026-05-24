@@ -26300,8 +26300,10 @@ function viewSolverVariant(){
     title.textContent = '⛔ Нельзя завершить пробник';
     const msg = document.createElement('div');
     msg.style.cssText = 'font-size:14px;line-height:1.5;color:var(--ink);margin-bottom:12px;';
-    msg.innerHTML = 'Не заполнены задания: <b>' + nums.length + '</b> шт.<br>' +
-      'Нажми на номер — попадёшь прямо к нему. Запиши ответы и попробуй снова.<br>' +
+    msg.innerHTML = 'Поле <b>«Ваш ответ»</b> пустое в заданиях: <b>' + nums.length + '</b> шт.<br>' +
+      'На ЕГЭ балл идёт только за то, что <b>вписано в бланк ответов</b> — ' +
+      'расставленных запятых и подчёркиваний недостаточно. ' +
+      'Нажми на номер — попадёшь к заданию, впиши ответ цифрами/буквами и попробуй снова.<br>' +
       '<span style="color:var(--ink-3);font-size:12px;">Сочинение (№27) можно оставить пустым.</span>';
     const chipsRow = document.createElement('div');
     chipsRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px;';
@@ -26343,14 +26345,15 @@ function viewSolverVariant(){
   });
   const finishSolverFlow = async (qList) => {
     if(STATE.solverPreview){ await finishSolvingAndSave(); return; }
-    /* Считаем пустыми задания 1-26 (без 27), у которых нет ни текстового
-       ответа, ни структуры (запятых, перетаскиваний, дропдаунов и т.д.). */
+    /* Считаем пустыми задания 1-26 (без 27) — даже если ученик расставил
+       запятые / буквы / перетащил пары, в поле «Ваш ответ» должен быть
+       РУЧНОЙ ответ цифрами/буквами. На реальном ЕГЭ зачитывается только
+       то, что вписано в бланк, поэтому тренируем привычку: структура без
+       вписанного ответа = пусто, дальше не идём. */
     const unanswered = qList.filter(q => {
       if(q.num >= 27) return false;
       const txt = (STATE.solverAnswers[q.num] || '').toString().trim();
-      if(txt) return false;
-      if(collectStructuredForNum(q.num)) return false;
-      return true;
+      return !txt;
     }).map(q => q.num).sort((a, b) => a - b);
     if(unanswered.length){
       /* Перед запретом — финальный сейв, чтобы черновик гарантированно
