@@ -28396,14 +28396,31 @@ async function loadGroupMasteryData(){
   const attIds = (attempts || []).map(a => a.id);
   let answers = [];
   if(attIds.length){
-    /* Чанкуем по 200 id'шников чтобы не упереться в длину URL */
-    const chunkSize = 200;
+    /* ВАЖНО: chunk = 25 попыток (≤25×26=650 ответов на чанк).
+       У Supabase/PostgREST стоит db-max-rows (по умолчанию 1000) — и
+       наш restRequest не шлёт Range-заголовок чтобы переопределить cap.
+       Раньше chunk был 200 → каждый запрос мог вернуть до ~5200 строк,
+       сервер молча отдавал только первую 1000, и у части учеников
+       (Алина и др.) ответы вообще не подгружались → пустая строка. */
+    const chunkSize = 25;
     for(let i = 0; i < attIds.length; i += chunkSize){
       const slice = attIds.slice(i, i + chunkSize);
       const part = await restRequest('GET',
         '/test_variant_answers?attempt_id=in.(' + slice.join(',') + ')' +
-        '&select=attempt_id,question_num,points,max_points');
-      if(Array.isArray(part)) answers.push(...part);
+        '&select=attempt_id,question_num,points,max_points' +
+        /* Жёсткий лимит на чанк — теоретический максимум 25×27=675; ставим
+           1000 чтобы на случай нестандартных вариантов с >26 заданий тоже
+           гарантированно влезть, не превышая cap. */
+        '&limit=1000');
+      if(Array.isArray(part)){
+        answers.push(...part);
+        /* Sanity-check: если чанк отдал ровно cap — значит могли уйти строки
+           за окно. Логируем, чтобы в будущем заметить отрегрессию. */
+        if(part.length >= 1000){
+          console.warn('[group-mastery] чанк #' + Math.floor(i/chunkSize) +
+            ' уперся в лимит ' + part.length + ' строк — возможна потеря данных');
+        }
+      }
     }
   }
   STATE.groupMasteryData = {
