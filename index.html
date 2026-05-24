@@ -14396,12 +14396,39 @@ function viewTeacherOverview(){
 
   wrap.append(el('div', { style:{ height:'18px' }}));
 
-  const essayQueue = el('div', { class:'card' });
+  /* ВАЖНО: ESSAYS — это мок, который обнуляется в loadEssaysFromDb (line ~4533).
+     Реальные сочинения живут в DB_ESSAYS. Раньше карточка читала из ESSAYS и
+     показывала «0 новых» как только подгружались реальные данные. */
+  const queueAll = (DB_ESSAYS || []).filter(e =>
+    e.status === 'submitted' || e.status === 'new' ||
+    e.status === 'in_progress' || e.status === 'pre_checked');
+  /* «новых» = только что сданные, ещё не открытые учителем/куратором */
+  const queueNew = queueAll.filter(e => e.status === 'submitted' || e.status === 'new').length;
+  /* DB_ESSAYS уже отсортирован submitted_at.desc — берём top-3 для главной */
+  const queueTop = queueAll.slice(0, 3);
+
+  const essayQueue = el('div', { class:'card', style: queueAll.length ? { cursor:'pointer' } : null,
+    onclick: queueAll.length ? () => { STATE.teacherTab = 'essays'; render(); } : null,
+    title: queueAll.length ? 'Открыть всю папку «Сочинения»' : null });
   essayQueue.append(
     el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'baseline', marginBottom:'14px' }},
       el('h2', null, '📝 Очередь сочинений'),
-      chip(ESSAYS.filter(e => e.status === 'new').length + ' новых', 'red')));
-  ESSAYS.slice(0, 3).forEach(e => essayQueue.append(essayRow(e, false)));
+      chip(queueNew + ' новых', queueNew > 0 ? 'red' : 'gray')));
+  if(!ESSAYS_LOADED){
+    essayQueue.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'4px 0' }},
+      '⏳ Загружаем…'));
+  } else if(!queueAll.length){
+    essayQueue.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'4px 0' }},
+      'Очередь пуста — все сочинения проверены. 🎉'));
+  } else {
+    queueTop.forEach(e => essayQueue.append(essayRow(e, false)));
+    if(queueAll.length > queueTop.length){
+      essayQueue.append(el('div', {
+        style:{ marginTop:'10px', paddingTop:'10px', borderTop:'1px solid var(--border-2)',
+                fontSize:'12px', color:'var(--ink-3)', textAlign:'center', fontWeight:'600' }
+      }, '…и ещё ' + (queueAll.length - queueTop.length) + ' в папке «Сочинения» →'));
+    }
+  }
   wrap.append(essayQueue);
   return wrap;
 }
@@ -29292,7 +29319,27 @@ function viewCuratorEssays(){
     el('h1', null, '📝 Сочинения · предварительная проверка'),
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'20px' }},
       'Куратор делает первичную оценку. После — учитель утверждает финально.'));
-  ESSAYS.filter(e => e.status === 'new' || (e.status === 'pre_checked' && e.preBy === 'c-sofia')).forEach(e => wrap.append(essayRow(e, true)));
+  /* DB_ESSAYS — реальные сочинения; статус 'submitted' в БД = 'new' в моке. */
+  const myId = MY_PROFILE ? MY_PROFILE.id : null;
+  const list = (DB_ESSAYS || []).filter(e => {
+    if(e.status === 'submitted' || e.status === 'new') return true;
+    if(e.status === 'pre_checked'){
+      /* Куратор видит свои предпроверенные — чтобы вернуться/дополнить */
+      return !myId || e.assignedCuratorId === myId;
+    }
+    return false;
+  });
+  if(!ESSAYS_LOADED){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)' }},
+      '⏳ Загружаем сочинения…'));
+    return wrap;
+  }
+  if(!list.length){
+    wrap.append(el('div', { class:'card', style:{ textAlign:'center', color:'var(--ink-3)' }},
+      'Очередь пуста — все сочинения проверены. 🎉'));
+    return wrap;
+  }
+  list.forEach(e => wrap.append(essayRow(e, true)));
   return wrap;
 }
 
@@ -30013,11 +30060,13 @@ function _renderNow(){
        Бейдж: для эксперта — только назначенные ему; для остальных — все «new». */
     if(perms.checkEssays || perms.expertMode){
       const myId = MY_PROFILE ? MY_PROFILE.id : null;
+      /* DB_ESSAYS — реальные сочинения; ESSAYS (мок) обнуляется после loadEssaysFromDb */
       const visibleEssays = perms.expertMode
-        ? ESSAYS.filter(e => e.assignedCuratorId === myId)
-        : ESSAYS;
+        ? (DB_ESSAYS || []).filter(e => e.assignedCuratorId === myId)
+        : (DB_ESSAYS || []);
+      const newCount = visibleEssays.filter(e => e.status === 'submitted' || e.status === 'new').length;
       tabs.push({ key:'essays', label:'Сочинения', ic:'📝',
-        badge: ESSAYS_LOADED ? (visibleEssays.filter(e => e.status === 'new').length || null) : null });
+        badge: ESSAYS_LOADED ? (newCount || null) : null });
     }
     if(perms.addTasks || perms.editTasks || perms.addMaterials || perms.checkTests){
       tabs.push({ key:'content', label:'Задания', ic:'📚' });
