@@ -674,6 +674,103 @@ if(typeof document !== 'undefined'){
 }
 
 /* ============================================================
+   АВТОДЕТЕКТ НОВОЙ ВЕРСИИ ПЛАТФОРМЫ
+   Когда учитель пушит новую версию через Cloudflare Pages, у уже
+   открытых вкладок (особенно у учеников) браузер продолжает крутить
+   старый кэшированный HTML. Они не знают что нужно нажать «обновить»
+   и пропускают исправления.
+
+   Решение: при загрузке запоминаем ETag/Last-Modified текущего index.html
+   на сервере. Раз в 60 сек И при возвращении фокуса на вкладку — снова
+   делаем HEAD-запрос. Если хэш изменился → деплой случился → показываем
+   ненавязчивую плашку в правом нижнем углу: «🆕 Новая версия — Обновить».
+   Без авто-перезагрузки, чтобы не сбить ученика посреди пробника.
+
+   Только на production-хостингах — на localhost/file:// бессмысленно.
+   ============================================================ */
+(function(){
+  if(typeof window === 'undefined' || typeof document === 'undefined') return;
+  const host = location.hostname || '';
+  const isDev = !host || host === 'localhost' || host === '127.0.0.1'
+    || host.startsWith('192.168.') || host.endsWith('.local')
+    || location.protocol === 'file:';
+  if(isDev) return;
+
+  let baselineKey = null;     /* ETag или Last-Modified первой загрузки */
+  let bannerShown = false;
+  let inflight = false;
+
+  /* Берём «отпечаток» текущей версии index.html на сервере.
+     Cloudflare Pages меняет ETag при каждом деплое, поэтому простое
+     сравнение хвостов достаточно. */
+  async function probeKey(){
+    if(inflight) return null;
+    inflight = true;
+    try {
+      const url = location.pathname + '?_v=' + Date.now();
+      const r = await fetch(url, { method: 'HEAD', cache: 'no-store' });
+      const k = r.headers.get('etag') || r.headers.get('last-modified') || null;
+      return k;
+    } catch(_){
+      return null;
+    } finally {
+      inflight = false;
+    }
+  }
+
+  function showUpdateBanner(){
+    if(bannerShown) return;
+    bannerShown = true;
+    const banner = document.createElement('div');
+    banner.id = 'zb-update-banner';
+    banner.style.cssText = [
+      'position:fixed', 'right:14px', 'bottom:14px', 'z-index:99999',
+      'background:#10B981', 'color:#fff',
+      'padding:10px 14px', 'border-radius:12px',
+      'box-shadow:0 6px 24px rgba(0,0,0,.25)',
+      'font-family:inherit', 'font-size:13px', 'font-weight:700',
+      'display:flex', 'align-items:center', 'gap:10px',
+      'cursor:default', 'max-width:calc(100vw - 28px)'
+    ].join(';');
+    banner.innerHTML =
+      '<span>🆕 Доступна новая версия платформы</span>' +
+      '<button id="zb-update-reload" style="' +
+        'background:#fff;color:#065F46;border:none;padding:6px 12px;' +
+        'border-radius:8px;font-weight:800;font-size:12px;cursor:pointer;' +
+        'font-family:inherit">Обновить</button>' +
+      '<button id="zb-update-close" title="Скрыть" style="' +
+        'background:transparent;color:#fff;border:none;padding:4px 6px;' +
+        'cursor:pointer;font-size:18px;line-height:1;opacity:.85">×</button>';
+    document.body.appendChild(banner);
+    document.getElementById('zb-update-reload').onclick = () => {
+      try { location.reload(); } catch(_){ location.href = location.href; }
+    };
+    document.getElementById('zb-update-close').onclick = () => {
+      banner.remove();
+      /* Снова показать через 5 минут — если за это время был ещё деплой */
+      setTimeout(() => { bannerShown = false; check(); }, 5 * 60 * 1000);
+    };
+  }
+
+  async function check(){
+    const k = await probeKey();
+    if(!k) return;
+    if(!baselineKey){ baselineKey = k; return; }
+    if(k !== baselineKey) showUpdateBanner();
+  }
+
+  /* Базовый отпечаток снимаем через секунду после загрузки —
+     чтобы не конкурировать с авторизацией / первой подгрузкой данных. */
+  setTimeout(check, 1500);
+  /* Polling каждые 60 секунд */
+  setInterval(check, 60 * 1000);
+  /* При возвращении на вкладку — сразу */
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible') check();
+  });
+})();
+
+/* ============================================================
    ИНДИКАТОРЫ «НОВОЕ» / «НЕПРОЧИТАННОЕ» для ученика
    Ученик видит точку/число на табе «Дни» и плашку на главной,
    когда учитель опубликовал новый пост в Разогреве или дне
