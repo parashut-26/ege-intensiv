@@ -4589,7 +4589,7 @@ async function loadEssaysFromDb(){
   try {
     /* Берём сочинения и подтягиваем имя ученика. У essays три FK к profiles
        (student_id, pre_checked_by, finalized_by) — указываем явно через !essays_student_id_fkey. */
-    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,photo_urls,word_count,status,submitted_at,format,assigned_curator_id,student:profiles!essays_student_id_fkey(full_name,email),review:essay_reviews(total,general_comment,is_pre_check,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10)&order=submitted_at.desc&limit=200');
+    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,photo_urls,word_count,status,submitted_at,format,assigned_curator_id,source_text,source_problem,source_variant_id,variant_id,student:profiles!essays_student_id_fkey(full_name,email),review:essay_reviews(total,general_comment,is_pre_check,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10)&order=submitted_at.desc&limit=200');
     if(Array.isArray(arr)){
       DB_ESSAYS = arr.map(e => {
         const r = e.review && (Array.isArray(e.review) ? e.review[0] : e.review);
@@ -4604,7 +4604,16 @@ async function loadEssaysFromDb(){
           status: e.status,
           submittedAt: e.submitted_at,
           format: e.format,
-          assignedCuratorId: e.assigned_curator_id || null
+          assignedCuratorId: e.assigned_curator_id || null,
+          /* Контекст исходного текста для проверки куратором/учителем:
+             — sourceText: если ученик вписал свой текст вручную
+             — sourceProblem: проблема, которую сформулировал ученик
+             — sourceVariantId / variantId: привязка к опубликованному варианту,
+               откуда подтягиваем проблемный вопрос, исходник и пояснение учителя */
+          sourceText: e.source_text || '',
+          sourceProblem: e.source_problem || '',
+          sourceVariantId: e.source_variant_id || null,
+          variantId: e.variant_id || null
         };
         if(r){
           obj.review = r;
@@ -16168,6 +16177,75 @@ function modalEssayResult(essayId){
     el('h4', { style:{ marginTop:'4px' }}, '📊 Баллы по критериям'),
     list);
 
+  /* === Контекст задания 27 для ученика — ПОСЛЕ сдачи и проверки ===
+     Это разбор: проблемный вопрос, исходный текст, и САМОЕ ВАЖНОЕ —
+     пояснение учителя с позицией автора, готовым сочинением, связями.
+     До сдачи (в редакторе) этого блока НЕТ — чтобы ученик не подсмотрел.
+     Здесь, после проверки работы — уже полезный материал для саморазбора. */
+  const variantIdForCtx = essay.sourceVariantId || essay.variantId || null;
+  if(variantIdForCtx){
+    loadEssayVariantContext(variantIdForCtx);
+  }
+  const ctxPrev = STATE.essayDraftSourcePreview;
+  const ctxMatches = variantIdForCtx && ctxPrev && ctxPrev.variantId === variantIdForCtx;
+  if(variantIdForCtx){
+    const card = el('div', { class:'card', style:{ marginTop:'12px',
+      background:'#F0FDF4', border:'1px solid #86EFAC' }});
+    card.append(el('div', { style:{ fontSize:'11px', fontWeight:'700',
+      color:'#166534', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'8px' }},
+      '📖 Разбор задания 27'));
+    if(!ctxMatches || (ctxPrev && ctxPrev.loading)){
+      card.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'6px 0' }},
+        '⏳ Подгружаю разбор…'));
+    } else if(ctxPrev.error){
+      card.append(el('div', { style:{ color:'#991B1B', fontSize:'12px', padding:'6px 0' }},
+        '⚠ Не удалось подгрузить разбор: ' + ctxPrev.error));
+    } else {
+      if(ctxPrev.q27){
+        card.append(el('div', { style:{ marginBottom:'10px', padding:'10px 12px',
+          background:'#fff', border:'1px solid #BBF7D0', borderRadius:'8px' }},
+          el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#166534',
+                               textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'4px' }},
+            '✍️ Проблемный вопрос'),
+          el('div', { style:{ whiteSpace:'pre-wrap', fontSize:'13px', lineHeight:'1.5' }},
+            ctxPrev.q27)));
+      }
+      if(ctxPrev.sourceText){
+        const det = el('details', { style:{ marginBottom:'8px' }});
+        det.append(
+          el('summary', { style:{ cursor:'pointer', fontSize:'12px', fontWeight:'700',
+                                   color:'#166534', userSelect:'none' }},
+            '📖 Показать исходный текст'),
+          el('div', { style:{ whiteSpace:'pre-wrap', marginTop:'8px',
+                              maxHeight:'320px', overflowY:'auto', padding:'10px 12px',
+                              background:'#fff', border:'1px solid var(--border)', borderRadius:'8px',
+                              fontSize:'13px', lineHeight:'1.7' }},
+            ctxPrev.sourceText));
+        card.append(det);
+      }
+      if(ctxPrev.explanation){
+        const det = el('details', { style:{ marginTop:'8px', paddingTop:'8px',
+          borderTop:'1px dashed #86EFAC' }});
+        det.append(
+          el('summary', { style:{ cursor:'pointer', fontSize:'12px', fontWeight:'800',
+                                   color:'#92400E', userSelect:'none',
+                                   background:'#FFFBEB', padding:'6px 10px',
+                                   borderRadius:'6px', display:'inline-block' }},
+            '🔑 Показать пояснение учителя (позиция автора · возможные связи · образец)'),
+          el('div', { style:{ whiteSpace:'pre-wrap', marginTop:'8px', padding:'10px 12px',
+                              background:'#FFFBEB', border:'1px solid #FACC15', borderRadius:'8px',
+                              fontSize:'13px', lineHeight:'1.7' }},
+            ctxPrev.explanation));
+        card.append(det);
+      }
+      if(!ctxPrev.q27 && !ctxPrev.sourceText && !ctxPrev.explanation){
+        card.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', fontStyle:'italic', padding:'4px 0' }},
+          '(учитель ещё не заполнил задание 27 в этом варианте)'));
+      }
+    }
+    body.append(card);
+  }
+
   const foot = el('div', { class:'modal-foot' },
     el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }},
       'Оценка по критериям ФИПИ К1–К10'),
@@ -17625,8 +17703,118 @@ function modalEssayReview(essayId){
            wordCount >= 150 ? 'green' : 'red'));
   }
 
+  /* === Карточка контекста задания 27 ===
+     Для куратора это критично: он часто не «в системе» (нет доступа
+     к банку вариантов) и должен понимать, по какому исходному тексту
+     ребёнок писал, какую проблему сформулировал учитель, и какая
+     ожидаемая позиция автора / готовое сочинение / связи лежат в
+     пояснении учителя. Используем тот же loadEssayVariantContext,
+     что и в редакторе ученика, плюс рендерим explanation. */
+  const variantIdForContext = essay.sourceVariantId || essay.variantId || null;
+  if(variantIdForContext){
+    loadEssayVariantContext(variantIdForContext);
+  }
+  const ctxPrev = STATE.essayDraftSourcePreview;
+  const hasMatchingContext = variantIdForContext && ctxPrev && ctxPrev.variantId === variantIdForContext;
+
+  const contextCard = (() => {
+    /* Если ученик указал свой исходный текст (sourceText в самом essay),
+       показываем его — приоритетнее варианта */
+    const ownText  = (essay.sourceText || '').trim();
+    const ownProb  = (essay.sourceProblem || '').trim();
+    if(!variantIdForContext && !ownText && !ownProb) return null;
+
+    const card = el('div', { class:'card', style:{ marginBottom:'12px',
+      background:'#F0FDF4', border:'1px solid #86EFAC' }});
+    card.append(el('div', { style:{ fontSize:'11px', fontWeight:'700',
+      color:'#166534', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'8px' }},
+      '📖 Контекст задания 27 — для проверяющего'));
+
+    /* Источник текста: либо ученик вписал свой, либо из варианта */
+    if(ownText){
+      const det = el('details', { open: true,
+        style:{ marginBottom:'8px', paddingBottom:'8px', borderBottom:'1px dashed #86EFAC' }});
+      det.append(
+        el('summary', { style:{ cursor:'pointer', fontSize:'12px', fontWeight:'700',
+                                 color:'#166534', userSelect:'none', marginBottom:'4px' }},
+          '✏️ Исходный текст (указан учеником при сдаче)'),
+        el('div', { style:{ whiteSpace:'pre-wrap', marginTop:'6px',
+                            maxHeight:'260px', overflowY:'auto', padding:'8px 10px',
+                            background:'#fff', border:'1px solid var(--border)', borderRadius:'8px',
+                            fontSize:'13px', lineHeight:'1.6', color:'var(--ink)' }},
+          ownText));
+      card.append(det);
+    }
+    if(ownProb){
+      card.append(el('div', { style:{ marginBottom:'8px', padding:'8px 10px',
+        background:'#fff', border:'1px solid #BBF7D0', borderRadius:'8px', fontSize:'13px' }},
+        el('span', { style:{ fontWeight:'700', color:'#166534' }}, '🎯 Проблема (от ученика): '),
+        ownProb));
+    }
+
+    /* Из варианта: проблемный вопрос + исходный текст + пояснение учителя */
+    if(variantIdForContext){
+      if(!hasMatchingContext || (ctxPrev && ctxPrev.loading)){
+        card.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'6px 0' }},
+          '⏳ Подгружаю задание 27 из варианта…'));
+      } else if(ctxPrev.error){
+        card.append(el('div', { style:{ color:'#991B1B', fontSize:'12px', padding:'6px 0' }},
+          '⚠ Не удалось подгрузить контекст: ' + ctxPrev.error));
+      } else {
+        /* Проблемный вопрос — всегда раскрыт */
+        if(ctxPrev.q27){
+          card.append(el('div', { style:{ marginBottom:'10px', padding:'10px 12px',
+            background:'#fff', border:'1px solid #BBF7D0', borderRadius:'8px' }},
+            el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#166534',
+                                 textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'4px' }},
+              '✍️ Проблемный вопрос (задание 27)'),
+            el('div', { style:{ whiteSpace:'pre-wrap', fontSize:'13px', lineHeight:'1.5' }},
+              ctxPrev.q27)));
+        }
+        /* Исходный текст — свёрнут по умолчанию */
+        if(ctxPrev.sourceText && !ownText){
+          const det = el('details', { style:{ marginBottom:'8px' }});
+          det.append(
+            el('summary', { style:{ cursor:'pointer', fontSize:'12px', fontWeight:'700',
+                                     color:'#166534', userSelect:'none' }},
+              '📖 Показать исходный текст (тот же, что в заданиях 22–26)'),
+            el('div', { style:{ whiteSpace:'pre-wrap', marginTop:'8px',
+                                maxHeight:'320px', overflowY:'auto', padding:'10px 12px',
+                                background:'#fff', border:'1px solid var(--border)', borderRadius:'8px',
+                                fontSize:'13px', lineHeight:'1.7', color:'var(--ink)' }},
+              ctxPrev.sourceText));
+          card.append(det);
+        }
+        /* Пояснение учителя — свёрнуто по умолчанию. Это позиция автора,
+           готовое сочинение, связи. КЛЮЧЕВОЕ для куратора. */
+        if(ctxPrev.explanation){
+          const det = el('details', { style:{ marginTop:'8px', paddingTop:'8px',
+            borderTop:'1px dashed #86EFAC' }});
+          det.append(
+            el('summary', { style:{ cursor:'pointer', fontSize:'12px', fontWeight:'800',
+                                     color:'#92400E', userSelect:'none',
+                                     background:'#FFFBEB', padding:'6px 10px',
+                                     borderRadius:'6px', display:'inline-block' }},
+              '🔑 Показать пояснение учителя (позиция автора / готовое сочинение / связи)'),
+            el('div', { style:{ whiteSpace:'pre-wrap', marginTop:'8px',
+                                padding:'10px 12px',
+                                background:'#FFFBEB', border:'1px solid #FACC15', borderRadius:'8px',
+                                fontSize:'13px', lineHeight:'1.7', color:'var(--ink)' }},
+              ctxPrev.explanation));
+          card.append(det);
+        } else if(!ctxPrev.q27 && !ctxPrev.sourceText){
+          card.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', fontStyle:'italic', padding:'4px 0' }},
+            '(в этом варианте задание 27 не заполнено)'));
+        }
+      }
+    }
+
+    return card;
+  })();
+
   leftCol.append(
     headBadges,
+    contextCard,
     el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
       isPhotoEssay
         ? '💡 Кликни по фото в месте ошибки — поставится пин с категорией и комментарием. Клик по пину — посмотреть/удалить. Баллы К4–К10 пересчитаются автоматически.'
@@ -17667,15 +17855,17 @@ function modalEssayReview(essayId){
               btn.textContent = '⏳ Проверяю…';
               try {
                 /* Приоритет источника:
-                   1) essay.source_text — ученик вписал свой текст при сдаче
-                   2) essay.source_variant_id — ученик выбрал вариант
-                   3) essay.variant_id — старая привязка к решённому пробнику */
-                let srcText = (essay.source_text || '').trim();
+                   1) essay.sourceText — ученик вписал свой текст при сдаче
+                   2) essay.sourceVariantId — ученик выбрал вариант
+                   3) essay.variantId — старая привязка к решённому пробнику
+                   Поля в camelCase, как они сейчас мапятся в DB_ESSAYS. */
+                let srcText = (essay.sourceText || essay.source_text || '').trim();
                 if(!srcText){
-                  let vid = essay.source_variant_id || essay.variant_id;
+                  let vid = essay.sourceVariantId || essay.variantId
+                    || essay.source_variant_id || essay.variant_id;
                   if(!vid){
                     const dbE = DB_ESSAYS.find(e => e.id === essay.id);
-                    if(dbE) vid = dbE.source_variant_id || dbE.variant_id;
+                    if(dbE) vid = dbE.sourceVariantId || dbE.variantId;
                   }
                   if(vid){
                     try {
@@ -17687,7 +17877,7 @@ function modalEssayReview(essayId){
                   }
                 }
                 /* Если ученик указал проблему — добавим как подсказку для AI */
-                const problem = (essay.source_problem || '').trim();
+                const problem = (essay.sourceProblem || essay.source_problem || '').trim();
                 let essayForAi = essayText;
                 if(problem){
                   essayForAi = '(Ученик заявил проблему: ' + problem + ')\n\n' + essayText;
@@ -21325,36 +21515,44 @@ async function loadVariantsList(){
   }
 }
 
-/* --- Подгрузка контекста задания 27 для редактора сочинения ученика.
-   Когда ученик в редакторе сочинения выбирает вариант, чтобы не лезть
-   в банк за формулировкой проблемы и исходным текстом — подтягиваем их
-   автоматически. Кэшируем в STATE.essayDraftSourcePreview по variantId,
-   повторно не дёргаем БД пока variantId тот же. */
+/* --- Подгрузка контекста задания 27 для редактора сочинения ученика
+   И ДЛЯ редактора проверки сочинения куратором/учителем.
+   Структура:
+     q27         — формулировка проблемного вопроса (question_text)
+     sourceText  — исходный текст для сочинения (kind='text_22_26')
+     explanation — пояснение учителя: позиция автора, готовое сочинение,
+                   анализ связи. ПОКАЗЫВАЕМ ТОЛЬКО КУРАТОРУ/УЧИТЕЛЮ,
+                   у ученика этот блок НЕ рендерится — он не должен
+                   видеть готовый ответ до сдачи.
+   Кэш в STATE.essayDraftSourcePreview по variantId — не дёргаем БД
+   повторно пока variantId не сменился. Кэш переиспользуется и в
+   редакторе ученика, и в проверке у куратора. */
 async function loadEssayVariantContext(variantId){
   if(!variantId) return;
   const cur = STATE.essayDraftSourcePreview;
   if(cur && cur.variantId === variantId && (cur.loading || cur.q27 != null || cur.error)) return;
-  STATE.essayDraftSourcePreview = { variantId, loading: true, q27: null, sourceText: null, error: null };
+  STATE.essayDraftSourcePreview = { variantId, loading: true, q27: null, sourceText: null, explanation: null, error: null };
   render();
   try {
     const [qArr, srcArr] = await Promise.all([
       restRequest('GET',
         '/test_variant_questions?variant_id=eq.' + encodeURIComponent(variantId) +
-        '&num=eq.27&select=question_text&limit=1'),
+        '&num=eq.27&select=question_text,explanation&limit=1'),
       restRequest('GET',
         '/test_variant_source_texts?variant_id=eq.' + encodeURIComponent(variantId) +
         '&kind=eq.text_22_26&select=body&limit=1')
     ]);
-    const q27 = Array.isArray(qArr) && qArr[0] && (qArr[0].question_text || '').trim() || '';
-    const src = Array.isArray(srcArr) && srcArr[0] && (srcArr[0].body || '').trim() || '';
+    const q27   = Array.isArray(qArr) && qArr[0] && (qArr[0].question_text || '').trim() || '';
+    const expl  = Array.isArray(qArr) && qArr[0] && (qArr[0].explanation   || '').trim() || '';
+    const src   = Array.isArray(srcArr) && srcArr[0] && (srcArr[0].body || '').trim() || '';
     /* На случай если ученик за время загрузки переключил вариант — кладём только если variantId совпадает */
     if(!STATE.essayDraftSourcePreview || STATE.essayDraftSourcePreview.variantId !== variantId) return;
-    STATE.essayDraftSourcePreview = { variantId, loading: false, q27, sourceText: src, error: null };
+    STATE.essayDraftSourcePreview = { variantId, loading: false, q27, sourceText: src, explanation: expl, error: null };
     render();
   } catch(e){
     console.warn('[essay-draft] context load error:', e.message);
     if(!STATE.essayDraftSourcePreview || STATE.essayDraftSourcePreview.variantId !== variantId) return;
-    STATE.essayDraftSourcePreview = { variantId, loading: false, q27: null, sourceText: null, error: e.message || 'ошибка' };
+    STATE.essayDraftSourcePreview = { variantId, loading: false, q27: null, sourceText: null, explanation: null, error: e.message || 'ошибка' };
     render();
   }
 }
