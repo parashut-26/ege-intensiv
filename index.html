@@ -26098,13 +26098,84 @@ function viewSolverVariant(){
     overlay.onclick = (e) => { if(e.target === overlay) finish(false); };
     document.body.append(overlay);
   });
+  /* Жёсткий запрет завершить пробник с пустыми ответами.
+     Показывает модалку со списком невыполненных заданий 1-26 (27 можно
+     оставить пустым). Кнопки-номера скроллят к нужному заданию и
+     подсвечивают его красным. Кнопки «Всё равно завершить» НЕТ —
+     это просьба учителя после массовых проблем с пустыми ответами
+     во время краш-теста 23-24 мая 2026. */
+  const showUnansweredBlocker = (nums) => new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);' +
+      'z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:14px;padding:22px;' +
+      'max-width:480px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25);font-family:inherit;';
+    const title = document.createElement('div');
+    title.style.cssText = 'font-size:16px;font-weight:800;color:#991B1B;margin-bottom:8px;';
+    title.textContent = '⛔ Нельзя завершить пробник';
+    const msg = document.createElement('div');
+    msg.style.cssText = 'font-size:14px;line-height:1.5;color:var(--ink);margin-bottom:12px;';
+    msg.innerHTML = 'Не заполнены задания: <b>' + nums.length + '</b> шт.<br>' +
+      'Нажми на номер — попадёшь прямо к нему. Запиши ответы и попробуй снова.<br>' +
+      '<span style="color:var(--ink-3);font-size:12px;">Сочинение (№27) можно оставить пустым.</span>';
+    const chipsRow = document.createElement('div');
+    chipsRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;margin-bottom:18px;';
+    const closeAnd = (fn) => {
+      try { document.body.removeChild(overlay); } catch(_){}
+      if(typeof fn === 'function') fn();
+      resolve();
+    };
+    nums.forEach(n => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = String(n);
+      b.style.cssText = 'min-width:38px;height:34px;padding:0 8px;border-radius:7px;' +
+        'background:#FEE2E2;color:#991B1B;border:1.5px solid #EF4444;cursor:pointer;' +
+        'font-size:13px;font-weight:800;font-family:inherit;';
+      b.onclick = () => closeAnd(() => {
+        const target = document.getElementById('solver-task-' + n);
+        if(target){
+          target.scrollIntoView({ behavior:'smooth', block:'start' });
+          target.style.transition = 'box-shadow .3s';
+          target.style.boxShadow = '0 0 0 3px #EF4444';
+          setTimeout(() => { target.style.boxShadow = ''; }, 1800);
+        }
+      });
+      chipsRow.append(b);
+    });
+    const btns = document.createElement('div');
+    btns.style.cssText = 'display:flex;justify-content:flex-end;';
+    const okBtn = document.createElement('button');
+    okBtn.textContent = 'Понятно';
+    okBtn.style.cssText = 'padding:9px 22px;border-radius:8px;background:var(--p);' +
+      'color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;';
+    okBtn.onclick = () => closeAnd();
+    btns.append(okBtn);
+    box.append(title, msg, chipsRow, btns);
+    overlay.append(box);
+    overlay.onclick = (e) => { if(e.target === overlay) closeAnd(); };
+    document.body.append(overlay);
+  });
   const finishSolverFlow = async (qList) => {
     if(STATE.solverPreview){ await finishSolvingAndSave(); return; }
-    const unanswered = qList.filter(q => !(STATE.solverAnswers[q.num] || '').trim());
-    const msg = unanswered.length
-      ? ('Не отвечено заданий: ' + unanswered.length + '. Всё равно завершить?')
-      : 'Завершить пробник? Ответы будут проверены автоматически.';
-    const ok = await customConfirm(msg);
+    /* Считаем пустыми задания 1-26 (без 27), у которых нет ни текстового
+       ответа, ни структуры (запятых, перетаскиваний, дропдаунов и т.д.). */
+    const unanswered = qList.filter(q => {
+      if(q.num >= 27) return false;
+      const txt = (STATE.solverAnswers[q.num] || '').toString().trim();
+      if(txt) return false;
+      if(collectStructuredForNum(q.num)) return false;
+      return true;
+    }).map(q => q.num).sort((a, b) => a - b);
+    if(unanswered.length){
+      /* Перед запретом — финальный сейв, чтобы черновик гарантированно
+         улетел в БД (вдруг ученик уйдёт на другую страницу). */
+      try { saveSolverDraft(); } catch(_){}
+      await showUnansweredBlocker(unanswered);
+      return;
+    }
+    const ok = await customConfirm('Завершить пробник? Ответы будут проверены автоматически.');
     if(!ok) return;
     await finishSolvingAndSave();
   };
