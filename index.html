@@ -793,6 +793,7 @@ const STATE = {
   inviteCodesLoaded: false,
   /* Сводная по ученику в кабинете учителя: 'by_variant' | 'by_student' */
   variantsView: 'by_variant',
+  variantSummarySort: 'score',  // 'score' | 'name' — сортировка строк в сводной по варианту
   selectedStudentForVariants: null,   // профайл-id выбранного ученика
   studentVariantsData: null,          // { student, attempts, answersByAttempt }
   /* Модалка ручной привязки попытки к ученику */
@@ -23458,6 +23459,42 @@ function viewVariantSummary(){
     wrap.append(banner);
   }
 
+  /* === Тумблер сортировки строк таблицы ===
+     По умолчанию по баллам (как и было — сильная сторона UI: видно лидеров).
+     Альтернатива — А→Я, когда нужно найти конкретного ребёнка по имени.
+     Без persist в localStorage: следующий заход — снова по баллам. */
+  const sortMode = STATE.variantSummarySort === 'name' ? 'name' : 'score';
+  const sortBtn = (key, label, title) => el('button', {
+    title,
+    style:{ padding:'5px 11px', borderRadius:'7px', fontWeight:'700', fontSize:'12px',
+            background: sortMode === key ? 'var(--surface)' : 'transparent',
+            color: sortMode === key ? 'var(--ink)' : 'var(--ink-3)',
+            boxShadow: sortMode === key ? '0 1px 2px rgba(0,0,0,.08)' : 'none',
+            border:'none', cursor:'pointer', fontFamily:'inherit' },
+    onclick: () => { STATE.variantSummarySort = key; render(); }
+  }, label);
+  wrap.append(el('div', { style:{ display:'flex', alignItems:'center', gap:'10px',
+    marginBottom:'10px', fontSize:'12px', color:'var(--ink-3)' }},
+    el('span', null, 'Сортировка:'),
+    el('div', { style:{ display:'flex', gap:'3px', background:'var(--bg)',
+      borderRadius:'9px', padding:'3px' }},
+      sortBtn('score', '🏆 По баллам', 'Сначала те, у кого выше балл (как было)'),
+      sortBtn('name',  'А→Я По алфавиту', 'По фамилии-имени, удобно найти конкретного ученика'))));
+
+  /* Сортируем копию массива, не мутируя attempts (там может быть live-popling). */
+  const sortedAttempts = attempts.slice().sort((a, b) => {
+    const an = (a.profile && a.profile.full_name) || a.otp_full_name || a.otp_user || '';
+    const bn = (b.profile && b.profile.full_name) || b.otp_full_name || b.otp_user || '';
+    if(sortMode === 'name'){
+      return an.localeCompare(bn, 'ru', { sensitivity: 'base' });
+    }
+    /* score: больший балл сверху, ничьи разрешаем по имени */
+    const as = Number(a.total_score) || 0;
+    const bs = Number(b.total_score) || 0;
+    if(as !== bs) return bs - as;
+    return an.localeCompare(bn, 'ru', { sensitivity: 'base' });
+  });
+
   /* Таблица: строки = ученики, колонки = №1..N + К1..К10 + тест + сочинение + первичный + тестовый + отметка */
   const tableWrap = el('div', { style:{ overflowX:'auto', background:'var(--surface)', borderRadius:'12px', border:'1px solid var(--border)' }});
   const table = el('table', { class:'variants-summary', style:{ borderCollapse:'collapse', minWidth:'100%' }});
@@ -23485,7 +23522,7 @@ function viewVariantSummary(){
   table.append(thead);
 
   const tbody = el('tbody', null);
-  attempts.forEach((a, idx) => {
+  sortedAttempts.forEach((a, idx) => {
     const isLive = a.started_at && !a.finished_at;
     const tr = el('tr', { style: isLive ? { background:'#FEF2F2' } : null });
     const profileName = (a.profile && a.profile.full_name) || a.otp_full_name || a.otp_user || '?';
