@@ -26446,14 +26446,29 @@ async function finishSolvingAndSave(){
     showToast('⚠ Не удалось сохранить попытку: ' + e.message);
     return;
   }
-  /* 2. Записать ответы */
-  const answersPayload = result.map(r => ({
-    attempt_id: attemptId,
-    question_num: r.num,
-    user_answer: r.user,
-    points: r.points,
-    max_points: r.max,
-  }));
+  /* 2. Записать ответы.
+     ВАЖНО: если ответ ученика пустой, НЕ затираем points/max_points —
+     возможно учитель уже руками поставил балл (через examineQuestion
+     → «Изменить балл»). В этом случае пишем только user_answer (пустой),
+     а points/max_points в БД остаются как были. */
+  const answersPayload = result.map(r => {
+    const userTrim = (r.user || '').toString().trim();
+    if(!userTrim){
+      return {
+        attempt_id: attemptId,
+        question_num: r.num,
+        user_answer: r.user
+        /* points / max_points НЕ пишем — сохраняем ручную правку учителя */
+      };
+    }
+    return {
+      attempt_id: attemptId,
+      question_num: r.num,
+      user_answer: r.user,
+      points: r.points,
+      max_points: r.max,
+    };
+  });
   /* Отдельно — позиция автора из задания 27 (если заполнена). Не влияет
      на балл (points=0, max_points=0), но сохраняется как ответ, чтобы
      ученик/учитель увидели её в разборе попытки. */
@@ -27122,13 +27137,29 @@ function viewSolverVariant(){
       chipsRow.append(b);
     });
     const btns = document.createElement('div');
-    btns.style.cssText = 'display:flex;justify-content:flex-end;';
+    btns.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;';
+    /* Аварийный выход — серая текстовая ссылка слева. На случай если поле
+       залочено фантомным нулём или ученица всё перепробовала и просто хочет
+       сдать как есть. Учитель потом доставит баллы вручную. */
+    const forceLink = document.createElement('button');
+    forceLink.type = 'button';
+    forceLink.textContent = '↪ Всё равно сдать (учитель доставит баллы вручную)';
+    forceLink.style.cssText = 'background:transparent;border:none;color:var(--ink-3);' +
+      'cursor:pointer;font-size:11px;font-family:inherit;text-decoration:underline;' +
+      'padding:4px 0;text-align:left;';
+    forceLink.onclick = async () => {
+      const ok = await customConfirm(
+        'Сдать пробник с пустыми ответами в ' + nums.length + ' заданиях?\n\n' +
+        'За пустые поля автоматически ставится 0 баллов. ' +
+        'Учитель сможет потом проверить вручную и доставить баллы.');
+      if(ok) closeAnd(() => { window.__zb_forceFinish = true; });
+    };
     const okBtn = document.createElement('button');
     okBtn.textContent = 'Понятно';
     okBtn.style.cssText = 'padding:9px 22px;border-radius:8px;background:var(--p);' +
       'color:#fff;border:none;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;';
     okBtn.onclick = () => closeAnd();
-    btns.append(okBtn);
+    btns.append(forceLink, okBtn);
     box.append(title, msg, chipsRow, btns);
     overlay.append(box);
     overlay.onclick = (e) => { if(e.target === overlay) closeAnd(); };
@@ -27150,8 +27181,12 @@ function viewSolverVariant(){
       /* Перед запретом — финальный сейв, чтобы черновик гарантированно
          улетел в БД (вдруг ученик уйдёт на другую страницу). */
       try { saveSolverDraft(); } catch(_){}
+      window.__zb_forceFinish = false;
       await showUnansweredBlocker(unanswered);
-      return;
+      /* Если ученик в модалке нажал «↪ Всё равно сдать» — продолжаем
+         к финализации, как будто блока не было. Учитель потом проверит. */
+      if(!window.__zb_forceFinish) return;
+      window.__zb_forceFinish = false;
     }
     const ok = await customConfirm('Завершить пробник? Ответы будут проверены автоматически.');
     if(!ok) return;
@@ -27423,14 +27458,31 @@ function viewSolverVariant(){
               boxSizing:'border-box', fontFamily:'inherit',
               background: checkedInfo ? '#FAFAFA' : '#fff' }
     });
-    if(checkedInfo) input.readOnly = true;   // ответ заперт после проверки
+    /* Локаем поле ТОЛЬКО если предыдущая проверка была полностью правильной
+       (points >= max). Если получили 0 или частично — оставляем редактируемым,
+       чтобы ученик мог переисправить. Это лечит «фантомный ноль»: старая
+       версия записывала checkedInfo с 0 баллов из-за бага №16, и ребёнок
+       не мог потом вообще ничего вписать в поле. */
+    if(checkedInfo && checkedInfo.max > 0 && checkedInfo.points >= checkedInfo.max){
+      input.readOnly = true;
+    }
     input.oninput = () => {
       STATE.solverAnswers[q.num] = input.value;
+      /* Если ввели что-то поверх старой «проверенной»-неверной отметки —
+         сбрасываем checkedInfo и оживляем кнопку «Проверить». */
+      if((STATE.solverChecked || {})[q.num]){
+        delete STATE.solverChecked[q.num];
+      }
       /* throttle сохранения — не чаще раз в секунду */
       if(STATE._solverSaveTimer) clearTimeout(STATE._solverSaveTimer);
       STATE._solverSaveTimer = setTimeout(saveSolverDraft, 800);
       /* Сбросить состояние кнопки на «активна» если ответ ввели заново */
-      if(checkBtn) checkBtn.disabled = !input.value.trim();
+      if(checkBtn){
+        checkBtn.disabled = !input.value.trim();
+        checkBtn.textContent = '✓ Проверить';
+        input.style.borderColor = 'var(--border-2)';
+        input.style.background = '#fff';
+      }
     };
     card.append(input);
     /* Если у задания есть подсказка про текст — показать кнопку фокуса справа */
