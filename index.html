@@ -13229,8 +13229,26 @@ function studentVariantsCard(){
         });
         cell.append(kGrid);
         if(review && review.general_comment){
-          cell.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px', fontSize:'12px', color:'var(--ink-2)' }},
-            '💬 ' + review.general_comment));
+          /* Метка «Импорт из Excel — Х» ставится автоматически при загрузке xlsx из
+             OTP — это не настоящий комментарий учителя. Рендерим как маленький
+             серый ярлык, чтобы не путать с реальным отзывом. */
+          const gc = String(review.general_comment);
+          const isImport = gc.startsWith('Импорт из Excel');
+          if(isImport){
+            const theme = gc.replace(/^Импорт из Excel(\s*—\s*|\s*-\s*|\s*:\s*)?/, '').trim();
+            cell.append(el('div', { style:{ marginTop:'8px', padding:'4px 8px',
+              background:'#F3F4F6', border:'1px solid var(--border-2)', borderRadius:'6px',
+              fontSize:'10px', color:'var(--ink-3)', display:'inline-block',
+              textTransform:'uppercase', letterSpacing:'.04em', fontWeight:'700' },
+              title:'Балл по этому сочинению был перенесён вручную из xlsx-таблицы OTP, а не оставлен учителем в системе'
+            },
+              '📊 Балл из OTP-таблицы' + (theme ? ' · ' + theme : '')));
+          } else {
+            cell.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px',
+              background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px',
+              fontSize:'12px', color:'var(--ink-2)' }},
+              '💬 ' + review.general_comment));
+          }
         }
         /* Кнопка «➕ Сдать ещё одно сочинение» — для случая, когда ученик
            переписал работу после РНО и хочет, чтобы учитель посмотрел заново.
@@ -16161,7 +16179,20 @@ function modalEssayResult(essayId){
 
   const rTxt = safeComment(r.general_comment);
   const rVu = safeVoiceUrl(r.voice_url);
-  if(rTxt || rVu){
+  /* «Импорт из Excel» — системная метка, не настоящий комментарий.
+     Если ТОЛЬКО метка и нет голосового — показываем маленьким ярлыком,
+     не рисуем большой блок «💬 Комментарий учителя». */
+  const isImportOnly = rTxt && String(rTxt).startsWith('Импорт из Excel') && !rVu;
+  if(isImportOnly){
+    const theme = String(rTxt).replace(/^Импорт из Excel(\s*—\s*|\s*-\s*|\s*:\s*)?/, '').trim();
+    body.append(el('div', { style:{ marginBottom:'10px', padding:'4px 8px',
+      background:'#F3F4F6', border:'1px solid var(--border-2)', borderRadius:'6px',
+      fontSize:'10px', color:'var(--ink-3)', display:'inline-block',
+      textTransform:'uppercase', letterSpacing:'.04em', fontWeight:'700' },
+      title:'Балл по этому сочинению был перенесён из xlsx-таблицы OTP — текстового отзыва учителя в системе нет'
+    },
+      '📊 Балл из OTP-таблицы' + (theme ? ' · ' + theme : '')));
+  } else if(rTxt || rVu){
     body.append(el('div', { class:'card', style:{ background:'var(--p-soft)', border:'1px solid var(--p-2)', marginBottom:'10px' }},
       el('h4', null, '💬 Комментарий учителя'),
       rTxt
@@ -28674,10 +28705,24 @@ function viewVariantsByStudent(){
         });
         card.append(kGrid);
         if(review && review.general_comment){
-          card.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px',
-            background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px',
-            fontSize:'12px', color:'var(--ink-2)', whiteSpace:'pre-wrap' }},
-            '💬 ' + review.general_comment));
+          /* «Импорт из Excel» — системная метка, не настоящий отзыв учителя */
+          const gc = String(review.general_comment);
+          const isImport = gc.startsWith('Импорт из Excel');
+          if(isImport){
+            const theme = gc.replace(/^Импорт из Excel(\s*—\s*|\s*-\s*|\s*:\s*)?/, '').trim();
+            card.append(el('div', { style:{ marginTop:'8px', padding:'4px 8px',
+              background:'#F3F4F6', border:'1px solid var(--border-2)', borderRadius:'6px',
+              fontSize:'10px', color:'var(--ink-3)', display:'inline-block',
+              textTransform:'uppercase', letterSpacing:'.04em', fontWeight:'700' },
+              title:'Балл импортирован из xlsx-таблицы OTP'
+            },
+              '📊 Балл из OTP' + (theme ? ' · ' + theme : '')));
+          } else {
+            card.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px',
+              background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'8px',
+              fontSize:'12px', color:'var(--ink-2)', whiteSpace:'pre-wrap' }},
+              '💬 ' + review.general_comment));
+          }
         }
       }
 
