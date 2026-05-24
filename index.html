@@ -4589,7 +4589,7 @@ async function loadEssaysFromDb(){
   try {
     /* Берём сочинения и подтягиваем имя ученика. У essays три FK к profiles
        (student_id, pre_checked_by, finalized_by) — указываем явно через !essays_student_id_fkey. */
-    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,photo_urls,word_count,status,submitted_at,format,assigned_curator_id,source_text,source_problem,source_variant_id,variant_id,student:profiles!essays_student_id_fkey(full_name,email),review:essay_reviews(total,general_comment,is_pre_check,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10)&order=submitted_at.desc&limit=200');
+    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,photo_urls,word_count,status,submitted_at,format,assigned_curator_id,source_text,source_problem,source_variant_id,student:profiles!essays_student_id_fkey(full_name,email),review:essay_reviews(total,general_comment,is_pre_check,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10)&order=submitted_at.desc&limit=200');
     if(Array.isArray(arr)){
       DB_ESSAYS = arr.map(e => {
         const r = e.review && (Array.isArray(e.review) ? e.review[0] : e.review);
@@ -4612,8 +4612,7 @@ async function loadEssaysFromDb(){
                откуда подтягиваем проблемный вопрос, исходник и пояснение учителя */
           sourceText: e.source_text || '',
           sourceProblem: e.source_problem || '',
-          sourceVariantId: e.source_variant_id || null,
-          variantId: e.variant_id || null
+          sourceVariantId: e.source_variant_id || null
         };
         if(r){
           obj.review = r;
@@ -16213,7 +16212,7 @@ function modalEssayResult(essayId){
      пояснение учителя с позицией автора, готовым сочинением, связями.
      До сдачи (в редакторе) этого блока НЕТ — чтобы ученик не подсмотрел.
      Здесь, после проверки работы — уже полезный материал для саморазбора. */
-  const variantIdForCtx = essay.sourceVariantId || essay.variantId || null;
+  const variantIdForCtx = essay.sourceVariantId || null;
   if(variantIdForCtx){
     loadEssayVariantContext(variantIdForCtx);
   }
@@ -17741,7 +17740,7 @@ function modalEssayReview(essayId){
      ожидаемая позиция автора / готовое сочинение / связи лежат в
      пояснении учителя. Используем тот же loadEssayVariantContext,
      что и в редакторе ученика, плюс рендерим explanation. */
-  const variantIdForContext = essay.sourceVariantId || essay.variantId || null;
+  const variantIdForContext = essay.sourceVariantId || null;
   if(variantIdForContext){
     loadEssayVariantContext(variantIdForContext);
   }
@@ -17887,16 +17886,13 @@ function modalEssayReview(essayId){
               try {
                 /* Приоритет источника:
                    1) essay.sourceText — ученик вписал свой текст при сдаче
-                   2) essay.sourceVariantId — ученик выбрал вариант
-                   3) essay.variantId — старая привязка к решённому пробнику
-                   Поля в camelCase, как они сейчас мапятся в DB_ESSAYS. */
+                   2) essay.sourceVariantId — ученик выбрал вариант */
                 let srcText = (essay.sourceText || essay.source_text || '').trim();
                 if(!srcText){
-                  let vid = essay.sourceVariantId || essay.variantId
-                    || essay.source_variant_id || essay.variant_id;
+                  let vid = essay.sourceVariantId || essay.source_variant_id;
                   if(!vid){
                     const dbE = DB_ESSAYS.find(e => e.id === essay.id);
-                    if(dbE) vid = dbE.sourceVariantId || dbE.variantId;
+                    if(dbE) vid = dbE.sourceVariantId;
                   }
                   if(vid){
                     try {
@@ -28682,13 +28678,23 @@ function viewVariantsByStudent(){
       }
       card.append(grid);
 
-      /* К1-К10 — если есть проверенное сочинение */
+      /* К1-К10 — рендерим ВСЕГДА (как в таблице у учителя), даже если сочинение
+         не привязано. Прочерки — это тоже информация: «у этой попытки сочинение
+         ещё не оценено». Без этой секции скрин для родителей выглядит так,
+         будто сочинения вообще нет в системе. */
       const review = row.essay && row.essay.review;
-      if(row.essay){
-        card.append(el('div', { style:{ fontSize:'11px', fontWeight:'700',
-          color:'var(--ink-3)', marginTop:'12px', marginBottom:'6px' }},
-          '✍️ Сочинение' +
-          (row.essay.submittedAt ? ' от ' + new Date(row.essay.submittedAt).toLocaleDateString('ru-RU') : '')));
+      const essayDateLabel = row.essay && row.essay.submittedAt
+        ? ' от ' + new Date(row.essay.submittedAt).toLocaleDateString('ru-RU')
+        : '';
+      card.append(el('div', { style:{ fontSize:'11px', fontWeight:'700',
+        color:'var(--ink-3)', marginTop:'12px', marginBottom:'6px',
+        display:'flex', justifyContent:'space-between', alignItems:'baseline',
+        flexWrap:'wrap', gap:'6px' }},
+        el('span', null, '✍️ Сочинение' + essayDateLabel),
+        !row.essay ? el('span', {
+          style:{ fontSize:'10px', fontWeight:'500', color:'var(--ink-3)', fontStyle:'italic' }
+        }, '(не привязано к этой попытке)') : null));
+      {
         const kGrid = el('div', { style:{ display:'grid',
           gridTemplateColumns:'repeat(5, 1fr)', gap:'4px' }});
         Object.keys(K_LIMITS).forEach(k => {
@@ -28704,6 +28710,8 @@ function viewVariantsByStudent(){
             el('div', null, val == null ? '—' : (val + '/' + max))));
         });
         card.append(kGrid);
+      }
+      if(row.essay){
         if(review && review.general_comment){
           /* «Импорт из Excel» — системная метка, не настоящий отзыв учителя */
           const gc = String(review.general_comment);
