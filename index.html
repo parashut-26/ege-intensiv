@@ -771,6 +771,59 @@ if(typeof document !== 'undefined'){
 })();
 
 /* ============================================================
+   ТАЙМЕР АВТОПОКАЗА ОТЛОЖЕННЫХ ПОСТОВ
+   У ученика в STATE могут быть подгружены посты с publish_at в будущем —
+   фильтр isWarmupVisibleToStudent сейчас их скрывает. Раз в 30 секунд
+   проверяем: не пора ли какой-то из них показать? Если есть пост, у
+   которого время уже наступило — триггерим render() и он появляется
+   автоматически, без F5.
+   У учителя таймер тоже работает, но безвредно (он видит всё).
+   ============================================================ */
+(function(){
+  if(typeof window === 'undefined') return;
+  const TICK_MS = 30 * 1000;
+  let lastPendingCount = -1;
+  function hasUpcomingScheduled(){
+    const lists = [];
+    if(STATE.warmupDays) lists.push(STATE.warmupDays);
+    if(STATE.warmupBlocksByDay){
+      Object.values(STATE.warmupBlocksByDay).forEach(arr => arr && lists.push(arr));
+    }
+    if(STATE.intensivePostsByOrd){
+      Object.values(STATE.intensivePostsByOrd).forEach(arr => arr && lists.push(arr));
+    }
+    const now = Date.now();
+    let pending = 0;
+    let dueNow = 0;
+    for(const list of lists){
+      for(const item of list){
+        if(!item || !item.publish_at) continue;
+        if(item.is_published === false) continue;
+        const t = Date.parse(item.publish_at);
+        if(isNaN(t)) continue;
+        if(t > now) pending++;
+        else if(t > now - TICK_MS - 5000) dueNow++;  // только что наступило
+      }
+    }
+    return { pending, dueNow };
+  }
+  setInterval(() => {
+    if(typeof STATE === 'undefined' || typeof render !== 'function') return;
+    if(document.visibilityState === 'hidden') return;
+    const { pending, dueNow } = hasUpcomingScheduled();
+    /* Если кто-то «созрел» в последние 30 секунд — обновляем рендер */
+    if(dueNow > 0){
+      try { render(); } catch(_){}
+    }
+    /* Если общее число ожидающих изменилось — тоже обновляем (учитель добавил/убрал) */
+    if(pending !== lastPendingCount){
+      lastPendingCount = pending;
+      try { render(); } catch(_){}
+    }
+  }, TICK_MS);
+})();
+
+/* ============================================================
    ИНДИКАТОРЫ «НОВОЕ» / «НЕПРОЧИТАННОЕ» для ученика
    Ученик видит точку/число на табе «Дни» и плашку на главной,
    когда учитель опубликовал новый пост в Разогреве или дне
@@ -864,7 +917,9 @@ function getUnreadWarmupPosts(dayId){
   const seen = getSeenDays();
   const lastTs = seen['warmup-' + dayId] || 0;
   return blocks.filter(b => {
-    if(b.is_published === false) return false;
+    /* Уважаем отложенную публикацию: пост, у которого ещё не наступило
+       время publish_at, не считается «новым» для ученика. */
+    if(!isWarmupVisibleToStudent(b)) return false;
     /* Если день ни разу не открывали (lastTs=0) — ВСЕ опубликованные посты «новые»,
        независимо от created_at. Иначе сравниваем timestamp. */
     if(lastTs === 0) return true;
@@ -879,7 +934,7 @@ function getUnreadIntensivePosts(dayOrd){
   const seen = getSeenDays();
   const lastTs = seen['intensive-' + dayOrd] || 0;
   return blocks.filter(b => {
-    if(b.is_published === false) return false;
+    if(!isWarmupVisibleToStudent(b)) return false;
     if(lastTs === 0) return true;
     const created = b.created_at ? Date.parse(b.created_at) : 0;
     return !isNaN(created) && created > lastTs;
@@ -889,8 +944,8 @@ function getUnreadIntensivePosts(dayOrd){
    + всем опубликованным дням интенсива. Используется для бейджа на табе. */
 function getTotalUnreadDayPosts(){
   let total = 0;
-  /* warmup */
-  const warmupDays = (STATE.warmupDays || []).filter(d => d.is_published);
+  /* warmup — только дни, видимые ученику (с учётом publish_at) */
+  const warmupDays = (STATE.warmupDays || []).filter(isWarmupVisibleToStudent);
   warmupDays.forEach(d => { total += getUnreadWarmupPosts(d.id).length; });
   /* intensive */
   if(typeof DAYS !== 'undefined' && Array.isArray(DAYS)){
@@ -904,7 +959,7 @@ function getTotalUnreadDayPosts(){
    на главной показываем плашку «🔥 Разогрев готов — открыть» с переходом
    именно в этот день. Берём ПЕРВЫЙ день с непрочитанным. */
 function getFirstWarmupDayWithUnread(){
-  const warmupDays = (STATE.warmupDays || []).filter(d => d.is_published);
+  const warmupDays = (STATE.warmupDays || []).filter(isWarmupVisibleToStudent);
   for(const d of warmupDays){
     if(getUnreadWarmupPosts(d.id).length > 0) return d;
   }
@@ -8986,7 +9041,7 @@ function viewStudentHome(){
   if(!STATE.warmupDays) {
     loadWarmupDays().then(render);
   } else {
-    (STATE.warmupDays || []).filter(d => d.is_published).forEach(d => {
+    (STATE.warmupDays || []).filter(isWarmupVisibleToStudent).forEach(d => {
       if(!STATE.warmupBlocksByDay || !STATE.warmupBlocksByDay[d.id]){
         loadWarmupBlocks(d.id).then(render);
       }
@@ -9180,7 +9235,9 @@ function viewStudentDays(){
   }
   /* === Секция «🔥 Разогрев» — pre-intensive дни перед стартом интенсива === */
   if(!STATE.warmupDays) loadWarmupDays().then(render);
-  const publishedWarmup = (STATE.warmupDays || []).filter(d => d.is_published);
+  /* Ученик видит только дни, у которых is_published=true И publish_at либо
+     пуст, либо уже наступил. Учитель видит всё (для планирования). */
+  const publishedWarmup = filterWarmupForRole(STATE.warmupDays);
   if(publishedWarmup.length){
     const warmupBox = el('div', { class:'card',
       style:{ marginBottom:'20px', padding:'18px 20px',
@@ -9245,8 +9302,8 @@ function dayBlock(d){
   if(!STATE.intensivePostsByOrd || !STATE.intensivePostsByOrd[d.id]){
     loadIntensivePosts(d.id).then(render);
   }
-  const dayPosts = ((STATE.intensivePostsByOrd && STATE.intensivePostsByOrd[d.id]) || [])
-    .filter(b => b.is_published !== false);
+  const dayPosts = filterWarmupForRole(
+    (STATE.intensivePostsByOrd && STATE.intensivePostsByOrd[d.id]) || []);
   if(dayPosts.length){
     const postsWrap = el('div', { class:'card',
       style:{ background:'#FEF3C7', borderColor:'#D97706', marginBottom:'14px', padding:'14px 16px' }},
@@ -21925,7 +21982,7 @@ function copyGuestLink(game){
 async function loadWarmupDays(){
   try {
     STATE.warmupDays = await restRequest('GET',
-      '/warmup_days?select=id,ord,day_date,title,subtitle,emoji,is_published&order=ord.asc') || [];
+      '/warmup_days?select=id,ord,day_date,title,subtitle,emoji,is_published,publish_at&order=ord.asc') || [];
   } catch(e){
     console.error('loadWarmupDays', e);
     STATE.warmupDays = [];
@@ -21935,7 +21992,7 @@ async function loadWarmupBlocks(dayId){
   try {
     const list = await restRequest('GET',
       '/warmup_blocks?day_id=eq.' + dayId +
-      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord,is_published,created_at&order=ord.asc');
+      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord,is_published,publish_at,created_at&order=ord.asc');
     if(!STATE.warmupBlocksByDay) STATE.warmupBlocksByDay = {};
     STATE.warmupBlocksByDay[dayId] = list || [];
   } catch(e){
@@ -21950,7 +22007,7 @@ async function loadIntensivePosts(dayOrd){
   try {
     const list = await restRequest('GET',
       '/warmup_blocks?intensive_day_ord=eq.' + dayOrd +
-      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord,is_published,created_at&order=ord.asc');
+      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord,is_published,publish_at,created_at&order=ord.asc');
     if(!STATE.intensivePostsByOrd) STATE.intensivePostsByOrd = {};
     STATE.intensivePostsByOrd[dayOrd] = list || [];
   } catch(e){
@@ -21958,6 +22015,50 @@ async function loadIntensivePosts(dayOrd){
     if(!STATE.intensivePostsByOrd) STATE.intensivePostsByOrd = {};
     STATE.intensivePostsByOrd[dayOrd] = [];
   }
+}
+
+/* === Отложенная публикация: helper'ы для фильтрации ученика ===
+   Ученик видит пост/день только если is_published=true И время публикации
+   уже наступило (либо publish_at не задано — публикуется сразу).
+   Учитель видит ВСЁ, чтобы планировать и редактировать запланированное. */
+function isWarmupVisibleToStudent(item){
+  if(!item) return false;
+  if(item.is_published === false) return false;  // явно скрыто учителем
+  if(!item.publish_at) return true;              // нет планирования → видно сразу
+  const t = Date.parse(item.publish_at);
+  if(isNaN(t)) return true;                       // некорректная дата → не блокируем
+  return t <= Date.now();
+}
+/* Удобная функция-обёртка: фильтр массива по роли. Учитель — всё, ученик — только видимое. */
+function filterWarmupForRole(list){
+  const isTeacher = MY_PROFILE && (MY_PROFILE.role === 'teacher' || MY_PROFILE.role === 'curator');
+  if(isTeacher) return list || [];
+  return (list || []).filter(isWarmupVisibleToStudent);
+}
+/* Формат даты публикации для UI учителя: «25 мая в 8:00» */
+function formatPublishAt(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return iso;
+  const today = new Date(); today.setHours(0,0,0,0);
+  const that = new Date(d); that.setHours(0,0,0,0);
+  const diff = Math.round((that - today) / 86400000);
+  const hh = String(d.getHours()).padStart(2,'0');
+  const mm = String(d.getMinutes()).padStart(2,'0');
+  const time = hh + ':' + mm;
+  if(diff === 0) return 'сегодня в ' + time;
+  if(diff === 1) return 'завтра в ' + time;
+  if(diff === -1) return 'вчера в ' + time;
+  return d.toLocaleDateString('ru-RU', { day:'numeric', month:'short' }) + ' в ' + time;
+}
+/* Перевести Date в формат для <input type="datetime-local"> (без таймзоны) */
+function toDatetimeLocalValue(iso){
+  if(!iso) return '';
+  const d = new Date(iso);
+  if(isNaN(d.getTime())) return '';
+  const pad = n => String(n).padStart(2, '0');
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
+    'T' + pad(d.getHours()) + ':' + pad(d.getMinutes());
 }
 
 async function updateWarmupBlock(blockId, payload){
@@ -22603,14 +22704,28 @@ function viewTeacherWarmup(){
         style:Object.assign({}, ss, { width:'200px' })});
       const subInput   = el('input', { type:'text', value: d.subtitle || '', placeholder:'Подзаголовок',
         style:Object.assign({}, ss, { width:'260px' })});
+      /* Отложенная публикация дня — пусто = открыть сразу (флаг is_published) */
+      const publishInput = el('input', { type:'datetime-local',
+        value: toDatetimeLocalValue(d.publish_at),
+        title:'Если указать — день откроется ученикам только в это время',
+        style:Object.assign({}, ss, { width:'200px' })});
       headerLeft = el('div', { style:{ display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap' }},
         emojiInput, titleInput, subInput,
+        el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'4px' }}, '⏰'),
+        publishInput,
         el('button', { class:'btn btn-teal btn-sm',
           onclick: (ev) => { ev.preventDefault(); ev.stopPropagation();
+            let publishAtIso = null;
+            const dtLocal = (publishInput.value || '').trim();
+            if(dtLocal){
+              const dd = new Date(dtLocal);
+              if(!isNaN(dd.getTime())) publishAtIso = dd.toISOString();
+            }
             updateWarmupDayMeta(d, {
               emoji: emojiInput.value.trim() || '☀️',
               title: titleInput.value.trim() || d.title,
-              subtitle: subInput.value.trim() || null
+              subtitle: subInput.value.trim() || null,
+              publish_at: publishAtIso
             });
           }
         }, '💾'),
@@ -22635,13 +22750,24 @@ function viewTeacherWarmup(){
     det.append(
       el('summary', { style:{ cursor:'pointer', listStyle:'none', display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
         headerLeft,
-        el('div', { style:{ display:'flex', gap:'8px', alignItems:'center' }},
-          d.is_published
-            ? el('span', { style:{ background:'#DCFCE7', color:'#166534', padding:'2px 8px', borderRadius:'8px', fontSize:'11px', fontWeight:'700' }}, 'ОТКРЫТ')
-            : el('span', { style:{ background:'#FEE2E2', color:'#991B1B', padding:'2px 8px', borderRadius:'8px', fontSize:'11px', fontWeight:'700' }}, 'СКРЫТ'),
-          el('button', { class:'btn ' + (d.is_published ? 'btn-secondary' : 'btn-teal') + ' btn-sm',
-            onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); toggleWarmupDayPublished(d, !d.is_published); }
-          }, d.is_published ? '🚫 Скрыть' : '✅ Открыть'))));
+        (function(){
+          /* Статусный чип: ОТКРЫТ / СКРЫТ / ⏰ ЗАПЛАНИРОВАН на …
+             если is_published=true и publish_at в будущем — день запланирован */
+          const tFuture = d.publish_at && Date.parse(d.publish_at) > Date.now();
+          const scheduled = d.is_published && tFuture;
+          const chipStyle = (bg, fg) => ({ background:bg, color:fg,
+            padding:'2px 8px', borderRadius:'8px', fontSize:'11px', fontWeight:'700' });
+          return el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }},
+            scheduled
+              ? el('span', { style: chipStyle('#FEF3C7', '#92400E'),
+                  title:'Откроется ' + formatPublishAt(d.publish_at) }, '⏰ ' + formatPublishAt(d.publish_at).toUpperCase())
+              : (d.is_published
+                  ? el('span', { style: chipStyle('#DCFCE7', '#166534') }, 'ОТКРЫТ')
+                  : el('span', { style: chipStyle('#FEE2E2', '#991B1B') }, 'СКРЫТ')),
+            el('button', { class:'btn ' + (d.is_published ? 'btn-secondary' : 'btn-teal') + ' btn-sm',
+              onclick: (ev) => { ev.preventDefault(); ev.stopPropagation(); toggleWarmupDayPublished(d, !d.is_published); }
+            }, d.is_published ? '🚫 Скрыть' : '✅ Открыть'));
+        })()));
 
     /* Подгружаем блоки лениво */
     if(STATE.warmupBlocksByDay && STATE.warmupBlocksByDay[d.id]){
@@ -22679,14 +22805,23 @@ function renderWarmupBlockTeacher(b, day){
   const cfg = (b.config && typeof b.config === 'object') ? b.config : {};
   const card = el('div', { style:{ padding:'12px 14px', border:'1px solid var(--border)', borderRadius:'10px', marginTop:'8px', background:'var(--bg)' }});
   const isPub = b.is_published !== false;
+  /* Запланирован: is_published=true И publish_at в будущем → ученикам пока невидно */
+  const tFuture = b.publish_at && Date.parse(b.publish_at) > Date.now();
+  const scheduled = isPub && tFuture;
   card.append(
     el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'8px', flexWrap:'wrap', gap:'6px' }},
-      el('div', { style:{ display:'flex', gap:'6px', alignItems:'center', fontSize:'12px', color:'var(--ink-3)', fontWeight:'700', textTransform:'uppercase', letterSpacing:'.04em' }},
+      el('div', { style:{ display:'flex', gap:'6px', alignItems:'center', fontSize:'12px', color:'var(--ink-3)', fontWeight:'700', textTransform:'uppercase', letterSpacing:'.04em', flexWrap:'wrap' }},
         el('span', { style:{ fontSize:'1.4rem' }}, b.emoji || '📌'),
         'Пост #' + b.ord,
-        isPub
-          ? el('span', { style:{ background:'#DCFCE7', color:'#166534', padding:'2px 6px', borderRadius:'6px', fontSize:'10px' }}, '👁 ВИДЕН')
-          : el('span', { style:{ background:'#FEE2E2', color:'#991B1B', padding:'2px 6px', borderRadius:'6px', fontSize:'10px' }}, '🙈 СКРЫТ')),
+        scheduled
+          ? el('span', {
+              style:{ background:'#FEF3C7', color:'#92400E', padding:'2px 6px',
+                      borderRadius:'6px', fontSize:'10px' },
+              title:'Откроется ученикам ' + formatPublishAt(b.publish_at)
+            }, '⏰ ' + formatPublishAt(b.publish_at).toUpperCase())
+          : (isPub
+              ? el('span', { style:{ background:'#DCFCE7', color:'#166534', padding:'2px 6px', borderRadius:'6px', fontSize:'10px' }}, '👁 ВИДЕН')
+              : el('span', { style:{ background:'#FEE2E2', color:'#991B1B', padding:'2px 6px', borderRadius:'6px', fontSize:'10px' }}, '🙈 СКРЫТ'))),
       el('div', { style:{ display:'flex', gap:'6px' }},
         el('button', { class:'btn btn-secondary btn-sm', style:{ padding:'2px 8px', fontSize:'12px' },
           onclick: () => toggleWarmupBlockPublished(b, !isPub)
@@ -23070,6 +23205,21 @@ function renderAddBlockForm(day, editingBlock, target){
   rebuildPollOptions();
   redrawImgGrid();   // покажем уже загруженные картинки в режиме редактирования
 
+  /* Отложенная публикация: учитель может выставить дату+время,
+     ученики увидят пост только когда оно наступит. Пусто = публикуется сразу. */
+  const initialPublishAt = isEdit ? toDatetimeLocalValue(editingBlock.publish_at) : '';
+  const publishInput = el('input', { type: 'datetime-local',
+    value: initialPublishAt,
+    style:{ padding:'6px 10px', borderRadius:'8px', border:'1px solid var(--border-2)',
+            fontSize:'13px', fontFamily:'inherit', boxSizing:'border-box', width:'220px' }});
+  const publishClearBtn = el('button', { type:'button', class:'btn btn-secondary btn-sm',
+    style:{ fontSize:'11px', padding:'5px 10px' },
+    title:'Очистить — пост будет опубликован сразу при is_published',
+    onclick: () => { publishInput.value = ''; }
+  }, '✕');
+  const publishHint = el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'4px' }},
+    'Если пусто — пост откроется ученикам сразу. Если указать время — будет ждать.');
+
   /* === Сборка формы === */
   box.append(
     el('div', { style:{ fontWeight:'700', marginBottom:'8px', fontSize:'14px' }},
@@ -23088,11 +23238,22 @@ function renderAddBlockForm(day, editingBlock, target){
     sectionLabel('📊 Опрос'),
     pollQuestion,
     pollOptionsBox,
+    sectionLabel('⏰ Отложенная публикация (необязательно)'),
+    el('div', { style:{ display:'flex', gap:'6px', alignItems:'center' }}, publishInput, publishClearBtn),
+    publishHint,
     el('div', { style:{ marginTop:'12px', display:'flex', gap:'8px' }},
       el('button', { class:'btn btn-teal',
         onclick: async () => {
           const validPollOptions = pollOptions.map(o => (o || '').trim()).filter(Boolean);
           const hasPoll = pollQuestion.value.trim() && validPollOptions.length >= 2;
+          /* datetime-local даёт «2026-05-25T08:00» без таймзоны → трактуем как
+             локальное время и конвертим в ISO. Пусто = null = публикуется сразу. */
+          let publishAtIso = null;
+          const dtLocal = (publishInput.value || '').trim();
+          if(dtLocal){
+            const d = new Date(dtLocal);
+            if(!isNaN(d.getTime())) publishAtIso = d.toISOString();
+          }
           const payload = {
             type: 'mixed',
             emoji: emojiInput.value.trim() || '📌',
@@ -23102,6 +23263,7 @@ function renderAddBlockForm(day, editingBlock, target){
             image_url: uploadedImageUrls[0] || null,   // совместимость для старого рендера
             url: urlInput.value.trim() || null,
             game_id: gameSelect.value ? parseInt(gameSelect.value,10) : null,
+            publish_at: publishAtIso,
             config: hasPoll ? { poll: { question: pollQuestion.value.trim(), options: validPollOptions } } : null
           };
           if(!payload.title && !payload.body && !uploadedImageUrls.length && !payload.url && !payload.game_id && !hasPoll){
@@ -23169,10 +23331,14 @@ function renderWarmupOverlay(day){
         el('div', { style:{ fontWeight:'800', fontSize:'18px' }}, (day.emoji || '☀️') + ' ' + day.title)),
       el('button', { class:'btn btn-secondary', onclick: () => closeWarmupOverlay() }, '✕ Закрыть')),
     el('div', { style:{ flex:1, padding:'20px', maxWidth:'800px', width:'100%', margin:'0 auto' }},
-      ...(blocks.filter(b => b.is_published !== false).length
-        ? blocks.filter(b => b.is_published !== false).map(b => renderWarmupBlockStudent(b))
-        : [el('div', { style:{ padding:'40px', textAlign:'center', color:'var(--ink-3)' }},
-            'В этом дне пока нет материалов. Загляни попозже.')])));
+      ...((function(){
+        const visible = filterWarmupForRole(blocks);
+        if(!visible.length){
+          return [el('div', { style:{ padding:'40px', textAlign:'center', color:'var(--ink-3)' }},
+            'В этом дне пока нет материалов. Загляни попозже.')];
+        }
+        return visible.map(b => renderWarmupBlockStudent(b));
+      })())));
   document.body.appendChild(overlay);
   /* Восстанавливаем сохранённую позицию скролла */
   if(savedScroll){
@@ -23185,6 +23351,24 @@ function renderWarmupBlockStudent(b){
      сверху картинка, потом заголовок/текст, потом ссылка/игра, потом опрос. */
   const cfg = (b.config && typeof b.config === 'object') ? b.config : {};
   const card = el('div', { class:'card', style:{ marginBottom:'16px', padding:'0', overflow:'hidden' }});
+
+  /* Ярлык «⏰ откроется в …» для учителя/куратора если пост запланирован
+     на будущее. Ученик этот код не увидит (ему такие посты не приходят
+     через filterWarmupForRole). */
+  const isTeacherRole = MY_PROFILE && (MY_PROFILE.role === 'teacher' || MY_PROFILE.role === 'curator');
+  if(isTeacherRole && b.publish_at){
+    const t = Date.parse(b.publish_at);
+    if(!isNaN(t) && t > Date.now()){
+      card.append(el('div', { style:{ padding:'8px 14px', background:'#FEF3C7',
+        borderBottom:'1px solid #F59E0B', fontSize:'12px', fontWeight:'700',
+        color:'#92400E', display:'flex', alignItems:'center', gap:'8px',
+        flexWrap:'wrap' }},
+        el('span', null, '⏰ Запланировано — откроется ' + formatPublishAt(b.publish_at)),
+        el('span', { style:{ marginLeft:'auto', fontSize:'11px', color:'#A16207',
+                              fontWeight:'500' }},
+          'видно только тебе')));
+    }
+  }
 
   /* Картинки (новое поле image_urls + старое image_url для совместимости) */
   const imgs = (Array.isArray(b.image_urls) && b.image_urls.length) ? b.image_urls
@@ -30681,7 +30865,7 @@ function _renderNow(){
        триггерим фоновую загрузку warmup_days и blocks (если ещё нет). */
     if(MY_PROFILE && MY_PROFILE.role === 'student'){
       if(!STATE.warmupDays) loadWarmupDays().then(render);
-      else (STATE.warmupDays || []).filter(d => d.is_published).forEach(d => {
+      else (STATE.warmupDays || []).filter(isWarmupVisibleToStudent).forEach(d => {
         if(!STATE.warmupBlocksByDay || !STATE.warmupBlocksByDay[d.id]){
           loadWarmupBlocks(d.id).then(render);
         }
