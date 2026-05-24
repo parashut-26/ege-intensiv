@@ -908,7 +908,22 @@ function isTeacherReplyUnread(attemptId, num, comment){
   } catch(_){ return true; }
 }
 
-/* Возвращает массив постов в warmup-дне, опубликованных после lastSeen
+/* «Эффективное время появления» поста для ученика:
+   - У обычного поста = created_at (когда учитель его опубликовал).
+   - У отложенного (publish_at в будущем относительно создания) = publish_at:
+     ученику пост стал виден именно тогда, а не в момент создания.
+   Это критично для индикатора «новое»: иначе после открытия дня все ещё
+   не наступившие отложенные посты считаются «старыми» по created_at
+   и не подсвечиваются плашкой при наступлении их publish_at. */
+function _warmupPostAppearanceTs(b){
+  if(!b) return 0;
+  const created = b.created_at ? Date.parse(b.created_at) : 0;
+  const publish = b.publish_at ? Date.parse(b.publish_at) : 0;
+  if(publish && !isNaN(publish) && publish > (isNaN(created) ? 0 : created)) return publish;
+  return isNaN(created) ? 0 : created;
+}
+
+/* Возвращает массив постов в warmup-дне, появившихся после lastSeen
    (либо все опубликованные, если день ни разу не открывали). */
 function getUnreadWarmupPosts(dayId){
   if(dayId == null) return [];
@@ -920,11 +935,10 @@ function getUnreadWarmupPosts(dayId){
     /* Уважаем отложенную публикацию: пост, у которого ещё не наступило
        время publish_at, не считается «новым» для ученика. */
     if(!isWarmupVisibleToStudent(b)) return false;
-    /* Если день ни разу не открывали (lastTs=0) — ВСЕ опубликованные посты «новые»,
-       независимо от created_at. Иначе сравниваем timestamp. */
+    /* Если день ни разу не открывали (lastTs=0) — ВСЕ опубликованные посты «новые». */
     if(lastTs === 0) return true;
-    const created = b.created_at ? Date.parse(b.created_at) : 0;
-    return !isNaN(created) && created > lastTs;
+    const ts = _warmupPostAppearanceTs(b);
+    return ts > 0 && ts > lastTs;
   });
 }
 function getUnreadIntensivePosts(dayOrd){
@@ -936,8 +950,8 @@ function getUnreadIntensivePosts(dayOrd){
   return blocks.filter(b => {
     if(!isWarmupVisibleToStudent(b)) return false;
     if(lastTs === 0) return true;
-    const created = b.created_at ? Date.parse(b.created_at) : 0;
-    return !isNaN(created) && created > lastTs;
+    const ts = _warmupPostAppearanceTs(b);
+    return ts > 0 && ts > lastTs;
   });
 }
 /* Суммарное количество непрочитанных постов по всем дням разогрева
