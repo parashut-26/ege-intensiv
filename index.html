@@ -856,6 +856,7 @@ const STATE = {
   essayDraftSourceVariantId: null,  // если 'variant' — id опубликованного варианта
   essayDraftSourceText: '',         // если 'custom' — текст исходника
   essayDraftSourceProblem: '',      // указанная учеником проблема (необязательно)
+  essayDraftSourcePreview: null,    // { variantId, q27, sourceText, loading, error } — превью задания 27 выбранного варианта
   newStudentForm: false,
   curatorPermsFor: null,   // id куратора — открыта модалка прав
   variantMode: false,      // сборка случайного варианта
@@ -15773,7 +15774,13 @@ function modalEssayDraft(){
     if(STATE.essayDraftSourceMode === 'variant'){
       const select = el('select', {
         style:{ width:'100%', padding:'8px 10px', borderRadius:'8px', border:'1px solid var(--border-2)', fontSize:'13px', marginBottom:'8px' },
-        onchange: ev => { STATE.essayDraftSourceVariantId = ev.target.value || null; }
+        onchange: ev => {
+          STATE.essayDraftSourceVariantId = ev.target.value || null;
+          /* Сбрасываем превью и подгружаем новый контекст */
+          STATE.essayDraftSourcePreview = null;
+          if(STATE.essayDraftSourceVariantId) loadEssayVariantContext(STATE.essayDraftSourceVariantId);
+          render();
+        }
       });
       select.append(el('option', { value:'' }, '— выбери вариант —'));
       const list = Array.isArray(STATE.variantsList) ? STATE.variantsList : [];
@@ -15790,6 +15797,62 @@ function modalEssayDraft(){
       wrap.append(select);
       if(!STATE.variantsList || !STATE.variantsList.length){
         loadVariantsList().then(() => render()).catch(() => {});
+      }
+      /* Автоподгрузка контекста для уже выбранного варианта (например, если
+         модалку открыли с preset variantId после завершённого пробника) */
+      if(STATE.essayDraftSourceVariantId){
+        loadEssayVariantContext(STATE.essayDraftSourceVariantId);
+      }
+      /* === Превью задания 27: проблемный вопрос + исходный текст === */
+      const prev = STATE.essayDraftSourcePreview;
+      if(STATE.essayDraftSourceVariantId && prev && prev.variantId === STATE.essayDraftSourceVariantId){
+        if(prev.loading){
+          wrap.append(el('div', {
+            style:{ marginTop:'8px', padding:'10px 12px', borderRadius:'8px',
+                    background:'var(--surface-soft)', border:'1px dashed var(--border-2)',
+                    color:'var(--ink-3)', fontSize:'12px' }
+          }, '⏳ Подгружаю задание 27 из этого варианта…'));
+        } else if(prev.error){
+          wrap.append(el('div', {
+            style:{ marginTop:'8px', padding:'10px 12px', borderRadius:'8px',
+                    background:'#FEF2F2', border:'1px solid #FCA5A5',
+                    color:'#991B1B', fontSize:'12px' }
+          }, '⚠ Не удалось подгрузить задание 27: ' + prev.error));
+        } else {
+          const previewCard = el('div', {
+            style:{ marginTop:'8px', padding:'10px 12px', borderRadius:'10px',
+                    background:'#F0FDF4', border:'1px solid #86EFAC',
+                    fontSize:'13px', lineHeight:'1.5' }
+          });
+          if(prev.q27){
+            previewCard.append(
+              el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#166534',
+                                   textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'4px' }},
+                '✍️ Задание 27 (проблемный вопрос)'),
+              el('div', { style:{ whiteSpace:'pre-wrap', color:'var(--ink)' }}, prev.q27));
+          } else {
+            previewCard.append(
+              el('div', { style:{ color:'var(--ink-3)', fontStyle:'italic', fontSize:'12px' }},
+                '(в этом варианте формулировка задания 27 не задана учителем)'));
+          }
+          if(prev.sourceText){
+            /* Сворачиваемый блок исходника — экономим место в модалке.
+               Учитель тоже использует details/summary в банке, ученику знакомо. */
+            const det = el('details', { style:{ marginTop:'10px', borderTop:'1px dashed #86EFAC', paddingTop:'8px' }});
+            det.append(
+              el('summary', { style:{ cursor:'pointer', fontSize:'12px', fontWeight:'700',
+                                       color:'#166534', userSelect:'none' }},
+                '📖 Показать исходный текст (тот же, что в заданиях 22–26)'),
+              el('div', {
+                style:{ whiteSpace:'pre-wrap', marginTop:'8px',
+                        maxHeight:'260px', overflowY:'auto', padding:'8px 10px',
+                        background:'#fff', border:'1px solid var(--border)', borderRadius:'8px',
+                        fontSize:'13px', lineHeight:'1.6', color:'var(--ink)' }
+              }, prev.sourceText));
+            previewCard.append(det);
+          }
+          wrap.append(previewCard);
+        }
       }
     } else if(STATE.essayDraftSourceMode === 'custom'){
       const srcTa = el('textarea', {
@@ -15849,6 +15912,7 @@ function modalEssayDraft(){
         STATE.essayDraftSourceVariantId = null;
         STATE.essayDraftSourceText = '';
         STATE.essayDraftSourceProblem = '';
+        STATE.essayDraftSourcePreview = null;
         render();
       } catch(e){
         if(e && e.message) console.error('submitEssay упал:', e);
@@ -21150,6 +21214,40 @@ async function loadVariantsList(){
   } catch(e){
     console.warn('[variants] load list error:', e.message);
     STATE.variantsListLoaded = true;
+  }
+}
+
+/* --- Подгрузка контекста задания 27 для редактора сочинения ученика.
+   Когда ученик в редакторе сочинения выбирает вариант, чтобы не лезть
+   в банк за формулировкой проблемы и исходным текстом — подтягиваем их
+   автоматически. Кэшируем в STATE.essayDraftSourcePreview по variantId,
+   повторно не дёргаем БД пока variantId тот же. */
+async function loadEssayVariantContext(variantId){
+  if(!variantId) return;
+  const cur = STATE.essayDraftSourcePreview;
+  if(cur && cur.variantId === variantId && (cur.loading || cur.q27 != null || cur.error)) return;
+  STATE.essayDraftSourcePreview = { variantId, loading: true, q27: null, sourceText: null, error: null };
+  render();
+  try {
+    const [qArr, srcArr] = await Promise.all([
+      restRequest('GET',
+        '/test_variant_questions?variant_id=eq.' + encodeURIComponent(variantId) +
+        '&num=eq.27&select=question_text&limit=1'),
+      restRequest('GET',
+        '/test_variant_source_texts?variant_id=eq.' + encodeURIComponent(variantId) +
+        '&kind=eq.text_22_26&select=body&limit=1')
+    ]);
+    const q27 = Array.isArray(qArr) && qArr[0] && (qArr[0].question_text || '').trim() || '';
+    const src = Array.isArray(srcArr) && srcArr[0] && (srcArr[0].body || '').trim() || '';
+    /* На случай если ученик за время загрузки переключил вариант — кладём только если variantId совпадает */
+    if(!STATE.essayDraftSourcePreview || STATE.essayDraftSourcePreview.variantId !== variantId) return;
+    STATE.essayDraftSourcePreview = { variantId, loading: false, q27, sourceText: src, error: null };
+    render();
+  } catch(e){
+    console.warn('[essay-draft] context load error:', e.message);
+    if(!STATE.essayDraftSourcePreview || STATE.essayDraftSourcePreview.variantId !== variantId) return;
+    STATE.essayDraftSourcePreview = { variantId, loading: false, q27: null, sourceText: null, error: e.message || 'ошибка' };
+    render();
   }
 }
 
