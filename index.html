@@ -29429,9 +29429,15 @@ async function recalculateVariantScores(variantId){
     '/test_variant_answers?attempt_id=in.(' + attIds.join(',') + ')');
   const byAttempt = {};
   (answers || []).forEach(a => { (byAttempt[a.attempt_id] = byAttempt[a.attempt_id] || []).push(a); });
-  /* 4. Перерасчёт по каждой попытке */
+  /* 4. Перерасчёт по каждой попытке.
+     ВАЖНО: если у ответа `user_answer` пустой — НЕ пересчитываем баллы.
+     В этой ячейке мог быть твой ручной балл (учитель в examineQuestion
+     → «✎ Изменить балл»), поставленный потому что ребёнок забыл вписать
+     ответ в поле но структурно (запятыми, чекбоксами) всё расставил.
+     Если автопересчёт затрёт — потеряются часы ручной работы. */
   let touchedAnswers = 0;
   let touchedAttempts = 0;
+  let preservedManual = 0;
   for(const att of attempts){
     const ans = byAttempt[att.id] || [];
     let total = 0, correct = 0, maxSum = 0;
@@ -29439,11 +29445,20 @@ async function recalculateVariantScores(variantId){
       const q = qByNum[a.question_num];
       if(!q || a.question_num >= 27) continue;
       const newMax = Number(q.max_points || 1);
-      const newPts = calcQuestionPoints(a.user_answer || '', q.correct_answer || '', newMax, a.question_num);
+      const userTrim = (a.user_answer || '').toString().trim();
+      let newPts;
+      if(!userTrim){
+        /* Пустой ответ — сохраняем то, что уже в БД (вероятно, ручная правка) */
+        newPts = Number(a.points || 0);
+        if(newPts > 0) preservedManual++;
+      } else {
+        newPts = calcQuestionPoints(a.user_answer || '', q.correct_answer || '', newMax, a.question_num);
+      }
       total += newPts;
       maxSum += newMax;
       if(newPts >= newMax && newMax > 0) correct++;
-      /* Обновляем ответ только если что-то изменилось */
+      /* Обновляем ответ только если что-то изменилось.
+         Для пустых ответов newPts == oldPts (по построению), patch'а не будет. */
       const oldPts = Number(a.points || 0);
       const oldMax = Number(a.max_points || 0);
       if(Math.abs(newPts - oldPts) > 0.001 || Math.abs(newMax - oldMax) > 0.001){
@@ -29464,7 +29479,8 @@ async function recalculateVariantScores(variantId){
       touchedAttempts++;
     } catch(e){ console.warn('attempt patch fail', e.message); }
   }
-  showToast('✅ Пересчёт: попыток ' + touchedAttempts + ' · ответов изменено ' + touchedAnswers);
+  showToast('✅ Пересчёт: попыток ' + touchedAttempts + ' · ответов изменено ' + touchedAnswers +
+    (preservedManual > 0 ? ' · сохранено ручных правок ' + preservedManual : ''));
   /* Перезагрузить сводную */
   if(STATE.selectedVariantId === variantId){
     try { await loadVariantFull(variantId); } catch(_){}
