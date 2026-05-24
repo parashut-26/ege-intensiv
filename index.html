@@ -452,11 +452,27 @@ body.no-anim .fade-in{animation:none}
 .essay-photo{position:relative;display:block;background:#fff;border:1px solid var(--border);border-radius:12px;overflow:hidden}
 .essay-photo img{display:block;width:100%;height:auto;user-select:none;-webkit-user-drag:none}
 .essay-photo.editable img{cursor:crosshair}
+/* В режиме редактирования (учитель) запрещаем системный pan-скролл по фото — иначе drag для прямоугольника не сработает на iPad. Зум двумя пальцами оставляем. */
+.essay-photo.editable{touch-action:pinch-zoom}
 .essay-photo .page-num{position:absolute;top:6px;left:6px;background:rgba(0,0,0,.6);color:#fff;font-size:11px;padding:3px 8px;border-radius:6px;font-weight:700;pointer-events:none}
 .pin{position:absolute;width:26px;height:26px;border-radius:50%;border:2px solid #fff;color:#fff;font-size:12px;font-weight:800;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.4);transform:translate(-50%,-50%);z-index:2;transition:.1s}
 .pin:hover{transform:translate(-50%,-50%) scale(1.15)}
 .pin-orf{background:#DC2626}.pin-pun{background:#2563EB}.pin-gram{background:#7C3AED}.pin-rech{background:#16A34A}
 .pin-fact{background:#D97706}.pin-log{background:#0D9488}.pin-eth{background:#6B7280}.pin-other{background:#EA580C}
+/* Прямоугольная разметка ошибки на фото — drag по фото рисует рамку поверх куска текста */
+.pin-rect{position:absolute;border:2px solid;border-radius:4px;cursor:pointer;z-index:2;box-shadow:0 0 0 1px rgba(255,255,255,.55) inset,0 2px 8px rgba(0,0,0,.25);transition:filter .12s;overflow:visible}
+.pin-rect:hover{filter:brightness(1.08)}
+.pin-rect .pin-rect-num{position:absolute;top:-12px;left:-12px;width:22px;height:22px;border-radius:50%;border:2px solid #fff;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.4);pointer-events:none}
+.pin-rect.rect-orf{border-color:#DC2626;background:rgba(220,38,38,.16)} .pin-rect.rect-orf .pin-rect-num{background:#DC2626}
+.pin-rect.rect-pun{border-color:#2563EB;background:rgba(37,99,235,.16)} .pin-rect.rect-pun .pin-rect-num{background:#2563EB}
+.pin-rect.rect-gram{border-color:#7C3AED;background:rgba(124,58,237,.16)} .pin-rect.rect-gram .pin-rect-num{background:#7C3AED}
+.pin-rect.rect-rech{border-color:#16A34A;background:rgba(22,163,74,.18)} .pin-rect.rect-rech .pin-rect-num{background:#16A34A}
+.pin-rect.rect-fact{border-color:#D97706;background:rgba(217,119,6,.18)} .pin-rect.rect-fact .pin-rect-num{background:#D97706}
+.pin-rect.rect-log{border-color:#0D9488;background:rgba(13,148,136,.18)} .pin-rect.rect-log .pin-rect-num{background:#0D9488}
+.pin-rect.rect-eth{border-color:#6B7280;background:rgba(107,114,128,.18)} .pin-rect.rect-eth .pin-rect-num{background:#6B7280}
+.pin-rect.rect-other{border-color:#EA580C;background:rgba(234,88,12,.18)} .pin-rect.rect-other .pin-rect-num{background:#EA580C}
+.pin-rect-preview{position:absolute;border:2px dashed #2563EB;background:rgba(37,99,235,.14);z-index:4;pointer-events:none;border-radius:4px}
+.pin-rect-ghost{opacity:.55}
 .photo-thumb{position:relative;width:80px;height:80px;border-radius:8px;overflow:hidden;border:1px solid var(--border)}
 .photo-thumb img{width:100%;height:100%;object-fit:cover}
 .photo-thumb .x{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,.6);color:#fff;font-size:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;border:none}
@@ -5146,32 +5162,150 @@ function renderPhotosWithPins(photos, comments, opts){
     pageWrap.append(img,
       el('span', { class:'page-num' }, 'стр. ' + (idx + 1)),
       expandBtn);
-    /* Пины */
+    /* Пины и прямоугольные пометки */
     (byPage[idx] || []).forEach((c, i) => {
       const meta = errKindMeta(c.kind);
-      const pin = el('div', {
-        class: 'pin pin-' + meta.id,
-        style: { left: ((c.photo_anchor.x || 0) * 100) + '%',
-                 top:  ((c.photo_anchor.y || 0) * 100) + '%' },
-        title: meta.crit + ' · ' + meta.label + (c.comment ? ' — ' + c.comment : '')
-      }, String(i + 1));
-      pin.dataset.cid = String(c.id);
-      pin.addEventListener('click', ev => {
-        ev.stopPropagation();
-        opts.onPinClick && opts.onPinClick(c, pin);
-      });
-      pageWrap.append(pin);
+      const a = c.photo_anchor || {};
+      const hasRect = Number(a.w) > 0 && Number(a.h) > 0;
+      if(hasRect){
+        /* Прямоугольное выделение поверх куска текста */
+        const rect = el('div', {
+          class: 'pin-rect rect-' + meta.id,
+          style: {
+            left:   ((a.x || 0) * 100) + '%',
+            top:    ((a.y || 0) * 100) + '%',
+            width:  ((a.w || 0) * 100) + '%',
+            height: ((a.h || 0) * 100) + '%'
+          },
+          title: meta.crit + ' · ' + meta.label + (c.comment ? ' — ' + c.comment : '')
+        }, el('span', { class:'pin-rect-num' }, String(i + 1)));
+        rect.dataset.cid = String(c.id);
+        rect.addEventListener('click', ev => {
+          ev.stopPropagation();
+          opts.onPinClick && opts.onPinClick(c, rect);
+        });
+        pageWrap.append(rect);
+      } else {
+        /* Точка как раньше */
+        const pin = el('div', {
+          class: 'pin pin-' + meta.id,
+          style: { left: ((a.x || 0) * 100) + '%',
+                   top:  ((a.y || 0) * 100) + '%' },
+          title: meta.crit + ' · ' + meta.label + (c.comment ? ' — ' + c.comment : '')
+        }, String(i + 1));
+        pin.dataset.cid = String(c.id);
+        pin.addEventListener('click', ev => {
+          ev.stopPropagation();
+          opts.onPinClick && opts.onPinClick(c, pin);
+        });
+        pageWrap.append(pin);
+      }
     });
-    /* Клик по фото → новый пин (учитель) */
+    /* Учитель: drag по фото = прямоугольник, простой клик = точка.
+       Порог 6 px по диагонали отделяет «потянул» от «промахнулся пальцем». */
     if(!opts.readonly){
-      pageWrap.addEventListener('click', ev => {
-        if(ev.target.classList.contains('pin')) return;
-        if(ev.target.tagName !== 'IMG') return;
-        const r = pageWrap.getBoundingClientRect();
-        const x = (ev.clientX - r.left) / r.width;
-        const y = (ev.clientY - r.top) / r.height;
-        opts.onPhotoClick && opts.onPhotoClick({ page: idx, x, y, pageWrap, ev });
-      });
+      const DRAG_THRESHOLD = 6;
+      let startX = 0, startY = 0;     /* в пикселях относительно pageWrap */
+      let startedAt = null;            /* timestamp начала жеста */
+      let dragging = false;            /* пользователь явно тянет (>= порога) */
+      let previewEl = null;            /* dashed-прямоугольник во время drag */
+      let pointerId = null;            /* для setPointerCapture */
+      let curR = null;                 /* getBoundingClientRect pageWrap'а */
+
+      const getPos = (ev) => {
+        const cx = ev.clientX, cy = ev.clientY;
+        return { x: cx - curR.left, y: cy - curR.top };
+      };
+      const inImg = (target) => target && (target.tagName === 'IMG' || target === pageWrap);
+      const clearPreview = () => {
+        if(previewEl){ previewEl.remove(); previewEl = null; }
+      };
+      const cancel = () => {
+        clearPreview();
+        startedAt = null; dragging = false; pointerId = null; curR = null;
+      };
+
+      const onDown = (ev) => {
+        /* Игнорируем правый клик, клики по пинам/прямоугольникам/кнопкам */
+        if(ev.button != null && ev.button !== 0) return;
+        if(!inImg(ev.target)) return;
+        if(ev.target.closest && (ev.target.closest('.pin') || ev.target.closest('.pin-rect') ||
+                                  ev.target.closest('button'))) return;
+        curR = pageWrap.getBoundingClientRect();
+        const p = getPos(ev);
+        startX = p.x; startY = p.y;
+        startedAt = Date.now();
+        dragging = false;
+        pointerId = ev.pointerId != null ? ev.pointerId : null;
+        if(pointerId != null && pageWrap.setPointerCapture){
+          try { pageWrap.setPointerCapture(pointerId); } catch(_){}
+        }
+        /* Не превентим — иначе клик не сработает; превентим только когда реально потянули */
+      };
+
+      const onMove = (ev) => {
+        if(startedAt == null || !curR) return;
+        const p = getPos(ev);
+        const dx = p.x - startX, dy = p.y - startY;
+        const dist = Math.hypot(dx, dy);
+        if(!dragging && dist >= DRAG_THRESHOLD){
+          dragging = true;
+          previewEl = el('div', { class:'pin-rect-preview' });
+          pageWrap.append(previewEl);
+        }
+        if(dragging){
+          ev.preventDefault();
+          const x1 = Math.max(0, Math.min(curR.width,  Math.min(startX, p.x)));
+          const y1 = Math.max(0, Math.min(curR.height, Math.min(startY, p.y)));
+          const x2 = Math.max(0, Math.min(curR.width,  Math.max(startX, p.x)));
+          const y2 = Math.max(0, Math.min(curR.height, Math.max(startY, p.y)));
+          previewEl.style.left   = ((x1 / curR.width)  * 100) + '%';
+          previewEl.style.top    = ((y1 / curR.height) * 100) + '%';
+          previewEl.style.width  = (((x2 - x1) / curR.width)  * 100) + '%';
+          previewEl.style.height = (((y2 - y1) / curR.height) * 100) + '%';
+        }
+      };
+
+      const onUp = (ev) => {
+        if(startedAt == null || !curR){ cancel(); return; }
+        const p = getPos(ev);
+        const dx = p.x - startX, dy = p.y - startY;
+        const dist = Math.hypot(dx, dy);
+        const dur = Date.now() - startedAt;
+        const wasDragging = dragging;
+        clearPreview();
+        if(pointerId != null && pageWrap.releasePointerCapture){
+          try { pageWrap.releasePointerCapture(pointerId); } catch(_){}
+        }
+        startedAt = null; dragging = false; pointerId = null;
+        if(wasDragging && dist >= DRAG_THRESHOLD){
+          /* Прямоугольник */
+          ev.preventDefault();
+          const x1 = Math.max(0, Math.min(curR.width,  Math.min(startX, p.x))) / curR.width;
+          const y1 = Math.max(0, Math.min(curR.height, Math.min(startY, p.y))) / curR.height;
+          const x2 = Math.max(0, Math.min(curR.width,  Math.max(startX, p.x))) / curR.width;
+          const y2 = Math.max(0, Math.min(curR.height, Math.max(startY, p.y))) / curR.height;
+          const w = x2 - x1, h = y2 - y1;
+          if(w > 0.005 && h > 0.005){
+            opts.onPhotoRect && opts.onPhotoRect({ page: idx, x: x1, y: y1, w, h, pageWrap, ev });
+          }
+          curR = null;
+          return;
+        }
+        /* Простой клик — пин, как раньше. Длинный тап (>500мс) без drag тоже считаем кликом. */
+        if(dist < DRAG_THRESHOLD && dur < 1200){
+          const x = (p.x) / curR.width;
+          const y = (p.y) / curR.height;
+          opts.onPhotoClick && opts.onPhotoClick({ page: idx, x, y, pageWrap, ev });
+        }
+        curR = null;
+      };
+
+      /* Pointer events покрывают и мышь, и тач на современных браузерах (включая iOS 13+ PWA) */
+      pageWrap.addEventListener('pointerdown', onDown);
+      pageWrap.addEventListener('pointermove', onMove);
+      pageWrap.addEventListener('pointerup',   onUp);
+      pageWrap.addEventListener('pointercancel', cancel);
     }
     wrap.append(pageWrap);
   });
@@ -17289,7 +17423,8 @@ function modalEssayReview(essayId){
       readonly: false,
       essayId: essay.id,
       onPinClick: (c, pinEl) => showExistingCommentPopup(essay, c, pinEl),
-      onPhotoClick: ({ page, x, y, pageWrap }) => showPhotoErrPopup(essay, pageWrap, { page, x, y })
+      onPhotoClick: ({ page, x, y, pageWrap }) => showPhotoErrPopup(essay, pageWrap, { page, x, y }),
+      onPhotoRect:  ({ page, x, y, w, h, pageWrap }) => showPhotoErrPopup(essay, pageWrap, { page, x, y, w, h })
     });
   } else {
     essayBodyEl = renderEssayWithMarks(essayText, commentsForView, { readonly: false });
@@ -17561,20 +17696,39 @@ function modalEssayReview(essayId){
   }, modal);
 }
 
-/* Popup для нового пина на фото — учитель кликнул по точке на фотографии */
+/* Popup для нового пина/прямоугольника на фото.
+   anchor: { page, x, y }                — точка (как раньше)
+   anchor: { page, x, y, w, h }          — прямоугольник (drag) */
 function showPhotoErrPopup(essay, pageWrap, anchor){
   document.querySelectorAll('.err-popup').forEach(n => n.remove());
-  /* Поставим временный «призрак» пина в месте клика, чтобы было понятно куда */
-  const ghost = el('div', {
-    class: 'pin pin-orf',
-    style: { left: (anchor.x * 100) + '%', top: (anchor.y * 100) + '%', opacity:'.5' }
-  }, '?');
+  const isRect = Number(anchor.w) > 0 && Number(anchor.h) > 0;
+  /* Ghost: либо полупрозрачный пин в точке, либо полупрозрачный прямоугольник */
+  let ghost;
+  if(isRect){
+    ghost = el('div', {
+      class: 'pin-rect rect-orf pin-rect-ghost',
+      style: {
+        left:   (anchor.x * 100) + '%',
+        top:    (anchor.y * 100) + '%',
+        width:  (anchor.w * 100) + '%',
+        height: (anchor.h * 100) + '%'
+      }
+    }, el('span', { class:'pin-rect-num' }, '?'));
+  } else {
+    ghost = el('div', {
+      class: 'pin pin-orf',
+      style: { left: (anchor.x * 100) + '%', top: (anchor.y * 100) + '%', opacity:'.5' }
+    }, '?');
+  }
   pageWrap.append(ghost);
 
   const rect = pageWrap.getBoundingClientRect();
   const popup = el('div', { class:'err-popup' });
-  popup.style.left = Math.max(8, Math.min(window.innerWidth - 360, rect.left + rect.width * anchor.x)) + 'px';
-  popup.style.top = (rect.top + window.scrollY + rect.height * anchor.y + 30) + 'px';
+  /* Для прямоугольника позиционируем под его нижней границей; для точки — под точкой */
+  const anchorXFrac = anchor.x + (isRect ? (anchor.w || 0) / 2 : 0);
+  const anchorYFrac = anchor.y + (isRect ? (anchor.h || 0)     : 0);
+  popup.style.left = Math.max(8, Math.min(window.innerWidth - 360, rect.left + rect.width * anchorXFrac)) + 'px';
+  popup.style.top  = (rect.top + window.scrollY + rect.height * anchorYFrac + 16) + 'px';
 
   let chosenKind = 'orf';
   const kindBtns = ERR_KINDS.map(k => el('button', {
@@ -17584,7 +17738,11 @@ function showPhotoErrPopup(essay, pageWrap, anchor){
       chosenKind = k.id;
       popup.querySelectorAll('.kind-btn').forEach(b => b.classList.remove('active'));
       ev.currentTarget.classList.add('active');
-      ghost.className = 'pin pin-' + k.id;
+      if(isRect){
+        ghost.className = 'pin-rect rect-' + k.id + ' pin-rect-ghost';
+      } else {
+        ghost.className = 'pin pin-' + k.id;
+      }
     }
   }, k.crit + ' ' + k.label));
 
@@ -17597,8 +17755,10 @@ function showPhotoErrPopup(essay, pageWrap, anchor){
     onclick: async () => {
       saveBtn.disabled = true; status.textContent = '⏳';
       try {
+        const pa = { page: anchor.page, x: anchor.x, y: anchor.y };
+        if(isRect){ pa.w = anchor.w; pa.h = anchor.h; }
         const row = await saveEssayComment(essay.id, {
-          photo_anchor: { page: anchor.page, x: anchor.x, y: anchor.y },
+          photo_anchor: pa,
           kind: chosenKind, comment: ta.value.trim() || '',
           voice_url: voiceRec.getUrl()
         });
@@ -17617,7 +17777,7 @@ function showPhotoErrPopup(essay, pageWrap, anchor){
 
   popup.append(
     el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'6px' }},
-      'Пин на странице ' + (anchor.page + 1)),
+      (isRect ? 'Прямоугольник на странице ' : 'Пин на странице ') + (anchor.page + 1)),
     el('div', { class:'kinds' }, ...kindBtns),
     ta,
     el('div', { style:{ marginTop:'8px', display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap' }},
