@@ -22405,6 +22405,159 @@ function copyGuestLink(game){
   }
 }
 
+/* === Парсер TASKS из HTML-файла игры ===
+   Игры — отдельные HTML с инлайн JS, у всех принят паттерн
+   `const TASKS = [ ... ];` (массив литералов). Чтобы учителю не открывать
+   и не проходить игру для просмотра содержания, тянем сам HTML, находим
+   литерал TASKS и парсим через new Function. Парсим через скан баланса
+   квадратных скобок (regex'у не доверяемся — массивы вложенные, с HTML
+   внутри строк, с экранированными кавычками). */
+async function fetchGameTasks(gameUrlOrSlug){
+  let url = gameUrlOrSlug;
+  if(!url) throw new Error('нет url игры');
+  if(url.indexOf('http') !== 0){
+    url = window.location.origin + (url.indexOf('/') === 0 ? url : '/games/' + url + '/');
+  }
+  /* Cache-bust, чтобы получить свежую версию: после правок игр старый HTML
+     может ещё лежать в браузерном/CDN кэше. */
+  const sep = url.indexOf('?') >= 0 ? '&' : '?';
+  const r = await fetch(url + sep + '_t=' + Date.now(), { cache: 'no-store' });
+  if(!r.ok) throw new Error('HTTP ' + r.status + ' при загрузке игры');
+  const html = await r.text();
+  const startMatch = html.match(/(?:const|var|let)\s+TASKS\s*=\s*\[/);
+  if(!startMatch) throw new Error('в файле игры не нашёл const TASKS = […]');
+  const startBracket = startMatch.index + startMatch[0].length - 1;
+  let depth = 0, inStr = null, escape = false, end = -1;
+  for(let i = startBracket; i < html.length; i++){
+    const ch = html[i];
+    if(escape){ escape = false; continue; }
+    if(inStr){
+      if(ch === '\\'){ escape = true; continue; }
+      if(ch === inStr) inStr = null;
+      continue;
+    }
+    if(ch === '"' || ch === "'" || ch === '`'){ inStr = ch; continue; }
+    /* Однострочный и многострочный комментарий — пропускаем содержимое */
+    if(ch === '/' && html[i+1] === '/'){
+      while(i < html.length && html[i] !== '\n') i++;
+      continue;
+    }
+    if(ch === '/' && html[i+1] === '*'){
+      i += 2;
+      while(i < html.length - 1 && !(html[i] === '*' && html[i+1] === '/')) i++;
+      i++;
+      continue;
+    }
+    if(ch === '['){ depth++; }
+    else if(ch === ']'){
+      depth--;
+      if(depth === 0){ end = i; break; }
+    }
+  }
+  if(end < 0) throw new Error('не нашёл конец массива TASKS');
+  const literal = html.slice(startBracket, end + 1);
+  try {
+    /* Function гоняем на нашем же контенте — других источников TASKS не бывает */
+    const tasks = new Function('return ' + literal)();
+    if(!Array.isArray(tasks)) throw new Error('TASKS не массив');
+    return tasks;
+  } catch(e){
+    throw new Error('не удалось распарсить TASKS: ' + e.message);
+  }
+}
+
+/* Универсальный рендер одного task'а. Гонки/тренажёры присылают разную
+   структуру — пытаемся вытащить осмысленные поля в фиксированном порядке.
+   Возвращает DOM-элемент <div>. Никаких side-effect'ов. */
+function renderGameTask(task, idx){
+  const wrap = el('div', { style:{ padding:'10px 12px', marginBottom:'8px',
+    background:'#FFFCF2', border:'1px solid #FCD34D', borderRadius:'8px',
+    fontSize:'13px', lineHeight:'1.5' }});
+  const head = el('div', { style:{ display:'flex', gap:'6px', alignItems:'center',
+    flexWrap:'wrap', marginBottom:'6px', fontSize:'11px', color:'var(--ink-3)' }});
+  head.append(el('b', { style:{ color:'var(--ink)' }}, '№' + (idx + 1)));
+  if(task && task.type) head.append(el('span', { style:{ padding:'1px 6px',
+    background:'#E0E7FF', color:'#3730A3', borderRadius:'4px', fontWeight:'700' }}, task.type));
+  if(task && task.tag)  head.append(el('span', { style:{ padding:'1px 6px',
+    background:'#FEF3C7', color:'#92400E', borderRadius:'4px', fontWeight:'700' }}, task.tag));
+  if(task && task.task) head.append(el('span', null, task.task));
+  wrap.append(head);
+
+  if(!task || typeof task !== 'object'){
+    wrap.append(el('div', null, String(task)));
+    return wrap;
+  }
+
+  /* «Текстовое тело» — что-то одно из самых читаемых полей */
+  const body = el('div', null);
+  if(task.title)    body.append(el('div', { style:{ fontWeight:'700' }, html: String(task.title) }));
+  if(task.sub)      body.append(el('div', { style:{ color:'var(--ink-2)', marginTop:'2px' }, html: String(task.sub) }));
+  if(task.sentence) body.append(el('div', { style:{ marginTop:'4px' }}, task.sentence));
+  if(task.q)        body.append(el('div', { style:{ marginTop:'4px', fontWeight:'700' }, html: String(task.q) }));
+  if(task.question) body.append(el('div', { style:{ marginTop:'4px', fontWeight:'700' }, html: String(task.question) }));
+  if(task.text)     body.append(el('div', { style:{ marginTop:'4px' }, html: String(task.text) }));
+  if(task.word)     body.append(el('div', { style:{ marginTop:'4px', fontFamily:'monospace' }}, '📖 ' + task.word));
+  wrap.append(body);
+
+  /* Списки */
+  if(Array.isArray(task.phraseologisms) && task.phraseologisms.length){
+    const ul = el('div', { style:{ marginTop:'6px', paddingLeft:'8px' }});
+    task.phraseologisms.forEach(p => {
+      ul.append(el('div', { style:{ marginTop:'2px' }},
+        el('b', null, '· ' + (p.phrase || '—')),
+        p.meaning ? el('span', { style:{ color:'var(--ink-2)' }}, ' — ' + p.meaning) : ''));
+    });
+    wrap.append(ul);
+  }
+  if(Array.isArray(task.opts) && task.opts.length){
+    const ul = el('div', { style:{ marginTop:'6px', paddingLeft:'8px', fontSize:'12px' }});
+    task.opts.forEach((o, i) => {
+      const isCorrect = task.a === i || (Array.isArray(task.a) && task.a.indexOf(i) >= 0);
+      ul.append(el('div', {
+        style:{ marginTop:'2px', color: isCorrect ? 'var(--green)' : 'var(--ink-2)',
+                fontWeight: isCorrect ? '700' : '400' }
+      }, (isCorrect ? '✓ ' : '   ') + (i+1) + ') ' + String(o)));
+    });
+    wrap.append(ul);
+  }
+  if(Array.isArray(task.sentences) && task.sentences.length){
+    const ul = el('div', { style:{ marginTop:'6px', paddingLeft:'8px', fontSize:'12px' }});
+    task.sentences.forEach((s, i) => {
+      ul.append(el('div', { style:{ marginTop:'2px' }}, (i+1) + ') ' + String(s)));
+    });
+    wrap.append(ul);
+  }
+  /* Теория тренажёров: sections с rules/words/items */
+  if(Array.isArray(task.sections) && task.sections.length){
+    task.sections.forEach(sec => {
+      if(sec.heading){
+        wrap.append(el('div', { style:{ marginTop:'8px', fontWeight:'700', fontSize:'12px',
+          color:'var(--ink-2)' }}, sec.heading));
+      }
+      if(Array.isArray(sec.items)){
+        const list = el('div', { style:{ marginTop:'2px', paddingLeft:'8px', fontSize:'12px' }});
+        sec.items.forEach(it => {
+          list.append(el('div', { style:{ marginTop:'2px' }, html: '· ' + String(it) }));
+        });
+        wrap.append(list);
+      }
+    });
+  }
+  /* Эталонный ответ — есть в разных формах */
+  const correctVal = task.correct != null ? task.correct
+                    : task.answer != null ? task.answer
+                    : task.correctStr != null ? task.correctStr : null;
+  if(correctVal != null && !Array.isArray(task.opts)){
+    wrap.append(el('div', { style:{ marginTop:'6px', fontSize:'12px', color:'var(--green)' }},
+      '✓ Правильно: ', el('b', null, String(correctVal))));
+  }
+  if(task.expl){
+    wrap.append(el('div', { style:{ marginTop:'6px', fontSize:'12px',
+      color:'var(--ink-2)', fontStyle:'italic' }}, '💡 ' + String(task.expl)));
+  }
+  return wrap;
+}
+
 /* === Просмотр игры учителем ===
    Открывает игру в новом окне БЕЗ ?mode=embed. Это значит:
    - Игра рендерит свой полный UI (не урезанный embed-вариант)
@@ -22413,6 +22566,80 @@ function copyGuestLink(game){
    - Учитель может полистать/пройти/закрыть без последствий для статистики.
    Используется когда учитель забыл, какие там вопросы, и хочет посмотреть
    содержание без необходимости проходить как ученик. */
+/* Открывает модалку «Список вопросов» по конкретной игре. Тянет TASKS
+   асинхронно, складывает в STATE.gamePreview, дёргает render(). */
+function showGameTasksModal(game){
+  STATE.gamePreview = { game, tasks: null, loading: true, error: null };
+  render();
+  fetchGameTasks(game.url || ('/games/' + game.slug + '/'))
+    .then(tasks => {
+      if(!STATE.gamePreview || STATE.gamePreview.game.id !== game.id) return;
+      STATE.gamePreview.tasks = tasks;
+      STATE.gamePreview.loading = false;
+      render();
+    })
+    .catch(err => {
+      if(!STATE.gamePreview || STATE.gamePreview.game.id !== game.id) return;
+      STATE.gamePreview.loading = false;
+      STATE.gamePreview.error = err && err.message || String(err);
+      render();
+    });
+}
+
+function modalGamePreview(){
+  const st = STATE.gamePreview;
+  if(!st) return null;
+  const close = () => { STATE.gamePreview = null; render(); };
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase',
+                            letterSpacing:'.08em', fontWeight:'700' }},
+        '📝 Содержимое игры'),
+      el('h2', { style:{ margin:0 }}, (st.game.emoji || '🎮') + ' ' + st.game.title)),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const body = el('div', { class:'modal-body' });
+  if(st.loading){
+    body.append(el('div', { style:{ textAlign:'center', padding:'40px', color:'var(--ink-3)' }},
+      '⏳ Читаю содержание игры…'));
+  } else if(st.error){
+    body.append(el('div', { class:'card', style:{ background:'#FEE2E2',
+      borderColor:'#FCA5A5', color:'#991B1B' }},
+      el('b', null, '⚠ Не получилось прочитать содержимое'),
+      el('div', { style:{ marginTop:'6px', fontSize:'13px' }}, st.error),
+      el('div', { style:{ marginTop:'10px', fontSize:'12px', color:'var(--ink-2)' }},
+        'Можно открыть игру в новом окне для просмотра вручную:')),
+      el('button', { class:'btn btn-secondary', style:{ marginTop:'10px' },
+        onclick: () => openGamePreview(st.game)
+      }, '👀 Открыть игру в новой вкладке'));
+  } else if(!Array.isArray(st.tasks) || !st.tasks.length){
+    body.append(el('div', { style:{ textAlign:'center', padding:'30px', color:'var(--ink-2)' }},
+      'В этой игре не нашлось списка вопросов (TASKS пуст).'));
+  } else {
+    body.append(el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginBottom:'10px' }},
+      'Всего заданий: ',
+      el('b', { style:{ color:'var(--ink)' }}, String(st.tasks.length)),
+      '. Формат у игр разный — показываю как смогла распарсить. ' +
+      'Если чего-то не хватает, открой игру в новой вкладке (кнопка 👀 ниже).'));
+    const list = el('div', null);
+    st.tasks.forEach((t, i) => list.append(renderGameTask(t, i)));
+    body.append(list);
+  }
+
+  const foot = el('div', { class:'modal-foot' },
+    el('button', { class:'btn btn-secondary',
+      onclick: () => openGamePreview(st.game)
+    }, '👀 Открыть в новой вкладке'),
+    el('button', { class:'btn btn-p', onclick: close }, 'Закрыть'));
+
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }},
+    el('div', { class:'modal',
+      style:{ maxWidth:'720px', maxHeight:'calc(100vh - 40px)', display:'flex',
+              flexDirection:'column' }},
+      head, body, foot));
+}
+
 function openGamePreview(game){
   const url = (game.url || ('/games/' + game.slug + '/')) + '?mode=preview&name=' + encodeURIComponent('Учитель');
   const fullUrl = url.indexOf('http') === 0 ? url : (window.location.origin + url);
@@ -24107,6 +24334,10 @@ function renderTeacherGameCard(g){
         el('button', { class:'btn ' + (g.is_published ? 'btn-secondary' : 'btn-teal'),
           onclick: () => toggleGamePublished(g, !g.is_published)
         }, g.is_published ? '🚫 Скрыть' : '✅ Открыть'),
+        el('button', { class:'btn btn-secondary',
+          title:'Список всех вопросов прямо здесь, без необходимости проходить игру',
+          onclick: () => showGameTasksModal(g)
+        }, '📝 Список вопросов'),
         el('button', { class:'btn btn-secondary',
           title:'Открыть в новом окне для просмотра содержания — без записи попытки в статистику',
           onclick: () => openGamePreview(g)
@@ -31614,6 +31845,7 @@ function _renderNow(){
   if(STATE.newStudentForm) root.append(modalNewStudent());
   if(STATE.curatorPermsFor) root.append(modalCuratorPerms());
   if(STATE.studentDetailOpen) root.append(modalStudentDetail());
+  if(STATE.gamePreview) root.append(modalGamePreview());
   if(STATE.attemptDetailOpen) root.append(modalAttemptDetail());
   /* Onboarding: если у профиля имя = префикс email (то есть дефолтное автогенерённое),
      показываем форму с просьбой ввести имя. Только один раз. */
