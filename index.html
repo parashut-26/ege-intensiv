@@ -5432,23 +5432,34 @@ function renderPhotosWithPins(photos, comments, opts){
       const a = c.photo_anchor || {};
       const hasRect = Number(a.w) > 0 && Number(a.h) > 0;
       if(hasRect){
-        /* Прямоугольное выделение поверх куска текста */
-        const rect = el('div', {
-          class: 'pin-rect rect-' + meta.id,
-          style: {
-            left:   ((a.x || 0) * 100) + '%',
-            top:    ((a.y || 0) * 100) + '%',
-            width:  ((a.w || 0) * 100) + '%',
-            height: ((a.h || 0) * 100) + '%'
-          },
-          title: meta.crit + ' · ' + meta.label + (c.comment ? ' — ' + c.comment : '')
-        }, el('span', { class:'pin-rect-num' }, String(i + 1)));
-        rect.dataset.cid = String(c.id);
-        rect.addEventListener('click', ev => {
-          ev.stopPropagation();
-          opts.onPinClick && opts.onPinClick(c, rect);
+        /* Прямоугольное выделение поверх куска текста.
+           === Мультивыделение ===
+           Если в photo_anchor есть массив `rects` — это группа прямоугольников,
+           принадлежащих одному комменту. Первый rect живёт в основных полях
+           x/y/w/h (обратная совместимость со старым кодом), доп.rects лежат
+           в массиве. Рисуем все, клик по любому открывает один общий попап
+           комментария. */
+        const allRects = [{ x:a.x, y:a.y, w:a.w, h:a.h }]
+          .concat(Array.isArray(a.rects) ? a.rects.filter(r => Number(r.w) > 0 && Number(r.h) > 0) : []);
+        allRects.forEach((r, ri) => {
+          const rect = el('div', {
+            class: 'pin-rect rect-' + meta.id,
+            style: {
+              left:   ((r.x || 0) * 100) + '%',
+              top:    ((r.y || 0) * 100) + '%',
+              width:  ((r.w || 0) * 100) + '%',
+              height: ((r.h || 0) * 100) + '%'
+            },
+            title: meta.crit + ' · ' + meta.label + (c.comment ? ' — ' + c.comment : '')
+              + (allRects.length > 1 ? ' (часть ' + (ri + 1) + '/' + allRects.length + ')' : '')
+          }, el('span', { class:'pin-rect-num' }, String(i + 1)));
+          rect.dataset.cid = String(c.id);
+          rect.addEventListener('click', ev => {
+            ev.stopPropagation();
+            opts.onPinClick && opts.onPinClick(c, rect);
+          });
+          pageWrap.append(rect);
         });
-        pageWrap.append(rect);
       } else {
         /* Точка как раньше */
         const pin = el('div', {
@@ -5551,7 +5562,20 @@ function renderPhotosWithPins(photos, comments, opts){
           const y2 = Math.max(0, Math.min(curR.height, Math.max(startY, p.y))) / curR.height;
           const w = x2 - x1, h = y2 - y1;
           if(w > 0.005 && h > 0.005){
-            opts.onPhotoRect && opts.onPhotoRect({ page: idx, x: x1, y: y1, w, h, pageWrap, ev });
+            /* Режим мультивыделения: если открыт попап и он ждёт дополнительный
+               прямоугольник к тому же комменту (Shift+drag на компе или клик ➕ на
+               планшете) — передаём rect в коллбэк попапа вместо открытия нового. */
+            const addHook = window.__essayAddRect;
+            if(addHook && (!addHook.pageWrap || addHook.pageWrap === pageWrap)){
+              addHook.onAddRect({ page: idx, x: x1, y: y1, w, h, pageWrap });
+            } else if(ev.shiftKey && opts.onPhotoRectShift){
+              /* Shift сразу при первом drag — учитель явно хочет начать
+                 мультивыделение, открываем новый попап с уже выделенным rect'ом и
+                 готовым режимом «➕ ждёт следующий». */
+              opts.onPhotoRectShift({ page: idx, x: x1, y: y1, w, h, pageWrap, ev });
+            } else {
+              opts.onPhotoRect && opts.onPhotoRect({ page: idx, x: x1, y: y1, w, h, pageWrap, ev });
+            }
           }
           curR = null;
           return;
@@ -17963,14 +17987,55 @@ function modalEssayReview(essayId){
       readonly: false,
       essayId: essay.id,
       onPinClick: (c, pinEl) => showExistingCommentPopup(essay, c, pinEl),
-      onPhotoClick: ({ page, x, y, pageWrap }) => showPhotoErrPopup(essay, pageWrap, { page, x, y }),
-      onPhotoRect:  ({ page, x, y, w, h, pageWrap }) => showPhotoErrPopup(essay, pageWrap, { page, x, y, w, h })
+      onPhotoClick:      ({ page, x, y, pageWrap }) => showPhotoErrPopup(essay, pageWrap, { page, x, y }),
+      onPhotoRect:       ({ page, x, y, w, h, pageWrap }) => showPhotoErrPopup(essay, pageWrap, { page, x, y, w, h }),
+      onPhotoRectShift:  ({ page, x, y, w, h, pageWrap }) => showPhotoErrPopup(essay, pageWrap, { page, x, y, w, h, awaitingMore: true })
     });
   } else {
     essayBodyEl = renderEssayWithMarks(essayText, commentsForView, { readonly: false });
-    essayBodyEl.addEventListener('mouseup', () => {
-      setTimeout(() => showErrPopup(essay, essayBodyEl, essayText), 0);
-    });
+    /* pointerup покрывает мышь, тач и Apple Pencil. На iPad Safari mouseup НЕ
+       срабатывает для тач-selection — раньше из-за этого Ольга не могла
+       выделить ошибку на печатном тексте пальцем/пенселом. Дополнительно
+       selectionchange — страховка для случаев когда тап завершён вне
+       essayBodyEl (например, пользователь дотянул палец до тулбара). */
+    let pendingSelTimer = null;
+    const triggerErrPopup = () => {
+      if(pendingSelTimer) clearTimeout(pendingSelTimer);
+      pendingSelTimer = setTimeout(() => {
+        pendingSelTimer = null;
+        const sel = window.getSelection();
+        if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+        const range = sel.getRangeAt(0);
+        if(!essayBodyEl.contains(range.startContainer) || !essayBodyEl.contains(range.endContainer)) return;
+        showErrPopup(essay, essayBodyEl, essayText);
+      }, 50);
+    };
+    essayBodyEl.addEventListener('pointerup', triggerErrPopup);
+    /* Доп.страховка для iOS: иногда нативный селект завершается событием
+       selectionchange на document, без pointerup. Слушаем глобально и
+       проверяем что выделение действительно внутри essayBodyEl. */
+    const onSelChange = () => {
+      const sel = window.getSelection();
+      if(!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+      const r = sel.getRangeAt(0);
+      if(essayBodyEl.contains(r.startContainer) && essayBodyEl.contains(r.endContainer)){
+        triggerErrPopup();
+      }
+    };
+    document.addEventListener('selectionchange', onSelChange);
+    /* При закрытии модалки слушатель selectionchange должен сняться —
+       сохраняем ссылку для очистки. STATE.essayOpen становится null при close;
+       при следующем render всё пересоздаётся, и этот же essayBodyEl уйдёт
+       в garbage. Но listener на document останется навсегда, если не снять.
+       ВАЖНО: при каждом ре-рендере открытой модалки эта функция вызывается
+       заново → новые listener'ы накапливаются. Поэтому перед добавлением
+       нового — снимаем все старые из предыдущего рендера. */
+    if(STATE._essaySelListeners && STATE._essaySelListeners.length){
+      STATE._essaySelListeners.forEach(fn => {
+        try { document.removeEventListener('selectionchange', fn); } catch(_){}
+      });
+    }
+    STATE._essaySelListeners = [onSelChange];
     essayBodyEl.addEventListener('click', ev => {
       if(ev.target && ev.target.tagName === 'MARK'){
         const cid = +ev.target.getAttribute('data-id');
@@ -18246,14 +18311,31 @@ function modalEssayReview(essayId){
           }, '🤖 Сгенерировать'))));
   }
 
+  /* === Общий комментарий ученику (туда же падает AI-черновик) ===
+     На планшете правая колонка узкая, и длинный AI-разбор по К1-К10 неудобно
+     читать в маленькой textarea. Кнопка ⛶ открывает fullscreen-оверлей
+     с большой textarea на весь экран. Состояние синхронизируется через
+     STATE.essayComment + STATE.essayCommentFullscreen. */
+  const commentTextarea = el('textarea', {
+    placeholder: isCurator ? 'Куратор: ваш предварительный комментарий — учитель сможет его дополнить.' : 'Аня, отличная работа над комментарием…',
+    style:{ width:'100%', padding:'10px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'80px', resize:'vertical', marginTop:'8px' },
+    oninput: ev => { STATE.essayComment = ev.target.value; }
+  }, STATE.essayComment || '');
+  const expandCommentBtn = el('button', {
+    type:'button',
+    title:'Развернуть на весь экран — удобно читать длинный AI-разбор',
+    style:{ padding:'4px 10px', fontSize:'12px', fontWeight:'700',
+            background:'#FFFDF7', color:'#92400E',
+            border:'1px solid #FACC15', borderRadius:'7px',
+            cursor:'pointer', fontFamily:'inherit' },
+    onclick: () => { STATE.essayCommentFullscreen = true; render(); }
+  }, '⛶ Развернуть');
   rightCol.append(
     el('div', { class:'card', style:{ marginTop:'14px', background:'var(--surface-soft)' }},
-      el('h4', null, '💬 Общий комментарий ученику'),
-      el('textarea', {
-        placeholder: isCurator ? 'Куратор: ваш предварительный комментарий — учитель сможет его дополнить.' : 'Аня, отличная работа над комментарием…',
-        style:{ width:'100%', padding:'10px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'80px', resize:'vertical', marginTop:'8px' },
-        oninput: ev => { STATE.essayComment = ev.target.value; }
-      }, STATE.essayComment || ''),
+      el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'8px', flexWrap:'wrap' }},
+        el('h4', { style:{ margin:0 }}, '💬 Общий комментарий ученику'),
+        expandCommentBtn),
+      commentTextarea,
       (() => {
         const wrap = el('div', { style:{ marginTop:'8px', display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }});
         wrap.append(el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }}, 'Голос:'));
@@ -18340,32 +18422,88 @@ function modalEssayReview(essayId){
       el('div', { class:'essay-grid' }, leftCol, rightCol)),
     foot);
 
-  return el('div', { class:'modal-bg', style: bgStyle,
+  const modalBg = el('div', { class:'modal-bg', style: bgStyle,
     onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.essayOpen = null; STATE.essayBy = null; STATE.scoresK = {}; STATE.errors = {}; STATE.essayComment = ''; STATE.essayVoiceUrl = null; render(); }}
   }, modal);
+
+  /* === Fullscreen-оверлей для «Общего комментария» === */
+  if(STATE.essayCommentFullscreen){
+    const bigTa = el('textarea', {
+      style:{ width:'100%', flex:'1 1 auto', minHeight:'200px', resize:'none',
+              padding:'14px 16px', borderRadius:'12px', border:'1px solid var(--border-2)',
+              fontSize:'15px', lineHeight:'1.55', fontFamily:'inherit', boxSizing:'border-box' },
+      placeholder:'Здесь удобно читать и править длинный AI-разбор по К1-К10. Изменения сразу попадают в общий комментарий.',
+      oninput: ev => {
+        STATE.essayComment = ev.target.value;
+        /* синхронизируем «маленькую» textarea на правой колонке, чтобы при закрытии оверлея не было визуальной задержки */
+        if(commentTextarea) commentTextarea.value = ev.target.value;
+      }
+    }, STATE.essayComment || '');
+    const closeFs = () => { STATE.essayCommentFullscreen = false; render(); };
+    const overlay = el('div', {
+      class:'modal-bg',
+      style:{ zIndex:'1000', padding:'12px', background:'rgba(15,23,42,.55)' },
+      onclick: e => { if(e.target.classList.contains('modal-bg')) closeFs(); }
+    },
+      el('div', {
+        class:'modal',
+        style:{ maxWidth:'none', width:'calc(100vw - 24px)', maxHeight:'calc(100vh - 24px)',
+                height:'calc(100vh - 24px)', borderRadius:'14px',
+                display:'flex', flexDirection:'column' }
+      },
+        el('div', { class:'modal-head' },
+          el('div', null,
+            el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
+              essay.studentName + ' · ИИ-разбор'),
+            el('h2', { style:{ margin:0 }}, '💬 Общий комментарий')),
+          el('button', { class:'x', onclick: closeFs }, '×')),
+        el('div', {
+          class:'modal-body',
+          style:{ display:'flex', flexDirection:'column', flex:'1 1 auto', minHeight:0, padding:'14px 16px' }
+        }, bigTa),
+        el('div', { class:'modal-foot', style:{ justifyContent:'flex-end' }},
+          el('button', { class:'btn btn-p', onclick: closeFs }, '✓ Готово'))));
+    /* Фокусируем большую textarea — на планшете это даёт всплытие клавиатуры. */
+    setTimeout(() => { try { bigTa.focus(); } catch(_){} }, 30);
+    return el('div', null, modalBg, overlay);
+  }
+
+  return modalBg;
 }
 
 /* Popup для нового пина/прямоугольника на фото.
-   anchor: { page, x, y }                — точка (как раньше)
-   anchor: { page, x, y, w, h }          — прямоугольник (drag) */
+   anchor: { page, x, y }                       — точка (как раньше)
+   anchor: { page, x, y, w, h }                 — прямоугольник (drag)
+   anchor: { page, x, y, w, h, awaitingMore }   — Shift+drag, сразу ждём ещё */
 function showPhotoErrPopup(essay, pageWrap, anchor){
   document.querySelectorAll('.err-popup').forEach(n => n.remove());
+  /* Если был незакрытый «жду ещё прямоугольник» от прошлого попапа — снимем */
+  window.__essayAddRect = null;
   const isRect = Number(anchor.w) > 0 && Number(anchor.h) > 0;
-  /* Ghost: либо полупрозрачный пин в точке, либо полупрозрачный прямоугольник */
-  let ghost;
-  if(isRect){
-    ghost = el('div', {
-      class: 'pin-rect rect-orf pin-rect-ghost',
+  /* extraRects — дополнительные прямоугольники, добавленные через ➕ / Shift+drag.
+     Первый rect остаётся в основных полях photo_anchor.x/y/w/h, доп. идут сюда. */
+  const extraRects = [];
+  const extraGhosts = [];
+  let chosenKind = 'orf';
+
+  const makeGhost = (kind, ax, ay, aw, ah) => {
+    return el('div', {
+      class: 'pin-rect rect-' + kind + ' pin-rect-ghost',
       style: {
-        left:   (anchor.x * 100) + '%',
-        top:    (anchor.y * 100) + '%',
-        width:  (anchor.w * 100) + '%',
-        height: (anchor.h * 100) + '%'
+        left:   (ax * 100) + '%',
+        top:    (ay * 100) + '%',
+        width:  (aw * 100) + '%',
+        height: (ah * 100) + '%'
       }
     }, el('span', { class:'pin-rect-num' }, '?'));
+  };
+
+  let ghost;
+  if(isRect){
+    ghost = makeGhost(chosenKind, anchor.x, anchor.y, anchor.w, anchor.h);
   } else {
     ghost = el('div', {
-      class: 'pin pin-orf',
+      class: 'pin pin-' + chosenKind,
       style: { left: (anchor.x * 100) + '%', top: (anchor.y * 100) + '%', opacity:'.5' }
     }, '?');
   }
@@ -18373,13 +18511,11 @@ function showPhotoErrPopup(essay, pageWrap, anchor){
 
   const rect = pageWrap.getBoundingClientRect();
   const popup = el('div', { class:'err-popup' });
-  /* Для прямоугольника позиционируем под его нижней границей; для точки — под точкой */
   const anchorXFrac = anchor.x + (isRect ? (anchor.w || 0) / 2 : 0);
   const anchorYFrac = anchor.y + (isRect ? (anchor.h || 0)     : 0);
   popup.style.left = Math.max(8, Math.min(window.innerWidth - 360, rect.left + rect.width * anchorXFrac)) + 'px';
   popup.style.top  = (rect.top + window.scrollY + rect.height * anchorYFrac + 16) + 'px';
 
-  let chosenKind = 'orf';
   const kindBtns = ERR_KINDS.map(k => el('button', {
     class: 'kind-btn' + (k.id === chosenKind ? ' active' : ''),
     style: { background: k.bg, borderColor: k.bg },
@@ -18389,16 +18525,63 @@ function showPhotoErrPopup(essay, pageWrap, anchor){
       ev.currentTarget.classList.add('active');
       if(isRect){
         ghost.className = 'pin-rect rect-' + k.id + ' pin-rect-ghost';
+        /* Перекрашиваем все доп.ghost'ы в новый цвет тоже */
+        extraGhosts.forEach(g => { g.className = 'pin-rect rect-' + k.id + ' pin-rect-ghost'; });
       } else {
         ghost.className = 'pin pin-' + k.id;
       }
     }
   }, k.crit + ' ' + k.label));
 
-  const ta = el('textarea', { placeholder: 'Комментарий к этой ошибке' });
+  const ta = el('textarea', { placeholder: 'Комментарий к этой ошибке (один на все прямоугольники)' });
   const voiceRec = makeVoiceRecorder();
   const status = el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, '');
-  const cleanup = () => { ghost.remove(); popup.remove(); };
+  const cleanup = () => {
+    ghost.remove();
+    extraGhosts.forEach(g => g.remove());
+    extraGhosts.length = 0;
+    popup.remove();
+    window.__essayAddRect = null;
+  };
+
+  /* === Кнопка «➕ Добавить ещё выделение» === */
+  let addMoreBtn = null;
+  let addInfo = null;
+  if(isRect){
+    addInfo = el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'4px',
+                                  display:'none' }},
+      '👉 Выдели на фото ещё один прямоугольник — он добавится к этому комментарию');
+    addMoreBtn = el('button', {
+      type:'button',
+      class:'btn btn-secondary btn-sm',
+      style:{ fontWeight:'700' },
+      onclick: () => {
+        /* Включаем режим: следующий drag по этой же странице добавит rect к комменту. */
+        if(window.__essayAddRect && window.__essayAddRect.cancel){ window.__essayAddRect.cancel(); }
+        addInfo.style.display = 'block';
+        addMoreBtn.disabled = true;
+        addMoreBtn.textContent = '⌛ жду выделение…';
+        window.__essayAddRect = {
+          pageWrap,
+          onAddRect: (r) => {
+            const ghostMore = makeGhost(chosenKind, r.x, r.y, r.w, r.h);
+            pageWrap.append(ghostMore);
+            extraGhosts.push(ghostMore);
+            extraRects.push({ x:r.x, y:r.y, w:r.w, h:r.h });
+            /* Готовы добавить ещё один — оставляем хук активным */
+            addInfo.textContent = '✓ Добавлено: ' + (extraRects.length + 1)
+              + '. Можно выделять ещё или нажать «Готово».';
+          },
+          cancel: () => {
+            if(!addMoreBtn) return;
+            addMoreBtn.disabled = false;
+            addMoreBtn.textContent = '➕ Добавить ещё выделение';
+          }
+        };
+      }
+    }, '➕ Добавить ещё выделение');
+  }
+
   const cancelBtn = el('button', { class:'btn btn-secondary btn-sm', onclick: cleanup }, 'Отмена');
   const saveBtn = el('button', { class:'btn btn-p btn-sm',
     onclick: async () => {
@@ -18406,6 +18589,7 @@ function showPhotoErrPopup(essay, pageWrap, anchor){
       try {
         const pa = { page: anchor.page, x: anchor.x, y: anchor.y };
         if(isRect){ pa.w = anchor.w; pa.h = anchor.h; }
+        if(extraRects.length){ pa.rects = extraRects.slice(); }
         const row = await saveEssayComment(essay.id, {
           photo_anchor: pa,
           kind: chosenKind, comment: ta.value.trim() || '',
@@ -18432,17 +18616,25 @@ function showPhotoErrPopup(essay, pageWrap, anchor){
     el('div', { style:{ marginTop:'8px', display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap' }},
       el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, 'Голос:'),
       voiceRec.node),
+    addMoreBtn ? el('div', { style:{ marginTop:'8px' }}, addMoreBtn, addInfo) : null,
     el('div', { class:'row' }, status, cancelBtn, saveBtn));
   document.body.append(popup);
   setTimeout(() => ta.focus(), 50);
 
+  /* Если попап создан через Shift+drag — сразу включаем режим ➕ */
+  if(anchor.awaitingMore && addMoreBtn){
+    addMoreBtn.click();
+  }
+
+  /* Закрытие по клику вне — pointerdown работает и на мыши, и на тач (iPad/iPhone).
+     Не закрываем, если клик попал в фото (там сейчас может начинаться добавление rect). */
   const closer = (ev) => {
     if(!popup.contains(ev.target) && !pageWrap.contains(ev.target)){
       cleanup();
-      document.removeEventListener('mousedown', closer);
+      document.removeEventListener('pointerdown', closer);
     }
   };
-  setTimeout(() => document.addEventListener('mousedown', closer), 100);
+  setTimeout(() => document.addEventListener('pointerdown', closer), 100);
 }
 
 /* Popup для нового замечания при выделении текста */
@@ -18519,14 +18711,14 @@ function showErrPopup(essay, container, fullText){
   document.body.append(popup);
   setTimeout(() => ta.focus(), 50);
 
-  /* Закрыть по клику вне */
+  /* Закрыть по клику вне — pointerdown срабатывает и на мыши, и на тач (iPad). */
   const closer = (ev) => {
     if(!popup.contains(ev.target) && !container.contains(ev.target)){
       popup.remove();
-      document.removeEventListener('mousedown', closer);
+      document.removeEventListener('pointerdown', closer);
     }
   };
-  setTimeout(() => document.addEventListener('mousedown', closer), 100);
+  setTimeout(() => document.addEventListener('pointerdown', closer), 100);
 }
 
 /* Утилиты — фильтруем пустые / литеральные «null» из БД */
@@ -18557,8 +18749,8 @@ function showStudentCommentTooltip(c, markEl){
     el('div', { class:'row' },
       el('button', { class:'btn btn-secondary btn-sm', onclick: () => popup.remove() }, 'Закрыть')));
   document.body.append(popup);
-  const closer = (ev) => { if(!popup.contains(ev.target)){ popup.remove(); document.removeEventListener('mousedown', closer); }};
-  setTimeout(() => document.addEventListener('mousedown', closer), 100);
+  const closer = (ev) => { if(!popup.contains(ev.target)){ popup.remove(); document.removeEventListener('pointerdown', closer); }};
+  setTimeout(() => document.addEventListener('pointerdown', closer), 100);
 }
 
 /* Popup для просмотра/удаления существующего замечания */
@@ -18596,8 +18788,8 @@ function showExistingCommentPopup(essay, c, markEl){
           } catch(e){ alert('⚠ ' + e.message); }
         }}, '🗑 Удалить')));
   document.body.append(popup);
-  const closer = (ev) => { if(!popup.contains(ev.target)){ popup.remove(); document.removeEventListener('mousedown', closer); }};
-  setTimeout(() => document.addEventListener('mousedown', closer), 100);
+  const closer = (ev) => { if(!popup.contains(ev.target)){ popup.remove(); document.removeEventListener('pointerdown', closer); }};
+  setTimeout(() => document.addEventListener('pointerdown', closer), 100);
 }
 
 /* Строка в списке замечаний */
@@ -31213,7 +31405,16 @@ function _renderNow(){
   if(STATE.testOpen != null) root.append(modalTest(STATE.testOpen));
   if(STATE.walkMaterialsOpen) root.append(modalWalkMaterials());
   if(STATE.archiveOpen) root.append(modalArchive());
-  if(STATE.essayOpen) root.append(modalEssayReview(STATE.essayOpen));
+  if(STATE.essayOpen){
+    root.append(modalEssayReview(STATE.essayOpen));
+  } else if(STATE._essaySelListeners && STATE._essaySelListeners.length){
+    /* Модалка закрыта — снимаем повешенные на document selectionchange-listeners,
+       иначе при следующем открытии будет накапливаться по штуке на render. */
+    STATE._essaySelListeners.forEach(fn => {
+      try { document.removeEventListener('selectionchange', fn); } catch(_){}
+    });
+    STATE._essaySelListeners = [];
+  }
   if(STATE.lightbox) root.append(modalLightbox());
   if(STATE.quickEditQuestion) root.append(modalQuickEditQuestion());
   if(STATE.newStudentForm) root.append(modalNewStudent());
