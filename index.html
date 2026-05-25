@@ -18281,9 +18281,12 @@ function modalEssayReview(essayId){
                        Правильно: правильный вариант */
                     const sevLabel = m.severity === 'warn' ? '⚠ НЕДОЧЁТ' : '❌ ОШИБКА';
                     const parts = ['🤖 ' + sevLabel];
-                    if(m.title) parts[0] += ' · ' + m.title;
-                    if(m.comment) parts.push(m.comment);
-                    if(m.correction) parts.push('Правильно: ' + m.correction);
+                    if(m.title && m.title !== 'null') parts[0] += ' · ' + m.title;
+                    /* AI иногда возвращает comment/correction как строку «null» вместо
+                       JSON null. Без явной проверки оно проходило truthy и приклеивалось
+                       к комменту хвостом «null». Защита: фильтруем литеральное 'null'. */
+                    if(m.comment && m.comment !== 'null') parts.push(m.comment);
+                    if(m.correction && m.correction !== 'null') parts.push('Правильно: ' + m.correction);
                     const commentText = parts.join('\n\n');
                     try {
                       const saved = await saveEssayComment(essay.id, {
@@ -18736,7 +18739,14 @@ function showErrPopup(essay, container, fullText){
 }
 
 /* Утилиты — фильтруем пустые / литеральные «null» из БД */
-function safeComment(s){ return (s && s !== 'null') ? s : ''; }
+function safeComment(s){
+  if(!s || s === 'null' || s === 'undefined') return '';
+  /* Подчищаем суффикс «\nnull» / «\nundefined» — артефакт старых сохранений,
+     когда null от AI (например m.correction) приводилось к строке через
+     конкатенацию. Делаем это на чтении, а не миграцией БД — безопасно для всех
+     существующих комментариев. */
+  return String(s).replace(/\s*\n+\s*(null|undefined)\s*$/i, '').trim();
+}
 function safeVoiceUrl(u){ return (u && u !== 'null' && (''+u).indexOf('http') === 0) ? u : null; }
 
 /* Tooltip для ученика — только просмотр замечания */
