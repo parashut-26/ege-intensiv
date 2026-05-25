@@ -6842,6 +6842,22 @@ function el(tag, props, ...children){
   return n;
 }
 
+/* Безопасный append для существующего DOM-элемента: фильтрует null/false/undefined,
+   которые нативный Element.append() превратил бы в текстовую ноду "null"/"undefined".
+   Прецедент 25.05.2026: ученик видел слово "null" под комментарием учителя — это
+   `popup.append(..., voice ? el(...) : null, ...)` падал в Element.append(null),
+   и Safari/Chrome послушно вставляли Text node "null". */
+function safeAppend(parent, ...children){
+  const flat = [];
+  for(const c of children){
+    if(Array.isArray(c)) flat.push(...c); else flat.push(c);
+  }
+  for(const c of flat){
+    if(c == null || c === false) continue;
+    parent.append(c instanceof Node ? c : document.createTextNode(String(c)));
+  }
+}
+
 function showToast(text, durationMs){
   /* ВАЖНО: НЕ дёргаем глобальный render() — он пересоздаёт DOM редактора
      поста (contenteditable) и стирает всё, что туда было вставлено: видео,
@@ -18625,7 +18641,7 @@ function showPhotoErrPopup(essay, pageWrap, anchor){
     }
   }, '✓ Сохранить');
 
-  popup.append(
+  safeAppend(popup,
     el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'6px' }},
       (isRect ? 'Прямоугольник на странице ' : 'Пин на странице ') + (anchor.page + 1)),
     el('div', { class:'kinds' }, ...kindBtns),
@@ -18716,7 +18732,7 @@ function showErrPopup(essay, container, fullText){
     }
   }, '✓ Сохранить');
 
-  popup.append(
+  safeAppend(popup,
     el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'6px' }},
       'Фрагмент: «' + (fragment.length > 60 ? fragment.slice(0, 60) + '…' : fragment) + '»'),
     el('div', { class:'kinds' }, ...kindBtns),
@@ -18759,7 +18775,7 @@ function showStudentCommentTooltip(c, markEl){
   popup.style.top = (rect.bottom + window.scrollY + 6) + 'px';
   const txt = safeComment(c.comment);
   const vu = safeVoiceUrl(c.voice_url);
-  popup.append(
+  safeAppend(popup,
     el('div', { style:{ fontSize:'12px', fontWeight:'700', marginBottom:'4px',
       padding:'4px 8px', background: meta.bg, borderRadius:'6px', display:'inline-block' }},
       meta.crit + ' · ' + meta.label),
@@ -18838,7 +18854,7 @@ function showExistingCommentPopup(essay, c, markEl){
     }, k.crit + ' ' + k.label));
   });
 
-  popup.append(
+  safeAppend(popup,
     kindHeader,
     kindsWrap,
     el('div', { style:{ fontSize:'13px', marginTop:'6px', whiteSpace:'pre-wrap' }},
