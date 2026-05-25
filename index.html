@@ -13691,7 +13691,14 @@ function openGameModal(game){
 
   const overlay = el('div', { id:'zebrus-game-overlay',
     style:{ position:'fixed', inset:'0', background:'rgba(15,12,30,0.85)', zIndex:'9999',
-            display:'flex', flexDirection:'column', padding:'0' }},
+            display:'flex', flexDirection:'column', padding:'0',
+            /* === Защита от iOS pull-to-refresh ===
+               Прецедент 25.05.2026: ученица играла в гонки-фразеологизмы, случайно
+               свайпнула пальцем вниз → Safari/PWA перезагрузил страницу → iframe
+               пересоздался → игра начала сначала. overscroll-behavior:contain
+               говорит браузеру не передавать жест прокрутки родителю (то есть
+               окну) → pull-to-refresh не срабатывает. */
+            overscrollBehavior:'contain', touchAction:'manipulation' }},
     el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center',
                         padding:'10px 16px', background:'#fff', borderBottom:'1px solid var(--border-2)' }},
       el('div', { style:{ fontWeight:'800', display:'flex', alignItems:'center', gap:'8px' }},
@@ -13703,12 +13710,36 @@ function openGameModal(game){
     el('iframe', { src:url, style:{ flex:1, width:'100%', border:'none', background:'#0a0e1a' }})
   );
   document.body.appendChild(overlay);
+  /* Дублируем защиту на body — на некоторых iOS-версиях overscroll-behavior
+     на дочернем элементе работает только если у родителя тоже стоит ограничение
+     прокрутки. Сохраняем предыдущие значения, чтобы аккуратно вернуть в close. */
+  STATE._gameModalPrevBodyStyle = {
+    overflow: document.body.style.overflow,
+    overscrollBehavior: document.body.style.overscrollBehavior,
+    position: document.body.style.position,
+    width: document.body.style.width
+  };
+  document.body.style.overflow = 'hidden';
+  document.body.style.overscrollBehavior = 'contain';
+  /* На iOS position:fixed нужен чтобы touchmove на body не двигал страницу
+     (а заодно блокирует и pull-to-refresh). */
+  document.body.style.position = 'fixed';
+  document.body.style.width = '100%';
 }
 
 function closeGameModal(){
   STATE.openGameId = null;
   const ov = document.getElementById('zebrus-game-overlay');
   if(ov) ov.remove();
+  /* Возвращаем body в исходное состояние */
+  if(STATE._gameModalPrevBodyStyle){
+    const p = STATE._gameModalPrevBodyStyle;
+    document.body.style.overflow = p.overflow || '';
+    document.body.style.overscrollBehavior = p.overscrollBehavior || '';
+    document.body.style.position = p.position || '';
+    document.body.style.width = p.width || '';
+    STATE._gameModalPrevBodyStyle = null;
+  }
 }
 
 function viewStudentGames(){
@@ -22912,19 +22943,31 @@ async function addWarmupBlock(target, payload){
       несмотря на то, что файл существует. Прокси на нашем домене
       обходит блокировки.
 
-   2. Параметр width не используется — пробовали Image Transformations
-      endpoint `/render/image/?width=N`, но на бесплатном плане Supabase
-      он возвращает 404 / 403 (нужен Pro план), что снова даёт broken icon.
-      Поэтому оставляем оригинальный объект через прокси. Если в будущем
-      перейдём на Pro — раскомментируем шаг 2.
+   2. Image Transformations через `/storage/v1/render/image/?width=N` —
+      включено 25.05.2026 после апгрейда на Pro план. Эндпоинт ужимает
+      картинку на лету до нужной ширины, что в 3-5 раз снижает bandwidth
+      на превью-карточках. На Free плане возвращал 404/403, поэтому
+      раньше был отключён.
 
-   3. Параметр width оставлен в сигнатуре для обратной совместимости —
-      если/когда включим transforms, не придётся менять все call sites. */
-function imgThumb(url, /* width */ _width){
+   3. Параметр width = ширина в пикселях. Если не указан — используем 720
+      (хватает на ретина превью карточки на iPad, при этом раза в три
+      меньше оригинала с iPhone). Если url не наш Storage — отдаём как
+      есть, transforms работают только на наших бакетах. */
+function imgThumb(url, width){
   if(!url || typeof url !== 'string') return url || '';
-  /* Проксифицируем direct supabase.co → наш прокси */
+  const w = (typeof width === 'number' && width > 0) ? Math.round(width) : 720;
+  /* Проксифицируем direct supabase.co → наш прокси + переписываем object → render/image */
   if(url.indexOf(SUPABASE_DIRECT_URL) === 0){
-    return SUPABASE_URL + url.slice(SUPABASE_DIRECT_URL.length);
+    const tail = url.slice(SUPABASE_DIRECT_URL.length);
+    /* /storage/v1/object/public/<bucket>/<path> → /storage/v1/render/image/public/<bucket>/<path>?width=N */
+    const renderTail = tail.replace('/storage/v1/object/', '/storage/v1/render/image/');
+    const sep = renderTail.indexOf('?') >= 0 ? '&' : '?';
+    return SUPABASE_URL + renderTail + sep + 'width=' + w + '&resize=contain&quality=80';
+  }
+  if(url.indexOf(SUPABASE_URL) === 0 && url.indexOf('/storage/v1/object/') >= 0){
+    const renderUrl = url.replace('/storage/v1/object/', '/storage/v1/render/image/');
+    const sep = renderUrl.indexOf('?') >= 0 ? '&' : '?';
+    return renderUrl + sep + 'width=' + w + '&resize=contain&quality=80';
   }
   /* Не наш Storage (внешний URL, Kinescope и т.п.) — отдаём как есть */
   return url;
