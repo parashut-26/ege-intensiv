@@ -5700,6 +5700,20 @@ async function deleteEssayComment(commentId){
   await restRequest('DELETE', '/essay_comments?id=eq.' + encodeURIComponent(commentId), null, { prefer: 'return=minimal' });
 }
 
+/* PATCH полей замечания. Используется например для смены kind (тип ошибки) у
+   уже поставленного коммента — Ольга часто переосмысливает на лету: «нет, это
+   не речь, а грамматика». Принимаем произвольный payload — пользователь
+   ответственен за валидность ключей. */
+async function updateEssayComment(commentId, payload){
+  if(!sb) throw new Error('нет соединения с Supabase');
+  if(!commentId) throw new Error('нет id комментария');
+  const row = await restRequest('PATCH',
+    '/essay_comments?id=eq.' + encodeURIComponent(commentId),
+    payload,
+    { prefer: 'return=representation' });
+  return Array.isArray(row) ? row[0] : row;
+}
+
 /* Загрузить существующую review (если куратор уже предпроверил — учитель увидит баллы) */
 async function loadEssayReview(essayId){
   if(!sb) return null;
@@ -18753,20 +18767,70 @@ function showStudentCommentTooltip(c, markEl){
   setTimeout(() => document.addEventListener('pointerdown', closer), 100);
 }
 
-/* Popup для просмотра/удаления существующего замечания */
+/* Popup для просмотра/правки/удаления существующего замечания */
 function showExistingCommentPopup(essay, c, markEl){
   document.querySelectorAll('.err-popup').forEach(n => n.remove());
-  const meta = errKindMeta(c.kind);
   const rect = markEl.getBoundingClientRect();
-  const popup = el('div', { class:'err-popup', style:{ width:'320px' }});
-  popup.style.left = Math.max(8, Math.min(window.innerWidth - 340, rect.left)) + 'px';
+  const popup = el('div', { class:'err-popup', style:{ width:'340px' }});
+  popup.style.left = Math.max(8, Math.min(window.innerWidth - 360, rect.left)) + 'px';
   popup.style.top = (rect.bottom + window.scrollY + 6) + 'px';
   const txtT = safeComment(c.comment);
   const vuT = safeVoiceUrl(c.voice_url);
+
+  /* === Плашка выбора типа ошибки ===
+     Раньше тип ошибки был «вшит» при создании коммента и поменять его можно
+     было только удалив-и-сделав-заново. Теперь — кнопки К1/К2/… как в новом
+     попапе. Клик → PATCH /essay_comments?id=eq.X { kind } → локально
+     обновляем c.kind, перекрашиваем mark/pin/rect через recomputeErrorsFromComments+render.
+     Статус показывает, что идёт сохранение или ошибка. */
+  const kindStatus = el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'6px' }}, '');
+  const kindHeader = el('div', { style:{ fontSize:'10px', fontWeight:'700', color:'var(--ink-3)',
+                                            textTransform:'uppercase', letterSpacing:'.06em',
+                                            marginBottom:'4px', display:'flex', alignItems:'center' }},
+    el('span', null, 'Тип ошибки'), kindStatus);
+  const kindsWrap = el('div', { class:'kinds', style:{ marginBottom:'6px' }});
+  const refreshActive = () => {
+    kindsWrap.querySelectorAll('.kind-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.kind === c.kind);
+    });
+  };
+  ERR_KINDS.forEach(k => {
+    kindsWrap.append(el('button', {
+      class: 'kind-btn' + (k.id === c.kind ? ' active' : ''),
+      style: { background: k.bg, borderColor: k.bg },
+      'data-kind': k.id,
+      onclick: async (ev) => {
+        ev.stopPropagation();
+        if(k.id === c.kind) return;          /* тот же тип — ничего не делаем */
+        const prev = c.kind;
+        kindStatus.textContent = '⏳';
+        try {
+          /* Оптимистично переключаем UI, чтобы Ольга не ждала сетевой round-trip */
+          c.kind = k.id;
+          refreshActive();
+          await updateEssayComment(c.id, { kind: k.id });
+          /* Синхронизируем кэш и пересчитываем агрегаты ошибок (К1-К10) */
+          const cache = ESSAY_COMMENTS_CACHE[essay.id] || essay.comments || [];
+          const inCache = cache.find(x => x.id === c.id);
+          if(inCache) inCache.kind = k.id;
+          ESSAY_COMMENTS_CACHE[essay.id] = cache;
+          recomputeErrorsFromComments(cache);
+          kindStatus.textContent = '✓';
+          setTimeout(() => { kindStatus.textContent = ''; }, 900);
+          render();
+        } catch(err){
+          /* Откат — на бэк не доехало, возвращаем как было */
+          c.kind = prev;
+          refreshActive();
+          kindStatus.textContent = '⚠ ' + (err && err.message || 'ошибка');
+        }
+      }
+    }, k.crit + ' ' + k.label));
+  });
+
   popup.append(
-    el('div', { style:{ fontSize:'12px', fontWeight:'700', marginBottom:'4px',
-      padding:'4px 8px', background: meta.bg, borderRadius:'6px', display:'inline-block' }},
-      meta.crit + ' · ' + meta.label),
+    kindHeader,
+    kindsWrap,
     el('div', { style:{ fontSize:'13px', marginTop:'6px', whiteSpace:'pre-wrap' }},
       txtT || (vuT ? '' : '(без комментария)')),
     vuT
