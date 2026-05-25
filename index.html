@@ -22405,6 +22405,30 @@ function copyGuestLink(game){
   }
 }
 
+/* === Просмотр игры учителем ===
+   Открывает игру в новом окне БЕЗ ?mode=embed. Это значит:
+   - Игра рендерит свой полный UI (не урезанный embed-вариант)
+   - Игра НЕ пошлёт postMessage в zebrus.online (нет window.parent для embed)
+     → в game_attempts ничего не запишется
+   - Учитель может полистать/пройти/закрыть без последствий для статистики.
+   Используется когда учитель забыл, какие там вопросы, и хочет посмотреть
+   содержание без необходимости проходить как ученик. */
+function openGamePreview(game){
+  const url = (game.url || ('/games/' + game.slug + '/')) + '?mode=preview&name=' + encodeURIComponent('Учитель');
+  const fullUrl = url.indexOf('http') === 0 ? url : (window.location.origin + url);
+  try {
+    /* noopener — без обратной ссылки на нашу window, чтобы игра вообще
+       не могла postMessage'ить в нас даже теоретически. */
+    const w = window.open(fullUrl, '_blank', 'noopener,noreferrer');
+    if(!w){
+      /* Браузер заблокировал попап — показываем prompt с url */
+      prompt('Браузер заблокировал окно. Скопируй ссылку и открой вручную:', fullUrl);
+    }
+  } catch(e){
+    prompt('Открой ссылку в новой вкладке:', fullUrl);
+  }
+}
+
 /* ==========================================================================
    PRE-INTENSIVE «РАЗОГРЕВ»
    ──────────────────────────────────────────────────────────────────────────
@@ -24083,6 +24107,10 @@ function renderTeacherGameCard(g){
         el('button', { class:'btn ' + (g.is_published ? 'btn-secondary' : 'btn-teal'),
           onclick: () => toggleGamePublished(g, !g.is_published)
         }, g.is_published ? '🚫 Скрыть' : '✅ Открыть'),
+        el('button', { class:'btn btn-secondary',
+          title:'Открыть в новом окне для просмотра содержания — без записи попытки в статистику',
+          onclick: () => openGamePreview(g)
+        }, '👀 Посмотреть'),
         el('button', { class:'btn btn-secondary',
           onclick: () => copyGuestLink(g)
         }, '🔗 Гостевая ссылка'),
