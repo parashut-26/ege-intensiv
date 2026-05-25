@@ -779,6 +779,26 @@ if(typeof document !== 'undefined'){
    автоматически, без F5.
    У учителя таймер тоже работает, но безвредно (он видит всё).
    ============================================================ */
+/* ГЛОБАЛЬНО: editorIsOpen + safeRender.
+   Используются ВЕЗДЕ, где автоматический render() может стереть открытый
+   contenteditable-редактор поста/дня (см. [[bug-polling-wipes-editor]]).
+   Источники, которые стирали редактор: 12-сек polling постов,
+   30-сек таймер publish_at, Supabase Realtime подписки на attempts и
+   payment_suggestions, разные debounced reload'ы. Любой такой render()
+   должен идти через safeRender(), а не напрямую. */
+window.editorIsOpen = function(){
+  if(typeof STATE === 'undefined') return false;
+  return STATE.editingBlockId != null
+      || STATE.addingPostToDayId != null
+      || STATE.addingPostToIntensiveOrd != null
+      || STATE.editingWarmupDayId != null;
+};
+window.safeRender = function(){
+  if(typeof render !== 'function') return;
+  if(window.editorIsOpen()) return;  /* НЕ дёргаем — учитель печатает */
+  try { render(); } catch(_){}
+};
+
 (function(){
   if(typeof window === 'undefined') return;
   const TICK_MS = 30 * 1000;
@@ -813,16 +833,12 @@ if(typeof document !== 'undefined'){
      редактор (та же логика, что в rerenderPostsView, см. [[bug-polling-wipes-editor]]).
      Пропущенный пост «дозреет» через render() при сохранении/отмене
      редактора или при следующем тике, когда редактор закрыт. */
-  function editorIsOpen(){
-    return STATE.editingBlockId != null
-        || STATE.addingPostToDayId != null
-        || STATE.addingPostToIntensiveOrd != null
-        || STATE.editingWarmupDayId != null;
-  }
+  /* editorIsOpen и safeRender — глобальные, чтобы любые realtime/polling
+     обработчики могли защитить redactor от внезапного render(). */
   setInterval(() => {
     if(typeof STATE === 'undefined' || typeof render !== 'function') return;
     if(document.visibilityState === 'hidden') return;
-    if(editorIsOpen()) return;  /* не дёргаем редактор — потеряются правки */
+    if(window.editorIsOpen && window.editorIsOpen()) return;  /* не дёргаем редактор — потеряются правки */
     const { pending, dueNow } = hasUpcomingScheduled();
     /* Если кто-то «созрел» в последние 30 секунд — обновляем рендер */
     if(dueNow > 0){
@@ -2680,7 +2696,10 @@ function _scheduleGroupStatsReload(){
         tasks.push(loadReportAttempts({ silent: true }));
       }
       await Promise.all(tasks);
-      if(typeof render === 'function') render();
+      /* НЕ render() напрямую — если учитель в этот момент редактирует пост,
+         contenteditable-редактор пересоздастся и текст слетит.
+         safeRender() пропускает render если editorIsOpen(). */
+      window.safeRender();
     } catch(e){
       console.warn('realtime stats reload:', e.message);
     }
@@ -2719,7 +2738,8 @@ function startTeacherRealtime(){
           console.log('rt: payment_suggestions change');
           try {
             await loadPaymentSuggestionsFromDb();
-            if(typeof render === 'function') render();
+            /* safeRender — чтобы не стереть открытый редактор поста */
+            window.safeRender();
           } catch(e){ console.warn('realtime pay-sugg reload:', e.message); }
         })
       .subscribe((status) => {
