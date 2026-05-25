@@ -22200,6 +22200,33 @@ async function addWarmupBlock(target, payload){
   }
 }
 
+/* Превращает прямую public-ссылку Supabase Storage в:
+   1. URL через наш прокси api2.zebrus.online (вместо hyczawwuehrqsqqosgub.supabase.co) —
+      обходим блокировки региональных провайдеров и VPN, через которые
+      прямой supabase.co домен может резаться. Прокси у всех учеников
+      стабильно работает, т.к. это наш домен (CNAME → CDN).
+   2. URL через Image Transformations endpoint `/storage/v1/render/image/...?width=N` —
+      сервер отдаёт картинку, уже ужатую до нужной ширины. Оригинал в Storage
+      не меняется. Это решает баг iOS Safari, который ловит memory cap при
+      декодировании 3000–6000px iPhone-сторис и показывает broken icon (❓).
+
+   Если URL уже идёт через render endpoint или это не Supabase Storage
+   (Kinescope, внешний) — возвращаем как есть (только проксифицируем). */
+function imgThumb(url, width){
+  if(!url || typeof url !== 'string') return url || '';
+  /* Шаг 1: проксифицируем — direct supabase.co → наш прокси */
+  let u = url;
+  if(u.indexOf(SUPABASE_DIRECT_URL) === 0){
+    u = SUPABASE_URL + u.slice(SUPABASE_DIRECT_URL.length);
+  }
+  /* Шаг 2: render-endpoint с resize, если это public-объект */
+  if(u.includes('/storage/v1/render/image/')) return u;
+  if(!u.includes('/storage/v1/object/public/')) return u;
+  const sep = u.includes('?') ? '&' : '?';
+  return u.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/')
+       + sep + 'width=' + (width || 1080) + '&quality=80';
+}
+
 /* Загрузка картинки в Supabase Storage (bucket: warmup) и возврат public URL */
 async function uploadWarmupImage(file){
   const ext = (file.name.split('.').pop() || 'png').toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -22894,14 +22921,34 @@ function renderWarmupBlockTeacher(b, day){
         el('button', { class:'btn btn-secondary btn-sm', style:{ padding:'2px 8px', fontSize:'12px' },
           onclick: () => deleteWarmupBlock(b)
         }, '🗑'))));
-  /* Мульти-картинки (новое поле) + одиночная для совместимости */
+  /* Мульти-картинки (новое поле) + одиночная для совместимости.
+     ВАЖНО: objectFit:contain (не cover) + увеличенная maxHeight + клик =
+     lightbox — иначе вертикальные сторис-фото обрезались в учительском
+     превью и не открывались на весь экран. Тот же подход, что и в
+     renderWarmupBlockStudent (~23436). */
   const imgs = (Array.isArray(b.image_urls) && b.image_urls.length) ? b.image_urls
              : (b.image_url ? [b.image_url] : []);
   if(imgs.length){
+    const openInLightboxTeacher = (startIdx) => {
+      if(typeof STATE === 'undefined' || typeof render !== 'function') return;
+      STATE.lightbox = { photos: imgs.slice(), idx: startIdx || 0 };
+      render();
+    };
     const grid = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'4px', marginBottom:'8px' }});
-    imgs.forEach(u => grid.append(el('img', { src:u, alt:'',
-      style:{ width: imgs.length === 1 ? '100%' : '120px', height: imgs.length === 1 ? 'auto' : '90px',
-              maxHeight:'200px', objectFit:'cover', borderRadius:'6px' }})));
+    imgs.forEach((u, i) => grid.append(el('img', { src: imgThumb(u, 900), alt:'',
+      loading: 'lazy', decoding: 'async',
+      style:{
+        width:  imgs.length === 1 ? '100%' : '120px',
+        height: imgs.length === 1 ? 'auto' : '120px',
+        maxHeight: imgs.length === 1 ? '60vh' : '120px',
+        objectFit: 'contain',
+        background: '#0f172a',
+        borderRadius:'6px',
+        cursor:'zoom-in'
+      },
+      title: 'Открыть на весь экран',
+      onclick: () => openInLightboxTeacher(i)
+    })));
     card.append(grid);
   }
   if(b.title) card.append(el('div', { style:{ fontWeight:'700', marginBottom:'4px' }}, b.title));
@@ -23446,7 +23493,8 @@ function renderWarmupBlockStudent(b){
     render();
   };
   if(imgs.length === 1){
-    card.append(el('img', { src:imgs[0], alt: b.title || '',
+    card.append(el('img', { src: imgThumb(imgs[0], 1080), alt: b.title || '',
+      loading: 'lazy', decoding: 'async',
       style:{ display:'block', width:'100%', maxHeight:'75vh',
               objectFit:'contain', background:'#0f172a', cursor:'zoom-in' },
       onclick: () => openInLightbox(0),
@@ -23470,7 +23518,8 @@ function renderWarmupBlockStudent(b){
                                       fontSize:'11px', fontWeight:'600',
                                       pointerEvents:'none', zIndex:'1', opacity:'0.85' }},
       '⤢ тапни — на весь экран');
-    imgs.forEach((u, i) => carousel.append(el('img', { src:u, alt:'',
+    imgs.forEach((u, i) => carousel.append(el('img', { src: imgThumb(u, 1080), alt:'',
+      loading: 'lazy', decoding: 'async',
       style:{ flex:'0 0 100%', maxHeight:'75vh', objectFit:'contain',
               scrollSnapAlign:'start', cursor:'zoom-in' },
       onclick: () => openInLightbox(i)
