@@ -7029,6 +7029,36 @@ function notifyWarmupPublished(block){
       return;
     }
   }
+  /* === Guard через ДЕНЬ ===
+     Прецедент 25.05.2026: Ольга создаёт пост в дне с publish_at=завтра, но у
+     самого поста publish_at = NULL (она ставит его отдельным действием
+     ПОСЛЕ создания). В этот момент клиент уже отправил push — ученики
+     получили уведомление на пост, который выйдет завтра.
+     Решение: если у warmup_day или у intensive-дня публикация ещё не
+     наступила — НЕ слать push клиентом. Cron подхватит когда созреет день. */
+  if(block.day_id){
+    const day = (STATE.warmupDays || []).find(d => d.id === block.day_id);
+    if(day && day.publish_at){
+      const tDay = Date.parse(day.publish_at);
+      if(!isNaN(tDay) && tDay > Date.now()){
+        console.log('[notify-warmup] день разогрева ещё не открыт — push не шлём (cron подхватит)');
+        return;
+      }
+    }
+    /* Также: если день вообще НЕ опубликован — пост никто не увидит, push не нужен */
+    if(day && day.is_published === false){
+      console.log('[notify-warmup] день разогрева скрыт — push не шлём');
+      return;
+    }
+  }
+  if(block.intensive_day_ord){
+    /* У дней интенсива publish_at пока не вводился, но если введём — учтём.
+       Сейчас просто пропускаем когда сам пост явно скрыт. */
+    if(block.is_published === false){
+      console.log('[notify-warmup] пост скрыт — push не шлём');
+      return;
+    }
+  }
   const token = getAccessToken();
   if(!token){ console.warn('[notify-warmup] нет токена'); return; }
   /* Подберём человеко-понятный day_title */
