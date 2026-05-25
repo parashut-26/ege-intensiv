@@ -4,7 +4,7 @@
 - [Дыры в QUIZ_BANK без sourceText](data_quizbank_missing_sourcetext.md) — Вариант 2 в заданиях 1 и 2 без исходного текста; есть фильтр isQuestionValid
 - [JWT expiry в Supabase](tech_supabase_jwt_expiry.md) — поднят до 604799 сек (~7 дней), потолок бесплатного тарифа
 - [TODO допарсить задания 1, 2, 3, 8](todo_parse_tasks_1_2_3_8.md) — отложено до после интенсива
-- [Git lock-файлы](feedback_git_lock.md) — sandbox в репо ЗебРус оставляет .git/*.lock; снимать пре-эмптивно одной chained-командой перед коммитом
+- [Git lock-файлы](feedback_git_lock.md) — снимать только index.lock + HEAD.lock; НЕ использовать `find .git -name "*.lock" -delete` (уничтожает refs/heads/main)
 - [Web Push на iOS — VAPID_SUBJECT](tech_webpush_apple_vapid.md) — Apple отбивает 403 если в subject не реальный email; для ZebRus = mailto:xxx154xxx153@gmail.com
 - [TODO Этап 2: решалка вариантов](todo_variants_solver_v2.md) — после интенсива 4 июня переехать с OTP на свою решалку с PDF-парсером и inline-полями
 - [TODO задания сочинений](todo_essay_assignments.md) — группировать работы по «теме сочинения», сейчас сданные сочинения свалены без группировки
@@ -16,4 +16,6 @@
 - [Realtime включён](tech_realtime_enabled.md) — supabase_realtime + attempts + payment_suggestions; «🟢 live» на Сводке и Аналитике у учителя
 - [Дашборд ученика в Достижениях](feature_student_dashboard.md) — зеркало карточки учителя: комментарий, KPI, слабые темы, попытки, пробники, оплаты, чемодан
 - [TODO архитектура курсов](todo_courses_cohorts_architecture.md) — летний + годовой курс: курсы/темы/дни/поэтапность/AI-отчёт; Фаза 1 к 18 июня, Фаза 2 за лето
-- [TODO блочный формат теории](todo_blocky_theory.md) — переделать теорию заданий на конструктор блоков как «Разогрев», с панелью форматирования в text-блоках; после 4 июня
+- [TODO блочный формат теории](todo_blocky_theory.md) — переделать теорию заданий на конструктор блоков как «Разогрев»; переиспользовать WYSIWYG-редактор (см. feature_wysiwyg_editors.md); после 4 июня
+- [WYSIWYG-редакторы](feature_wysiwyg_editors.md) — contenteditable+execCommand в постах «Разогрев» и теории заданий; сохраняется HTML; рендер у ученика через innerHTML с детектом HTML-тегов
+- [Подсветка заданий 2/3](feature_task23_highlight.md) — корни целевых слов в sourceText + разнос вариантов 1)-5); приоритет ручной разметки **слово**; редактор sourceText в банке с кнопкой 🟡 Ж
