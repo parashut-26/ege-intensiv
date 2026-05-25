@@ -6938,9 +6938,23 @@ async function disableWebPush(){
 }
 
 /* Учитель опубликовал новый пост в Разогреве/Дне — fire-and-forget рассылка
-   push всем ученикам через Edge Function notify-warmup-published. */
+   push всем ученикам через Edge Function notify-warmup-published.
+
+   ВАЖНО: если у поста стоит publish_at в будущем — push НЕ отправляем здесь.
+   Серверный pg_cron каждые 5 минут вызывает Edge Function
+   process-scheduled-warmup-pushes, которая разошлёт push ровно когда наступит
+   publish_at (даже если компьютер учителя в этот момент выключен). Иначе
+   ученики получили бы push сейчас, а пост увидели бы только утром. */
 function notifyWarmupPublished(block){
   if(!sb || !MY_PROFILE || !block) return;
+  /* Отложенная публикация: push отправит сервер по cron'у */
+  if(block.publish_at){
+    const t = Date.parse(block.publish_at);
+    if(!isNaN(t) && t > Date.now()){
+      console.log('[notify-warmup] publish_at в будущем — push отправит cron, пропускаем');
+      return;
+    }
+  }
   const token = getAccessToken();
   if(!token){ console.warn('[notify-warmup] нет токена'); return; }
   /* Подберём человеко-понятный day_title */
@@ -23398,30 +23412,55 @@ function renderWarmupBlockStudent(b){
     }
   }
 
-  /* Картинки (новое поле image_urls + старое image_url для совместимости) */
+  /* Картинки (новое поле image_urls + старое image_url для совместимости).
+     ВАЖНО: используем objectFit:'contain', а не 'cover', чтобы вертикальные
+     фотки-сторис (9:16 — фразеологизмы и т.п.) показывались целиком, а не
+     обрезались. Фон контейнера тёмный — белые поля по сторонам не бросаются
+     в глаза. Клик по картинке открывает её в lightbox на весь экран
+     (переиспользуем STATE.lightbox — он же используется для фото сочинений). */
   const imgs = (Array.isArray(b.image_urls) && b.image_urls.length) ? b.image_urls
              : (b.image_url ? [b.image_url] : []);
+  const openInLightbox = (startIdx) => {
+    if(typeof STATE === 'undefined' || typeof render !== 'function') return;
+    STATE.lightbox = { photos: imgs.slice(), idx: startIdx || 0 };
+    render();
+  };
   if(imgs.length === 1){
     card.append(el('img', { src:imgs[0], alt: b.title || '',
-      style:{ display:'block', width:'100%', maxHeight:'420px', objectFit:'cover', background:'var(--bg)' }}));
+      style:{ display:'block', width:'100%', maxHeight:'75vh',
+              objectFit:'contain', background:'#0f172a', cursor:'zoom-in' },
+      onclick: () => openInLightbox(0),
+      title: 'Открыть на весь экран'
+    }));
   } else if(imgs.length > 1){
-    /* Горизонтальный скролл-карусель + счётчик «N / M» в углу */
+    /* Горизонтальный скролл-карусель + счётчик «N / M» в углу. */
     const wrap = el('div', { style:{ position:'relative' }});
-    const carousel = el('div', { style:{ display:'flex', overflowX:'auto', gap:'4px', scrollSnapType:'x mandatory', background:'var(--bg)' }});
+    const carousel = el('div', { style:{ display:'flex', overflowX:'auto', gap:'4px',
+                                          scrollSnapType:'x mandatory', background:'#0f172a' }});
     const counter = el('div', { style:{ position:'absolute', top:'10px', right:'12px',
                                          background:'rgba(0,0,0,0.55)', color:'#fff',
                                          padding:'4px 10px', borderRadius:'999px',
                                          fontSize:'12px', fontWeight:'700',
                                          pointerEvents:'none', zIndex:'1' }},
       '1 / ' + imgs.length);
-    imgs.forEach(u => carousel.append(el('img', { src:u, alt:'',
-      style:{ flex:'0 0 100%', maxHeight:'420px', objectFit:'cover', scrollSnapAlign:'start' }})));
+    /* Подсказка про fullscreen в нижнем углу */
+    const hint = el('div', { style:{ position:'absolute', bottom:'10px', right:'12px',
+                                      background:'rgba(0,0,0,0.55)', color:'#fff',
+                                      padding:'4px 10px', borderRadius:'999px',
+                                      fontSize:'11px', fontWeight:'600',
+                                      pointerEvents:'none', zIndex:'1', opacity:'0.85' }},
+      '⤢ тапни — на весь экран');
+    imgs.forEach((u, i) => carousel.append(el('img', { src:u, alt:'',
+      style:{ flex:'0 0 100%', maxHeight:'75vh', objectFit:'contain',
+              scrollSnapAlign:'start', cursor:'zoom-in' },
+      onclick: () => openInLightbox(i)
+    })));
     /* Обновляем счётчик на скролле */
     carousel.addEventListener('scroll', () => {
       const idx = Math.round(carousel.scrollLeft / carousel.clientWidth) + 1;
       counter.textContent = idx + ' / ' + imgs.length;
     });
-    wrap.append(carousel, counter);
+    wrap.append(carousel, counter, hint);
     card.append(wrap);
   }
 
