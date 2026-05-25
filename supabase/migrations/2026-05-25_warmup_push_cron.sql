@@ -84,7 +84,7 @@ SET search_path = public
 AS $$
 DECLARE
   v_url    text := 'https://hyczawwuehrqsqqosgub.functions.supabase.co/process-scheduled-warmup-pushes';
-  v_secret text := '<LEGACY_SERVICE_ROLE_REDACTED>';
+  v_secret text := '<CRON_SECRET>';
   v_request_id bigint;
 BEGIN
   SELECT net.http_post(
