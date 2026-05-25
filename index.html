@@ -12482,11 +12482,25 @@ function modalExamineQuestion(){
   if(!STATE.examineQuestionData){
     (async () => {
       try {
-        const [qArr, srcArr] = await Promise.all([
+        /* === Ленивая подгрузка attemptAnswers ===
+           У ученика (и в некоторых учительских кейсах) нет общего
+           STATE.currentVariantData, поэтому стрелки ◀ ▶ некуда взять
+           user_answer/points для соседних заданий. Один раз тянем ответы по
+           attemptId и кэшируем как { [num]: row } в самом examineQuestion —
+           этого хватает на всё перелистывание модалки. */
+        const needAnswers = !!attemptId
+          && !(STATE.examineQuestion && STATE.examineQuestion.attemptAnswers)
+          && !(STATE.currentVariantData && STATE.currentVariantData.answersByAttempt
+               && STATE.currentVariantData.answersByAttempt[attemptId]);
+        const [qArr, srcArr, ansArr] = await Promise.all([
           restRequest('GET',
             '/test_variant_questions?variant_id=eq.' + variantId + '&num=eq.' + num + '&limit=1'),
           restRequest('GET',
-            '/test_variant_source_texts?variant_id=eq.' + variantId + '&select=kind,body')
+            '/test_variant_source_texts?variant_id=eq.' + variantId + '&select=kind,body'),
+          needAnswers ? restRequest('GET',
+            '/test_variant_answers?attempt_id=eq.' + attemptId
+              + '&select=num,user_answer,points,max_points,structured_state,scratch,student_drawing,teacher_scratch,teacher_drawing,student_note,teacher_comment')
+            : Promise.resolve(null)
         ]);
         if(Array.isArray(qArr) && qArr.length){
           STATE.examineQuestionData = qArr[0];
@@ -12499,6 +12513,11 @@ function modalExamineQuestion(){
           STATE.examineSourceTexts = {};
           srcArr.forEach(r => { STATE.examineSourceTexts[r.kind] = r.body; });
         }
+        if(Array.isArray(ansArr) && STATE.examineQuestion){
+          const map = {};
+          ansArr.forEach(r => { if(r && r.num != null) map[r.num] = r; });
+          STATE.examineQuestion.attemptAnswers = map;
+        }
         render();
       } catch(e){
         STATE.examineQuestionData = { question_text: '⚠ ' + e.message, correct_answer: null };
@@ -12509,16 +12528,26 @@ function modalExamineQuestion(){
 
   /* === Стрелки ◀ ▶ для перелистывания заданий в рамках одной попытки ===
      Учителю не надо закрывать модалку и кликать ячейку в таблице — достаточно
-     нажать стрелку. Кнопки рендерятся только если есть к чему перейти, то
-     есть в открытой попытке есть строки с другими question_num. */
+     нажать стрелку. У ученика currentVariantData нет (это учительская сводная),
+     поэтому fresh подтягиваем из локальной карты attemptAnswers — она
+     заполняется ленивой загрузкой в async-блоке ниже. */
   const navTo = (newNum) => {
-    if(!attemptId || !STATE.currentVariantData) return;
-    const ba = STATE.currentVariantData.answersByAttempt || {};
-    const fresh = ba[attemptId] && ba[attemptId][newNum];
+    if(!attemptId) return;
+    let fresh = null;
+    if(STATE.currentVariantData){
+      const ba = STATE.currentVariantData.answersByAttempt || {};
+      fresh = ba[attemptId] && ba[attemptId][newNum];
+    }
+    if(!fresh && STATE.examineQuestion && STATE.examineQuestion.attemptAnswers){
+      fresh = STATE.examineQuestion.attemptAnswers[newNum] || null;
+    }
     /* Если у нового задания НЕТ данных вообще — всё равно открываем
        (учитель может хотеть посмотреть формулировку или оставить коммент).
        Поля заполняем минимально, остальные пересоберутся при следующем
        polling-тике или через examineQuestionData. */
+    /* Сохраняем attemptAnswers через перелистывание — иначе после первой стрелки
+       вторая будет тыкаться в пустой кэш и снова показывать «(пусто)». */
+    const carryAnswers = (STATE.examineQuestion && STATE.examineQuestion.attemptAnswers) || null;
     STATE.examineQuestion = {
       variantId, num: newNum,
       userAnswer: fresh ? (fresh.user_answer || null) : null,
@@ -12532,6 +12561,7 @@ function modalExamineQuestion(){
       teacherScratch:  fresh ? (fresh.teacher_scratch || null) : null,
       teacherDrawing:  fresh ? (fresh.teacher_drawing || null) : null,
       structuredState: fresh ? (fresh.structured_state || null) : null,
+      attemptAnswers:  carryAnswers,
       isStudent
     };
     /* Сбрасываем кэш загруженного задания — заново запросим question_text/correct_answer */
@@ -12595,12 +12625,18 @@ function modalExamineQuestion(){
         lineHeight:'1.6', color:'var(--ink)'
       }});
       srcBox.setAttribute('open', '');
+      /* sourceBody часто хранится с разметкой <b>/<u>/<i> или закодированными
+         сущностями &lt;…&gt; (цитаты, пропуски). Текстовый child превратил бы
+         всё это в сырые символы — поэтому прогоняем через sanitizeQuestionHtml
+         (он же используется для question_text) и кладём как innerHTML. */
+      const srcContent = el('div', { style:{ marginTop:'8px', whiteSpace:'pre-wrap' } });
+      srcContent.innerHTML = sanitizeQuestionHtml(sourceBody);
       srcBox.append(
         el('summary', { style:{ cursor:'pointer', fontWeight:'700', color:'var(--ink-2)',
                                   fontSize:'11px', textTransform:'uppercase', letterSpacing:'.06em',
                                   marginBottom:'8px', listStyle:'none' }},
           '📖 Исходный текст (' + srcLabel + ') ▾'),
-        el('div', { style:{ marginTop:'8px', whiteSpace:'pre-wrap' } }, sourceBody));
+        srcContent);
       body.append(srcBox);
     }
     /* Текст задания (HTML с форматированием).
