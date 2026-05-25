@@ -22200,31 +22200,30 @@ async function addWarmupBlock(target, payload){
   }
 }
 
-/* Превращает прямую public-ссылку Supabase Storage в:
-   1. URL через наш прокси api2.zebrus.online (вместо hyczawwuehrqsqqosgub.supabase.co) —
-      обходим блокировки региональных провайдеров и VPN, через которые
-      прямой supabase.co домен может резаться. Прокси у всех учеников
-      стабильно работает, т.к. это наш домен (CNAME → CDN).
-   2. URL через Image Transformations endpoint `/storage/v1/render/image/...?width=N` —
-      сервер отдаёт картинку, уже ужатую до нужной ширины. Оригинал в Storage
-      не меняется. Это решает баг iOS Safari, который ловит memory cap при
-      декодировании 3000–6000px iPhone-сторис и показывает broken icon (❓).
+/* Проксифицирует прямой supabase.co URL картинки через наш прокси
+   api2.zebrus.online (CNAME → Cloudflare → reg.ru). Зачем:
 
-   Если URL уже идёт через render endpoint или это не Supabase Storage
-   (Kinescope, внешний) — возвращаем как есть (только проксифицируем). */
-function imgThumb(url, width){
+   1. У части RU-провайдеров прямой hyczawwuehrqsqqosgub.supabase.co
+      режется (или замедляется до timeout) → ученик видит broken icon (❓)
+      несмотря на то, что файл существует. Прокси на нашем домене
+      обходит блокировки.
+
+   2. Параметр width не используется — пробовали Image Transformations
+      endpoint `/render/image/?width=N`, но на бесплатном плане Supabase
+      он возвращает 404 / 403 (нужен Pro план), что снова даёт broken icon.
+      Поэтому оставляем оригинальный объект через прокси. Если в будущем
+      перейдём на Pro — раскомментируем шаг 2.
+
+   3. Параметр width оставлен в сигнатуре для обратной совместимости —
+      если/когда включим transforms, не придётся менять все call sites. */
+function imgThumb(url, /* width */ _width){
   if(!url || typeof url !== 'string') return url || '';
-  /* Шаг 1: проксифицируем — direct supabase.co → наш прокси */
-  let u = url;
-  if(u.indexOf(SUPABASE_DIRECT_URL) === 0){
-    u = SUPABASE_URL + u.slice(SUPABASE_DIRECT_URL.length);
+  /* Проксифицируем direct supabase.co → наш прокси */
+  if(url.indexOf(SUPABASE_DIRECT_URL) === 0){
+    return SUPABASE_URL + url.slice(SUPABASE_DIRECT_URL.length);
   }
-  /* Шаг 2: render-endpoint с resize, если это public-объект */
-  if(u.includes('/storage/v1/render/image/')) return u;
-  if(!u.includes('/storage/v1/object/public/')) return u;
-  const sep = u.includes('?') ? '&' : '?';
-  return u.replace('/storage/v1/object/public/', '/storage/v1/render/image/public/')
-       + sep + 'width=' + (width || 1080) + '&quality=80';
+  /* Не наш Storage (внешний URL, Kinescope и т.п.) — отдаём как есть */
+  return url;
 }
 
 /* Загрузка картинки в Supabase Storage (bucket: warmup) и возврат public URL */
