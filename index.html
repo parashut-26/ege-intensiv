@@ -22309,13 +22309,61 @@ async function loadGameAttempts(gameId){
   try {
     STATE.gameAttempts = await restRequest('GET',
       '/game_attempts?game_id=eq.' + gameId +
-      '&select=id,student_id,score,max_score,percent,time_seconds,created_at,' +
+      '&select=id,student_id,score,max_score,percent,time_seconds,created_at,payload,' +
       'student:profiles!game_attempts_student_id_fkey(id,full_name)' +
       '&order=created_at.desc');
   } catch(e){
     console.error('loadGameAttempts', e);
     STATE.gameAttempts = [];
   }
+}
+
+/* Универсальный рендер «Разбор ошибок» по payload.wrong_tasks из game_attempts.
+   Два формата встречаются в природе:
+   - гонки-фразеологизмы: массив чисел [3, 5, 12] — просто номера заданий
+   - тренажёры (trener-*): массив объектов [{id, type, correct, user, tag?}, ...]
+   Если массив пуст или отсутствует — возвращаем null (вызывающий не рисует блок). */
+function renderGameWrongTasks(payload){
+  const arr = (payload && Array.isArray(payload.wrong_tasks)) ? payload.wrong_tasks : null;
+  if(!arr || !arr.length) return null;
+  const wrap = el('div', { style:{ marginTop:'10px', padding:'10px 12px',
+    background:'#FEF3C7', border:'1px solid #F59E0B', borderRadius:'8px',
+    fontSize:'12px', color:'#92400E' }});
+  wrap.append(el('div', { style:{ fontWeight:'700', marginBottom:'6px' }},
+    '📝 Разбор ошибок · ' + arr.length));
+  /* Числовой формат: компактный список номеров. Группируем по 8 в строку. */
+  if(typeof arr[0] === 'number'){
+    wrap.append(el('div', { style:{ display:'flex', gap:'4px', flexWrap:'wrap' }},
+      ...arr.map(n => el('span', {
+        style:{ display:'inline-block', minWidth:'26px', padding:'2px 6px',
+                background:'#fff', borderRadius:'5px', border:'1px solid #FCD34D',
+                textAlign:'center', fontWeight:'700', fontFamily:'monospace' }
+      }, '№' + n))));
+    return wrap;
+  }
+  /* Объектный формат: построчно с типом и (по возможности) ответами. */
+  const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'4px' }});
+  arr.forEach((w, i) => {
+    if(!w || typeof w !== 'object'){
+      list.append(el('div', null, '№' + (i + 1) + ' · ' + String(w))); return;
+    }
+    const tagPart = w.tag ? w.tag + ' · ' : '';
+    const typePart = w.type || w.task_type || '—';
+    const idPart = w.id != null ? ('№' + w.id) : ('№' + (i + 1));
+    const head = idPart + ' · ' + tagPart + typePart;
+    const row = el('div', { style:{ padding:'4px 6px', background:'#fff',
+      borderRadius:'5px', border:'1px solid #FCD34D' }},
+      el('div', { style:{ fontWeight:'700' }}, head));
+    if(w.correct != null || w.user != null){
+      row.append(el('div', { style:{ fontSize:'11px', color:'#78350F', marginTop:'2px' }},
+        w.correct != null ? el('span', null, '✓ верно: ', el('b', null, String(w.correct))) : null,
+        w.correct != null && w.user != null ? '   ' : null,
+        w.user != null ? el('span', null, '✗ ответил: ', el('b', null, String(w.user) || '(пусто)')) : null));
+    }
+    list.append(row);
+  });
+  wrap.append(list);
+  return wrap;
 }
 
 async function toggleGamePublished(game, next){
@@ -24099,7 +24147,16 @@ function viewGameResults(){
   const table = el('div', { class:'card', style:{ padding:0, overflow:'hidden' }});
   rows.forEach((r, i) => {
     const a = r.best;
-    table.append(el('div', { style:{
+    /* Лучшая попытка — сначала сама строка с итогом, потом details с разбором.
+       Если у ученика несколько попыток — внутри details показываем все. */
+    const allSorted = (r.all || []).slice().sort((x, y) => {
+      const tx = Date.parse(x.created_at || 0) || 0;
+      const ty = Date.parse(y.created_at || 0) || 0;
+      return ty - tx;
+    });
+    const hasAnyWrong = allSorted.some(att =>
+      att.payload && Array.isArray(att.payload.wrong_tasks) && att.payload.wrong_tasks.length);
+    const headRow = el('div', { style:{
       display:'grid', gridTemplateColumns:'1fr auto auto auto', gap:'12px',
       padding:'12px 16px', alignItems:'center',
       borderTop: i === 0 ? 'none' : '1px solid var(--border-2)'
@@ -24114,7 +24171,26 @@ function viewGameResults(){
         (a.time_seconds != null) ? ('⏱ ' + Math.floor(a.time_seconds/60) + ':' + String(a.time_seconds%60).padStart(2,'0')) : '—'),
       el('div', { style:{ fontWeight:'800', fontSize:'18px',
                           color: (a.percent || 0) >= 70 ? 'var(--green)' : (a.percent || 0) >= 50 ? 'var(--gold)' : 'var(--ink-2)' }},
-        Math.round(a.percent || 0) + '%')));
+        Math.round(a.percent || 0) + '%'));
+    table.append(headRow);
+    if(hasAnyWrong){
+      const details = el('details', { style:{ padding:'0 16px 12px 16px' }});
+      details.append(el('summary', { style:{ cursor:'pointer', fontSize:'12px',
+        color:'var(--ink-2)', fontWeight:'700', padding:'4px 0' }},
+        '📝 Показать ошибки' + (allSorted.length > 1 ? ' (по всем попыткам)' : '')));
+      allSorted.forEach((att, ai) => {
+        const wrongBlock = renderGameWrongTasks(att.payload);
+        if(!wrongBlock) return;
+        const when = att.created_at ? new Date(att.created_at).toLocaleString('ru-RU') : '';
+        details.append(el('div', { style:{ marginTop: ai === 0 ? '4px' : '10px',
+          fontSize:'11px', color:'var(--ink-3)' }},
+          'Попытка ' + (allSorted.length - ai) + (when ? ' · ' + when : '') +
+          ' · 🐝 ' + att.score + '/' + att.max_score +
+          ' · ' + Math.round(att.percent || 0) + '%'));
+        details.append(wrongBlock);
+      });
+      table.append(details);
+    }
   });
   wrap.append(table);
   return wrap;
