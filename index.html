@@ -22270,7 +22270,7 @@ async function loadGamesList(){
      таблицы game_day_assignments. Это обходит 502 от прокси reg.ru. */
   try {
     STATE.gamesList = await restRequest('GET',
-      '/games?select=id,slug,title,grade,topic,emoji,description,url,is_published,day_ids,created_at' +
+      '/games?select=id,slug,title,grade,topic,emoji,description,url,is_published,day_ids,teacher_notes,created_at' +
       '&order=grade.asc,topic.asc,created_at.desc') || [];
   } catch(e){
     console.error('loadGamesList', e);
@@ -22566,6 +22566,16 @@ function renderGameTask(task, idx){
    - Учитель может полистать/пройти/закрыть без последствий для статистики.
    Используется когда учитель забыл, какие там вопросы, и хочет посмотреть
    содержание без необходимости проходить как ученик. */
+/* PATCH /games — сохраняет заметку учителя. Используется из модалки
+   «Список вопросов» — туда учитель пишет «вот что я помню про эту игру».
+   Полезно когда парсер TASKS не вытащил все детали. */
+async function saveGameTeacherNotes(gameId, notes){
+  if(!sb) throw new Error('нет соединения с Supabase');
+  await restRequest('PATCH', '/games?id=eq.' + encodeURIComponent(gameId),
+    { teacher_notes: notes || null },
+    { prefer: 'return=minimal' });
+}
+
 /* Открывает модалку «Список вопросов» по конкретной игре. Тянет TASKS
    асинхронно, складывает в STATE.gamePreview, дёргает render(). */
 function showGameTasksModal(game){
@@ -22599,6 +22609,44 @@ function modalGamePreview(){
     el('button', { class:'x', onclick: close }, '×'));
 
   const body = el('div', { class:'modal-body' });
+
+  /* === Заметка учителя ===
+     То, что парсер не вытащил (или Ольга помнит лучше), она пишет сюда.
+     Сохраняется в games.teacher_notes — миграция
+     supabase/migrations/2026-05-25_games_teacher_notes.sql. */
+  const noteStatus = el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'6px' }}, '');
+  const noteTa = el('textarea', {
+    placeholder: 'Что в этой игре — твои заметки. Если парсер чего-то не показал, впиши вручную сюда. Сохранится в БД, увидишь при следующем открытии.',
+    style:{ width:'100%', padding:'10px', borderRadius:'8px', border:'1px solid var(--border-2)',
+            minHeight:'70px', resize:'vertical', fontFamily:'inherit', fontSize:'13px',
+            lineHeight:'1.5', boxSizing:'border-box' }
+  }, st.game.teacher_notes || '');
+  const noteSaveBtn = el('button', {
+    class:'btn btn-secondary btn-sm', style:{ marginTop:'6px' },
+    onclick: async () => {
+      noteSaveBtn.disabled = true; noteStatus.textContent = '⏳';
+      try {
+        await saveGameTeacherNotes(st.game.id, noteTa.value.trim());
+        /* Обновляем локально, чтобы при повторном открытии модалки текст был свежий
+           без перезагрузки списка игр. */
+        st.game.teacher_notes = noteTa.value.trim() || null;
+        noteStatus.textContent = '✓ сохранено';
+        setTimeout(() => { noteStatus.textContent = ''; }, 1500);
+      } catch(e){
+        noteStatus.textContent = '⚠ ' + (e && e.message || 'ошибка');
+      } finally {
+        noteSaveBtn.disabled = false;
+      }
+    }
+  }, '💾 Сохранить заметку');
+  body.append(el('div', { class:'card', style:{ marginBottom:'14px',
+    background:'#FFFDF7', borderColor:'#FACC15' }},
+    el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'#92400E', marginBottom:'6px',
+                          display:'flex', alignItems:'center' }},
+      el('span', null, '✏️ Заметка учителя'), noteStatus),
+    noteTa,
+    noteSaveBtn));
+
   if(st.loading){
     body.append(el('div', { style:{ textAlign:'center', padding:'40px', color:'var(--ink-3)' }},
       '⏳ Читаю содержание игры…'));
