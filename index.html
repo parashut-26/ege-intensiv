@@ -12482,25 +12482,11 @@ function modalExamineQuestion(){
   if(!STATE.examineQuestionData){
     (async () => {
       try {
-        /* === Ленивая подгрузка attemptAnswers ===
-           У ученика (и в некоторых учительских кейсах) нет общего
-           STATE.currentVariantData, поэтому стрелки ◀ ▶ некуда взять
-           user_answer/points для соседних заданий. Один раз тянем ответы по
-           attemptId и кэшируем как { [num]: row } в самом examineQuestion —
-           этого хватает на всё перелистывание модалки. */
-        const needAnswers = !!attemptId
-          && !(STATE.examineQuestion && STATE.examineQuestion.attemptAnswers)
-          && !(STATE.currentVariantData && STATE.currentVariantData.answersByAttempt
-               && STATE.currentVariantData.answersByAttempt[attemptId]);
-        const [qArr, srcArr, ansArr] = await Promise.all([
+        const [qArr, srcArr] = await Promise.all([
           restRequest('GET',
             '/test_variant_questions?variant_id=eq.' + variantId + '&num=eq.' + num + '&limit=1'),
           restRequest('GET',
-            '/test_variant_source_texts?variant_id=eq.' + variantId + '&select=kind,body'),
-          needAnswers ? restRequest('GET',
-            '/test_variant_answers?attempt_id=eq.' + attemptId
-              + '&select=num,user_answer,points,max_points,structured_state,scratch,student_drawing,teacher_scratch,teacher_drawing,student_note,teacher_comment')
-            : Promise.resolve(null)
+            '/test_variant_source_texts?variant_id=eq.' + variantId + '&select=kind,body')
         ]);
         if(Array.isArray(qArr) && qArr.length){
           STATE.examineQuestionData = qArr[0];
@@ -12513,17 +12499,40 @@ function modalExamineQuestion(){
           STATE.examineSourceTexts = {};
           srcArr.forEach(r => { STATE.examineSourceTexts[r.kind] = r.body; });
         }
-        if(Array.isArray(ansArr) && STATE.examineQuestion){
-          const map = {};
-          ansArr.forEach(r => { if(r && r.num != null) map[r.num] = r; });
-          STATE.examineQuestion.attemptAnswers = map;
-        }
         render();
       } catch(e){
         STATE.examineQuestionData = { question_text: '⚠ ' + e.message, correct_answer: null };
         render();
       }
     })();
+    /* === Ленивая подгрузка attemptAnswers — отдельным запросом ===
+       У ученика (и в некоторых учительских кейсах) нет общего
+       STATE.currentVariantData, поэтому стрелки ◀ ▶ некуда взять
+       user_answer/points для соседних заданий. Один раз тянем ответы по
+       attemptId и кэшируем как { [question_num]: row } в самом
+       examineQuestion. ВАЖНО: НЕ кладём в Promise.all с question_text —
+       если этот запрос упадёт (например, опечатка в имени колонки),
+       формулировка задания всё равно загрузится. */
+    const needAnswers = !!attemptId
+      && !(STATE.examineQuestion && STATE.examineQuestion.attemptAnswers)
+      && !(STATE.currentVariantData && STATE.currentVariantData.answersByAttempt
+           && STATE.currentVariantData.answersByAttempt[attemptId]);
+    if(needAnswers){
+      restRequest('GET',
+        '/test_variant_answers?attempt_id=eq.' + attemptId
+          + '&select=question_num,user_answer,points,max_points,structured_state,scratch,student_drawing,teacher_scratch,teacher_drawing,student_note,teacher_comment')
+        .then(ansArr => {
+          if(Array.isArray(ansArr) && STATE.examineQuestion){
+            const map = {};
+            ansArr.forEach(r => { if(r && r.question_num != null) map[r.question_num] = r; });
+            STATE.examineQuestion.attemptAnswers = map;
+            /* Не зовём render() — карта нужна только для navTo, на текущий
+               вид модалки она не влияет. Следующая стрелка возьмёт уже
+               прогретые данные. */
+          }
+        })
+        .catch(err => { console.warn('[examine] не удалось подгрузить attemptAnswers:', err); });
+    }
   }
 
   /* === Стрелки ◀ ▶ для перелистывания заданий в рамках одной попытки ===
