@@ -26167,11 +26167,16 @@ async function startSolvingVariant(variantId, opts){
       if(liveDb){
         STATE.liveAttemptId = liveDb.id;
         if(liveDb.started_at) STATE.solverStartedAt = new Date(liveDb.started_at).getTime();
-        /* Подтягиваем сохранённые в БД ответы */
+        /* Подтягиваем сохранённые в БД ответы — и финальные цифры (user_answer),
+           и промежуточное structured_state (расставленные галочки в зад. 16,
+           выбранные предложения в 21, матчинг А-Д в 22, отмеченные буквы 9-12,
+           слитно/раздельно в 13-14 и т.п.) Без structured_state на другом
+           устройстве ученик видел бы итоговую цифру, но не «откуда она» —
+           и не мог бы поправить выбор. */
         try {
           const answers = await restRequest('GET',
             '/test_variant_answers?attempt_id=eq.' + liveDb.id +
-            '&select=question_num,user_answer,points,max_points');
+            '&select=question_num,user_answer,points,max_points,structured_state');
           (answers || []).forEach(a => {
             if(a.user_answer != null){
               STATE.solverAnswers[a.question_num] = a.user_answer;
@@ -26181,7 +26186,48 @@ async function startSolvingVariant(variantId, opts){
                 correct: ''  // правильный ответ заберём из q.correct_answer при рендере
               };
             }
+            /* Применяем structured_state обратно — обратная операция к
+               collectStructuredForNum (см. ~строка 26240). Ключи строго
+               совпадают с теми, что сохраняются. */
+            const s = a.structured_state;
+            const n = a.question_num;
+            if(s && typeof s === 'object' && n != null){
+              if(s.letters){
+                if(!STATE.solverLetters) STATE.solverLetters = {};
+                STATE.solverLetters[n] = s.letters;
+              }
+              if(s.checks9_12){
+                if(!STATE.solverChecks9_12) STATE.solverChecks9_12 = {};
+                STATE.solverChecks9_12[n] = s.checks9_12;
+              }
+              if(s.words13_14){
+                if(!STATE.solverWords13_14) STATE.solverWords13_14 = {};
+                STATE.solverWords13_14[n] = s.words13_14;
+              }
+              if(s.choice13_14){
+                if(!STATE.solverChoice13_14) STATE.solverChoice13_14 = {};
+                STATE.solverChoice13_14[n] = s.choice13_14;
+              }
+              if(s.gaps){
+                if(!STATE.solverGaps) STATE.solverGaps = {};
+                STATE.solverGaps[n] = s.gaps;
+              }
+              if(s.checks16){
+                if(!STATE.solverChecks16) STATE.solverChecks16 = {};
+                STATE.solverChecks16[n] = s.checks16;
+              }
+              if(s.dropdowns21){
+                if(!STATE.solverDropdowns21) STATE.solverDropdowns21 = {};
+                STATE.solverDropdowns21[n] = s.dropdowns21;
+              }
+              if(s.matching22){
+                if(!STATE.solverMatching22) STATE.solverMatching22 = {};
+                STATE.solverMatching22[n] = s.matching22;
+              }
+            }
           });
+          /* Сохраняем то что подтянули в localStorage — чтобы при следующем
+             render'е (например navigation на задание) state был на месте. */
           saveSolverDraft();
         } catch(e){ console.warn('[live resume] load answers fail:', e.message); }
       }
