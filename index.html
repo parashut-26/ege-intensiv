@@ -22827,12 +22827,14 @@ function renderWarmupActivityTable(){
     el('br', null),
     el('span', { style:{ color:'#A16207' }}, '⚠ Запись начинается с 25.05.2026 — старые открытия не учтены.')));
 
-  /* Только опубликованные дни (которые ученик мог увидеть). И только role='student' */
+  /* Только опубликованные дни (которые ученик мог увидеть). Берём из глобального
+     STUDENTS (там реальные ученики после loadStudents). Поле имени — `name`,
+     не `full_name` (отличается от REST-ответа profiles). */
   const days = (STATE.warmupDays || []).filter(d => d.is_published !== false);
   const students = (typeof STUDENTS !== 'undefined' ? STUDENTS : [])
-    .filter(s => s && s.id && (s.role === 'student' || !s.role))
+    .filter(s => s && s.id && s.name)
     .slice()
-    .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '', 'ru'));
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
   const acts = STATE.warmupActivity || [];
 
   if(!days.length){
@@ -22883,11 +22885,11 @@ function renderWarmupActivityTable(){
     const seen = days.filter(d => u[d.id]).length;
     return { s, seen };
   });
-  enriched.sort((a, b) => a.seen - b.seen || (a.s.full_name || '').localeCompare(b.s.full_name || '', 'ru'));
+  enriched.sort((a, b) => a.seen - b.seen || (a.s.name || '').localeCompare(b.s.name || '', 'ru'));
 
   enriched.forEach(({s, seen}) => {
     const tr = el('tr', null);
-    tr.append(el('td', { style:{ fontWeight:'600' }}, s.full_name || s.id));
+    tr.append(el('td', { style:{ fontWeight:'600' }}, s.name || s.id));
     days.forEach(d => {
       const act = (byUserDay[s.id] || {})[d.id];
       const cellStyle = { textAlign:'center', cursor: act ? 'pointer' : 'default' };
@@ -22923,7 +22925,7 @@ function renderWarmupActivityTable(){
         const expanded = el('tr', null,
           el('td', { colspan: days.length + 2, style:{ background:'#F9FAFB', padding:'8px 14px' }},
             el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }},
-              '📋 ' + (s.full_name || '') + ' · ' + (openDay.title || ('День ' + openDay.ord)) + ' — посты:'),
+              '📋 ' + (s.name || '') + ' · ' + (openDay.title || ('День ' + openDay.ord)) + ' — посты:'),
             blocks.length === 0
               ? el('div', { style:{ fontSize:'12px', color:'var(--ink-3)' }},
                   'Блоки дня ещё не загружены — открой день в списке ниже, чтобы подгрузить.')
