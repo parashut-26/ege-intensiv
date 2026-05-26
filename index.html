@@ -791,7 +791,16 @@ window.editorIsOpen = function(){
   return STATE.editingBlockId != null
       || STATE.addingPostToDayId != null
       || STATE.addingPostToIntensiveOrd != null
-      || STATE.editingWarmupDayId != null;
+      || STATE.editingWarmupDayId != null
+      /* Прецедент 25.05.2026: Ольга редактировала вопрос в банке задания 22
+         (modalQuickEditQuestion) — при нажатии Enter после «6) риторическое
+         обращение» страница подскакивала и ввод слетал. Это срабатывал
+         какой-то фоновый render (polling/realtime/timer) поверх открытого
+         textarea. Гард ниже снимает это. */
+      || STATE.quickEditQuestion != null
+      || STATE.questionBuilder != null
+      /* Аналогично — редактор теории/контента (тоже WYSIWYG в модалке) */
+      || STATE.contentEditTaskN != null;
 };
 window.safeRender = function(){
   if(typeof render !== 'function') return;
@@ -26323,7 +26332,25 @@ function makeTask21Field(q){
    склеены в одну строку без переносов. */
 function parseTask22Matching(questionText){
   if(!questionText) return null;
-  const stripped = String(questionText).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  /* === HTML-теги форматирования → обратно в markdown ===
+     Прецедент 25.05.2026: у Ольги в варианте 37 А) видела «Знакомым ш умом
+     ш орох их их вер ш ин» вместо «Знакомым **ш**умом **ш**орох...». Причина:
+     в БД question_text лежит как HTML (после сохранения через rich-text)
+     с <strong>ш</strong>. Старый код replace(/<[^>]+>/g, ' ') заменял теги
+     на ПРОБЕЛЫ — выделенные буквы оставались стоять отдельно с пробелами
+     вокруг, читалось как «ш умом» вместо «шумом». Решение: сначала
+     конвертируем <strong>/<b>/<em>/<u> обратно в markdown-маркеры (которые
+     потом renderInlineMd снова отрисует как <strong>...), а уже потом
+     стрипаем остальные теги без замены. */
+  const preMarkdown = String(questionText)
+    .replace(/<\s*(strong|b)\s*>([\s\S]*?)<\s*\/\s*(strong|b)\s*>/gi, '**$2**')
+    .replace(/<\s*(em|i)\s*>([\s\S]*?)<\s*\/\s*(em|i)\s*>/gi, '*$2*')
+    .replace(/<\s*u\s*>([\s\S]*?)<\s*\/\s*u\s*>/gi, '__$1__')
+    /* <br>, <p>, <div> → перенос строки (а не пробел), чтобы граница
+       блоков сохранилась без слипания слов. */
+    .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+    .replace(/<\s*\/\s*(p|div|li|h[1-6])\s*>/gi, '\n');
+  const stripped = preMarkdown.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
   /* Находим все маркеры — буквы А-Д и цифры 1-9, за которыми идёт текст.
      Для БУКВ скобка ) необязательна (импорт PDF иногда теряет её для Д).
      Для ЦИФР скобка обязательна — иначе будем ловить любые числа в тексте.
