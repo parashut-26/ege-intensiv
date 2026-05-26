@@ -1908,15 +1908,21 @@ function renderTheoryGallery(urls){
       background:'#f5f5f5', borderRadius:'10px', overflow:'hidden',
       minHeight:'200px', maxHeight:'500px'
     }});
-    const img = el('img', { src: url, alt: 'Фото к теории',
+    /* imgThumb проксифицирует supabase.co → api2.zebrus.online и применяет
+       image transforms (width=720, quality=80) для Pro плана. Без этого
+       картинки теории не грузились у учеников без VPN в РФ — прямой
+       домен supabase.co заблокирован провайдером. Прецедент 26.05.2026. */
+    const proxiedUrl = (typeof imgThumb === 'function') ? imgThumb(url) : url;
+    const img = el('img', { src: proxiedUrl, alt: 'Фото к теории',
       style:{ maxWidth:'100%', maxHeight:'500px', display:'block', cursor:'zoom-in', objectFit:'contain' },
       onclick: () => {
-        /* Открыть в lightbox — если в платформе есть STATE.lightbox */
+        /* Открыть в lightbox — если в платформе есть STATE.lightbox.
+           Lightbox сам тоже проксифицирует через imgThumb (см. modalLightbox). */
         if(STATE.lightbox !== undefined){
           STATE.lightbox = { photos: list, idx: i };
           render();
         } else {
-          window.open(url, '_blank');
+          window.open(proxiedUrl, '_blank');
         }
       }
     });
