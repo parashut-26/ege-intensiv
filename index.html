@@ -7426,7 +7426,7 @@ async function markMistakeMasteredById(id){
 
 /* AI-проверка сочинения через Edge Function check-essay → YandexGPT 5.1 Pro.
    Возвращает { scores: {k1..k10}, comments: {k1..k10}, general, total, max }. */
-async function callCheckEssay(essayText, sourceText, studentName){
+async function callCheckEssay(essayText, sourceText, studentName, teacherMarks){
   if(!sb) throw new Error('нет соединения с Supabase');
   const token = getAccessToken();
   if(!token) throw new Error('нужно войти в аккаунт');
@@ -7442,6 +7442,11 @@ async function callCheckEssay(essayText, sourceText, studentName){
       essay_text:   essayText,
       source_text:  sourceText || '',
       student_name: studentName || '',
+      /* teacher_marks — массив отметок учителя по этому сочинению, чтобы
+         AI учитывал их в баллах К1-К10, не дублировал в своих marks и
+         упоминал в общем комментарии. Может быть null или [] — тогда AI
+         работает как раньше (полный независимый прогон). */
+      teacher_marks: Array.isArray(teacherMarks) ? teacherMarks : null,
     }),
   });
   const txt = await r.text();
@@ -18513,7 +18518,27 @@ function modalEssayReview(essayId){
                 if(problem){
                   essayForAi = '(Ученик заявил проблему: ' + problem + ')\n\n' + essayText;
                 }
-                const res = await callCheckEssay(essayForAi, srcText, essay.studentName || '');
+                /* === Учительские отметки как контекст для AI ===
+                   Берём актуальные комментарии (с пинами/рамками/выделениями)
+                   из ESSAY_COMMENTS_CACHE — то что Ольга уже отметила на работе.
+                   AI учтёт их в баллах К1-К10, не будет дублировать в своих marks,
+                   упомянет в general. */
+                const teacherMarks = (ESSAY_COMMENTS_CACHE[essay.id] || essay.comments || [])
+                  .filter(c => c && (c.comment || c.fragment || c.photo_anchor))
+                  .map(c => {
+                    const meta = (typeof errKindMeta === 'function') ? errKindMeta(c.kind) : null;
+                    return {
+                      kind: c.kind || null,
+                      criterion: meta ? meta.crit : null,
+                      label: meta ? meta.label : null,
+                      fragment: c.fragment || null,
+                      comment: (c.comment || '').slice(0, 500),
+                      where: c.photo_anchor
+                        ? 'фото · стр. ' + ((c.photo_anchor.page || 0) + 1)
+                        : (c.fragment ? 'выделение в тексте' : null)
+                    };
+                  });
+                const res = await callCheckEssay(essayForAi, srcText, essay.studentName || '', teacherMarks);
                 /* Подставляем в STATE.scoresK — там ключи UPPERCASE (K1..K10) */
                 if(!STATE.scoresK) STATE.scoresK = {};
                 Object.keys(res.scores).forEach(k => {
@@ -19103,11 +19128,52 @@ function showExistingCommentPopup(essay, c, markEl){
     }, k.crit + ' ' + k.label));
   });
 
+  /* === Редактируемый текст комментария ===
+     Раньше показывался только для чтения (div с pre-wrap). Теперь — textarea,
+     можно добавить/изменить комментарий и сохранить. PATCH через
+     updateEssayComment, локально обновляем c.comment в кэше. */
+  const commentStatus = el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', marginLeft:'6px' }}, '');
+  const commentHeader = el('div', { style:{ fontSize:'10px', fontWeight:'700', color:'var(--ink-3)',
+                                              textTransform:'uppercase', letterSpacing:'.06em',
+                                              marginTop:'8px', marginBottom:'4px',
+                                              display:'flex', alignItems:'center' }},
+    el('span', null, 'Комментарий ученику'), commentStatus);
+  const commentTa = el('textarea', {
+    placeholder: 'Что именно тут не так / совет ученику',
+    style:{ width:'100%', minHeight:'70px', padding:'8px 10px', borderRadius:'8px',
+            border:'1px solid var(--border-2)', fontFamily:'inherit', fontSize:'13px',
+            lineHeight:'1.45', resize:'vertical', boxSizing:'border-box' }
+  }, txtT || '');
+  const commentSaveBtn = el('button', {
+    class:'btn btn-secondary btn-sm', style:{ marginTop:'6px', fontWeight:'700' },
+    onclick: async () => {
+      const newVal = (commentTa.value || '').trim();
+      if(newVal === (txtT || '')){ commentStatus.textContent = '— ничего не изменилось'; setTimeout(()=>{commentStatus.textContent='';}, 1200); return; }
+      commentSaveBtn.disabled = true; commentStatus.textContent = '⏳';
+      try {
+        await updateEssayComment(c.id, { comment: newVal || null });
+        c.comment = newVal;
+        const cache = ESSAY_COMMENTS_CACHE[essay.id] || essay.comments || [];
+        const inCache = cache.find(x => x.id === c.id);
+        if(inCache) inCache.comment = newVal;
+        ESSAY_COMMENTS_CACHE[essay.id] = cache;
+        commentStatus.textContent = '✓ сохранено';
+        setTimeout(() => { commentStatus.textContent = ''; }, 1500);
+        render();   /* обновим списки замечаний внизу страницы */
+      } catch(err){
+        commentStatus.textContent = '⚠ ' + (err && err.message || 'ошибка');
+      } finally {
+        commentSaveBtn.disabled = false;
+      }
+    }
+  }, '💾 Сохранить комментарий');
+
   safeAppend(popup,
     kindHeader,
     kindsWrap,
-    el('div', { style:{ fontSize:'13px', marginTop:'6px', whiteSpace:'pre-wrap' }},
-      txtT || (vuT ? '' : '(без комментария)')),
+    commentHeader,
+    commentTa,
+    commentSaveBtn,
     vuT
       ? el('div', { style:{ marginTop:'8px' }},
           el('audio', { controls:'controls', src: proxifyUrl(vuT), style:{ width:'100%', height:'36px' }}))
