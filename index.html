@@ -582,8 +582,13 @@ function _testProgressKey(){
 function persistTestProgress(){
   try {
     if(!STATE.testOpen){
+      /* Тренажёр закрыт ИЛИ ещё не открыт. Чистим только localStorage —
+         в БД запись НЕ трогаем. Иначе после перезагрузки страницы (когда
+         STATE.testOpen ещё null) мы бы стёрли свой же прогресс из БД,
+         и на других устройствах нечего было бы подтянуть.
+         БД-запись удаляется только явным clearTestProgress (при завершении
+         тренажёра / нажатии «Начать заново»). */
       localStorage.removeItem(_testProgressKey());
-      _scheduleTestProgressDbDelete();
       return;
     }
     const payload = {
@@ -2297,6 +2302,12 @@ async function restoreSession(){
         else if(profile.role === 'curator') STATE.view = 'curator';
         else STATE.view = 'student';
         _AUTH_BOOTSTRAP_RUNNING = false;
+        /* Сразу после установки профиля — пытаемся подтянуть незаконченный
+           тренажёр с другого устройства. Прежде вызывалось только в
+           viewStudentHome; если ученик минует главную, sync не происходил. */
+        if(profile.role === 'student' && typeof tryRestoreTestProgressFromDb === 'function'){
+          tryRestoreTestProgressFromDb();
+        }
         render();
         /* Подгружаем теорию из БД в фоне — после первого render'а */
         Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb().then(() => loadPaymentsFromDb()), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile()), loadPaymentSuggestionsFromDb()]).then(() => {
@@ -2369,6 +2380,11 @@ async function restoreSession(){
     if(profile.role === 'teacher') STATE.view = 'teacher';
     else if(profile.role === 'curator') STATE.view = 'curator';
     else STATE.view = 'student';
+    /* Сразу sync прогресса тренажёра с других устройств — независимо от того,
+       зайдёт ли ученик на главную или сразу откроет конкретное задание. */
+    if(profile.role === 'student' && typeof tryRestoreTestProgressFromDb === 'function'){
+      tryRestoreTestProgressFromDb();
+    }
     /* Загружаем теорию в фоне */
     Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb().then(() => loadPaymentsFromDb()), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile()), loadPaymentSuggestionsFromDb()]).then(() => {
           render();
