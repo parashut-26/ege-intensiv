@@ -22797,6 +22797,154 @@ async function loadWarmupDays(){
     STATE.warmupDays = [];
   }
 }
+
+/* === Активность учеников в Разогреве: загрузка warmup_views ===
+   Только учитель/куратор может прочитать всё. Один запрос — потом строим
+   матрицу ученики × дни / блоки. */
+async function loadWarmupActivity(){
+  try {
+    const arr = await restRequest('GET',
+      '/warmup_views?select=user_id,day_id,block_id,first_viewed_at,last_viewed_at,view_count') || [];
+    STATE.warmupActivity = Array.isArray(arr) ? arr : [];
+    console.log('[warmup-views] загружено записей:', STATE.warmupActivity.length);
+  } catch(e){
+    console.error('loadWarmupActivity', e);
+    STATE.warmupActivity = [];
+  }
+}
+
+/* === Рендер таблицы активности учителю ===
+   Строки — ученики (из STUDENTS, только role='student'). Колонки —
+   опубликованные дни разогрева (warmup_days, is_published=true). В ячейке —
+   ✓ если ученик открывал этот день, иначе •. Tooltip показывает дату/время
+   последнего захода. Раскрывающаяся секция «📋 Посты дня» под каждым
+   ✓ показывает какие конкретно блоки этого дня ученик видел. */
+function renderWarmupActivityTable(){
+  const wrap = el('div', { class:'card', style:{ marginBottom:'14px', overflowX:'auto' }});
+  wrap.append(el('h3', { style:{ marginBottom:'8px' }}, '👀 Активность учеников по дням разогрева'));
+  wrap.append(el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginBottom:'10px' }},
+    '✓ — ученик открывал день. Кликни по ✓ — увидишь какие посты дня он просмотрел. ',
+    el('br', null),
+    el('span', { style:{ color:'#A16207' }}, '⚠ Запись начинается с 25.05.2026 — старые открытия не учтены.')));
+
+  /* Только опубликованные дни (которые ученик мог увидеть). И только role='student' */
+  const days = (STATE.warmupDays || []).filter(d => d.is_published !== false);
+  const students = (typeof STUDENTS !== 'undefined' ? STUDENTS : [])
+    .filter(s => s && s.id && (s.role === 'student' || !s.role))
+    .slice()
+    .sort((a, b) => (a.full_name || '').localeCompare(b.full_name || '', 'ru'));
+  const acts = STATE.warmupActivity || [];
+
+  if(!days.length){
+    wrap.append(el('p', { style:{ color:'var(--ink-3)' }},
+      'Нет опубликованных дней разогрева.'));
+    return wrap;
+  }
+  if(!students.length){
+    wrap.append(el('p', { style:{ color:'var(--ink-3)' }},
+      'Список учеников пуст или ещё не загружен.'));
+    return wrap;
+  }
+
+  /* Индексы для быстрого поиска: byUserDay[uid][dayId] = act-запись */
+  const byUserDay = {};
+  const byUserBlock = {};
+  acts.forEach(a => {
+    if(a.user_id && a.day_id != null){
+      if(!byUserDay[a.user_id]) byUserDay[a.user_id] = {};
+      byUserDay[a.user_id][a.day_id] = a;
+    }
+    if(a.user_id && a.block_id != null){
+      if(!byUserBlock[a.user_id]) byUserBlock[a.user_id] = {};
+      byUserBlock[a.user_id][a.block_id] = a;
+    }
+  });
+
+  const table = el('table', { class:'table', style:{ minWidth:'100%', fontSize:'13px' }});
+  const thead = el('thead', null);
+  const headRow = el('tr', null);
+  headRow.append(el('th', { style:{ textAlign:'left', minWidth:'180px' }}, 'Ученик'));
+  days.forEach(d => {
+    headRow.append(el('th', { style:{ textAlign:'center', minWidth:'70px', padding:'6px 4px' },
+      title: d.title || ('День ' + d.ord) },
+      el('div', { style:{ fontSize:'10px', color:'var(--ink-3)', fontWeight:'500' }},
+        d.day_date || ''),
+      el('div', null, (d.emoji ? d.emoji + ' ' : '') + (d.title || ('День ' + d.ord)).slice(0, 14))));
+  });
+  headRow.append(el('th', { style:{ textAlign:'center', minWidth:'60px' }}, 'Всего'));
+  thead.append(headRow);
+  table.append(thead);
+
+  const tbody = el('tbody', null);
+  /* Сортируем учеников: сначала те, кто меньше всего открывал (чтобы Ольга
+     сразу видела отстающих сверху) */
+  const enriched = students.map(s => {
+    const u = byUserDay[s.id] || {};
+    const seen = days.filter(d => u[d.id]).length;
+    return { s, seen };
+  });
+  enriched.sort((a, b) => a.seen - b.seen || (a.s.full_name || '').localeCompare(b.s.full_name || '', 'ru'));
+
+  enriched.forEach(({s, seen}) => {
+    const tr = el('tr', null);
+    tr.append(el('td', { style:{ fontWeight:'600' }}, s.full_name || s.id));
+    days.forEach(d => {
+      const act = (byUserDay[s.id] || {})[d.id];
+      const cellStyle = { textAlign:'center', cursor: act ? 'pointer' : 'default' };
+      if(!act){
+        tr.append(el('td', { style: Object.assign({}, cellStyle, { color:'#D1D5DB' }) }, '•'));
+        return;
+      }
+      const when = act.last_viewed_at ? new Date(act.last_viewed_at).toLocaleString('ru-RU') : '';
+      const title = 'Открыл(а) ' + when + (act.view_count > 1 ? ' · заходов: ' + act.view_count : '');
+      tr.append(el('td', {
+        style: Object.assign({}, cellStyle, { color:'#16A34A', fontWeight:'700', fontSize:'15px' }),
+        title,
+        onclick: () => {
+          /* Раскрываем — показываем посты этого дня которые ученик видел */
+          const key = s.id + '|' + d.id;
+          STATE.warmupActivityOpen = (STATE.warmupActivityOpen === key) ? null : key;
+          render();
+        }
+      }, '✓'));
+    });
+    tr.append(el('td', { style:{ textAlign:'center', fontWeight:'700',
+      color: seen === days.length ? '#16A34A' : seen === 0 ? '#DC2626' : 'var(--ink-2)' }},
+      seen + '/' + days.length));
+    tbody.append(tr);
+
+    /* Развёрнутая строка: какие посты дня ученик видел */
+    if(STATE.warmupActivityOpen && STATE.warmupActivityOpen.startsWith(s.id + '|')){
+      const openDayId = parseInt(STATE.warmupActivityOpen.split('|')[1], 10);
+      const openDay = days.find(x => x.id === openDayId);
+      if(openDay){
+        const blocks = (STATE.warmupBlocksByDay && STATE.warmupBlocksByDay[openDayId]) || [];
+        const userBlocks = byUserBlock[s.id] || {};
+        const expanded = el('tr', null,
+          el('td', { colspan: days.length + 2, style:{ background:'#F9FAFB', padding:'8px 14px' }},
+            el('div', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'6px' }},
+              '📋 ' + (s.full_name || '') + ' · ' + (openDay.title || ('День ' + openDay.ord)) + ' — посты:'),
+            blocks.length === 0
+              ? el('div', { style:{ fontSize:'12px', color:'var(--ink-3)' }},
+                  'Блоки дня ещё не загружены — открой день в списке ниже, чтобы подгрузить.')
+              : el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'6px' }},
+                  ...blocks.map(b => {
+                    const ub = userBlocks[b.id];
+                    return el('span', {
+                      style:{ padding:'3px 8px', borderRadius:'6px', fontSize:'11px',
+                              background: ub ? '#D1FAE5' : '#F3F4F6',
+                              color: ub ? '#065F46' : 'var(--ink-3)' },
+                      title: ub ? ('Просмотрел ' + new Date(ub.last_viewed_at).toLocaleString('ru-RU')) : 'Не открывал'
+                    }, (ub ? '✓ ' : '• ') + (b.emoji ? b.emoji + ' ' : '') + (b.title || b.type || 'пост').slice(0, 30));
+                  }))));
+        tbody.append(expanded);
+      }
+    }
+  });
+  table.append(tbody);
+  wrap.append(table);
+  return wrap;
+}
 async function loadWarmupBlocks(dayId){
   try {
     const list = await restRequest('GET',
@@ -23539,6 +23687,15 @@ function viewTeacherWarmup(){
   /* Подгружаем игры тоже — нужны в конструкторе для типа 'game' */
   if(!STATE.gamesList) loadGamesList().then(render);
 
+  /* === Таблица активности учеников по дням разогрева ===
+     Подгружаем warmup_views один раз — потом строим матрицу
+     «ученики × дни» c ✓/✗ + расширение на просмотренные посты. */
+  if(!STATE.warmupActivity){
+    loadWarmupActivity().then(render);
+  } else {
+    wrap.append(renderWarmupActivityTable());
+  }
+
   STATE.warmupDays.forEach(d => {
     const det = el('details', { class:'card', open:true, style:{ marginBottom:'12px' }});
     const ss = { padding:'6px 10px', borderRadius:'6px', border:'1px solid var(--border-2)', fontSize:'14px' };
@@ -24164,6 +24321,11 @@ function openWarmupDayFullscreen(day){
   STATE.openWarmupDayId = day.id;
   /* Помечаем день как «прочитанный» — пропадает бейдж непрочитанного и плашка */
   markDayAsSeen('warmup-' + day.id);
+  /* === Логирование активности в БД ===
+     Учитель потом увидит «кто открывал какой день» во вкладке Разогрев.
+     Только для учеников (учителю/куратору считать активность смысла нет).
+     RLS не разрешит писать чужие user_id, fire-and-forget без блокировки UI. */
+  logWarmupDayView(day.id);
   /* Подгружаем игры (для блоков типа 'игра' внутри постов) и блоки дня
      параллельно, потом рендерим overlay. */
   const tasks = [loadWarmupBlocks(day.id)];
@@ -24173,8 +24335,36 @@ function openWarmupDayFullscreen(day){
     /* После загрузки блоков может оказаться больше «новых», чем до открытия —
        обновим seen-метку второй раз, чтобы и эти посты тоже стали прочитанными. */
     markDayAsSeen('warmup-' + day.id);
+    /* Также логируем просмотр каждого опубликованного блока этого дня.
+       Это даёт детальную картину «какие посты ученик долистал». */
+    const blocks = (STATE.warmupBlocksByDay && STATE.warmupBlocksByDay[day.id]) || [];
+    blocks.forEach(b => {
+      if(isWarmupVisibleToStudent(b)) logWarmupBlockView(b.id);
+    });
     render();  /* обновим бейдж/плашку */
   });
+}
+
+/* === UPSERT в warmup_views: учёт активности ===
+   Только для ролей student. У учителя/куратора это пустая операция —
+   они и так видят свою аналитику другими путями. RLS на стороне БД
+   тоже не пропустит чужой user_id, но проверим на клиенте для
+   честности и чтобы не плодить лишние HTTP-запросы. */
+function logWarmupDayView(dayId){
+  if(!sb || !MY_PROFILE || MY_PROFILE.role !== 'student' || !dayId) return;
+  restRequest('POST',
+    '/warmup_views?on_conflict=user_id,day_id',
+    [{ user_id: MY_PROFILE.id, day_id: dayId, last_viewed_at: new Date().toISOString() }],
+    { prefer: 'resolution=merge-duplicates,return=minimal' })
+    .catch(e => console.warn('[warmup-views] day fail:', e && e.message));
+}
+function logWarmupBlockView(blockId){
+  if(!sb || !MY_PROFILE || MY_PROFILE.role !== 'student' || !blockId) return;
+  restRequest('POST',
+    '/warmup_views?on_conflict=user_id,block_id',
+    [{ user_id: MY_PROFILE.id, block_id: blockId, last_viewed_at: new Date().toISOString() }],
+    { prefer: 'resolution=merge-duplicates,return=minimal' })
+    .catch(e => console.warn('[warmup-views] block fail:', e && e.message));
 }
 function closeWarmupOverlay(){
   STATE.openWarmupDayId = null;
