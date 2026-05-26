@@ -24348,20 +24348,22 @@ function openWarmupDayFullscreen(day){
 }
 
 /* === UPSERT в warmup_views: учёт активности ===
-   Только для ролей student. У учителя/куратора это пустая операция —
-   они и так видят свою аналитику другими путями. RLS на стороне БД
-   тоже не пропустит чужой user_id, но проверим на клиенте для
-   честности и чтобы не плодить лишние HTTP-запросы. */
+   Логируем ВСЕМ кто открывает день — иначе при тестах «зайди как ученик»
+   через учительский режим (MY_PROFILE.role остаётся 'teacher' до явной
+   переавторизации) INSERT молча skip'ался и записи не появлялись. В
+   учительскую таблицу активности эти записи не попадут — она итерирует
+   только по STUDENTS, а учителя там нет. */
 function logWarmupDayView(dayId){
-  if(!sb || !MY_PROFILE || MY_PROFILE.role !== 'student' || !dayId) return;
+  if(!sb || !MY_PROFILE || !MY_PROFILE.id || !dayId) return;
   restRequest('POST',
     '/warmup_views?on_conflict=user_id,day_id',
     [{ user_id: MY_PROFILE.id, day_id: dayId, last_viewed_at: new Date().toISOString() }],
     { prefer: 'resolution=merge-duplicates,return=minimal' })
+    .then(() => console.log('[warmup-views] day logged', dayId))
     .catch(e => console.warn('[warmup-views] day fail:', e && e.message));
 }
 function logWarmupBlockView(blockId){
-  if(!sb || !MY_PROFILE || MY_PROFILE.role !== 'student' || !blockId) return;
+  if(!sb || !MY_PROFILE || !MY_PROFILE.id || !blockId) return;
   restRequest('POST',
     '/warmup_views?on_conflict=user_id,block_id',
     [{ user_id: MY_PROFILE.id, block_id: blockId, last_viewed_at: new Date().toISOString() }],
