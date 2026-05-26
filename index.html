@@ -26327,12 +26327,8 @@ function parseTask22Matching(questionText){
   /* Находим все маркеры — буквы А-Д и цифры 1-9, за которыми идёт текст.
      Для БУКВ скобка ) необязательна (импорт PDF иногда теряет её для Д).
      Для ЦИФР скобка обязательна — иначе будем ловить любые числа в тексте.
-     После маркера требуем пробел / кавычку / начало слова с заглавной / конец
-     строки. Прецедент 25.05.2026: у Ольги пропадало предложение №4 у ученика —
-     в БД лежало «4)В книге» без пробела, парсер не считал «4)» маркером,
-     terms[] оказывался без элемента №4. Расширили lookahead на кириллицу и
-     открывающие кавычки. */
-  const markerRe = /(^|\s)(?:([А-Д])\)?|([1-9])\))(?=\s|[А-ЯЁ«„"„]|$)/g;
+     После маркера требуем пробел или конец строки (чтобы не ловить «Дом»). */
+  const markerRe = /(^|\s)(?:([А-Д])\)?|([1-9])\))(?=\s|$)/g;
   const markers = [];
   let m;
   while((m = markerRe.exec(stripped)) !== null){
@@ -26346,14 +26342,32 @@ function parseTask22Matching(questionText){
     });
   }
   if(markers.length < 4) return null;
+  /* === Фильтр ложных буквенных маркеров внутри предложений ===
+     Прецедент 25.05.2026: у Ольги пропадало предложение №4 в задании 8.
+     В тексте «4) В книге В.А. Рождественского…» парсер находил «В» как
+     отдельную букву-маркер (пробел до и после) — она вставала сразу за «4)»,
+     text для 4 становился пустым ' ', срабатывал if(!text) continue → terms
+     терял элемент №4. У ученика в dropdown были 1,2,3,5,6,7,8,9.
+     Структурно задания 8/22 устроены так: сначала блок А-Д с категориями,
+     потом блок 1-9 с предложениями. После первого числового маркера новых
+     буквенных быть НЕ может — они уже точно ложные (буква внутри обычного
+     слова в предложении). */
+  let firstNumIdx = -1;
+  for(let i = 0; i < markers.length; i++){
+    if(markers[i].type === 'num'){ firstNumIdx = i; break; }
+  }
+  let cleanMarkers = markers;
+  if(firstNumIdx >= 0){
+    cleanMarkers = markers.filter((mk, i) => !(i > firstNumIdx && mk.type === 'letter'));
+  }
   /* Сортируем по позиции (на случай если regex выдал в порядке матчей,
      но в тексте они стоят по-другому — крайне редкий случай) */
-  markers.sort((a, b) => a.start - b.start);
+  cleanMarkers.sort((a, b) => a.start - b.start);
   const letters = [];
   const terms = [];
-  for(let i = 0; i < markers.length; i++){
-    const mk = markers[i];
-    const nextStart = i + 1 < markers.length ? markers[i+1].start : stripped.length;
+  for(let i = 0; i < cleanMarkers.length; i++){
+    const mk = cleanMarkers[i];
+    const nextStart = i + 1 < cleanMarkers.length ? cleanMarkers[i+1].start : stripped.length;
     const text = stripped.slice(mk.end, nextStart).trim();
     if(!text) continue;
     if(mk.type === 'letter'){
