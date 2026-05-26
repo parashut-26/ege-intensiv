@@ -26385,19 +26385,37 @@ function parseTask22Matching(questionText){
   const isLikelyHeader = (s) => {
     const t = (s || '').trim();
     if(t.length < 12) return true;
-    /* Доля заглавных кириллических букв среди всех кириллических */
-    const cyr = t.match(/[А-ЯЁа-яё]/g) || [];
-    const upper = t.match(/[А-ЯЁ]/g) || [];
+    /* Доля заглавных кириллических букв среди всех кириллических.
+       ВАЖНО: проверяем только ПЕРВОЕ предложение, иначе у Д) после
+       которой идёт заголовок «ИЗОБРАЗИТЕЛЬНО-ВЫРАЗИТЕЛЬНЫЕ СРЕДСТВА
+       ЯЗЫКА» — реальный текст «За мной, мой читатель» нормальный, но
+       присоединённый заголовок задирает долю заглавных и Д выбрасывалась
+       как «лже-маркер». Прецедент 25.05.2026, вариант 37 задания 22. */
+    const firstSentence = t.split(/[.!?]/)[0].trim();
+    const probe = firstSentence.length >= 6 ? firstSentence : t;
+    const cyr = probe.match(/[А-ЯЁа-яё]/g) || [];
+    const upper = probe.match(/[А-ЯЁ]/g) || [];
     if(cyr.length === 0) return true;
     return (upper.length / cyr.length) > 0.6;
+  };
+  /* Обрезаем хвост-заголовок второго блока (UPPERCASE-фраза из 12+ символов
+     подряд с кириллицей-заглавными, пробелами, дефисами). После такого
+     отреза остаётся только настоящий текст самой буквы — без «ИЗОБРАЗИТЕЛЬНО
+     ВЫРАЗИТЕЛЬНЫЕ СРЕДСТВА ЯЗЫКА» в конце. */
+  const stripTrailingHeader = (s) => {
+    if(!s) return s;
+    return String(s).replace(/\s+[А-ЯЁ][А-ЯЁ\s\-]{10,}.*$/, '').trim();
   };
   const uniqLetters = [];
   const seenL = new Set();
   for(const l of letters){
     if(seenL.has(l.letter)) continue;
-    if(isLikelyHeader(l.text)) continue;   // отбрасываем фейк
+    /* Сначала проверяем что буква не лже-маркер (по началу текста),
+       потом обрезаем хвост-заголовок второго блока */
+    if(isLikelyHeader(l.text)) continue;
+    const cleanText = stripTrailingHeader(l.text);
     seenL.add(l.letter);
-    uniqLetters.push(l);
+    uniqLetters.push({ letter: l.letter, text: cleanText || l.text });
   }
   const uniqTerms = [];
   const seenN = new Set();
