@@ -583,6 +583,7 @@ function persistTestProgress(){
   try {
     if(!STATE.testOpen){
       localStorage.removeItem(_testProgressKey());
+      _scheduleTestProgressDbDelete();
       return;
     }
     const payload = {
@@ -602,7 +603,49 @@ function persistTestProgress(){
       testCommas:           _serializeTestCommas(STATE.testCommas),
     };
     localStorage.setItem(_testProgressKey(), JSON.stringify(payload));
+    /* === Синхронизация в БД (между устройствами) ===
+       Прецедент 25.05.2026: ученики жаловались на потерю прогресса при
+       переходе с телефона на комп или при возврате через 7+ часов
+       (TTL localStorage). Дублируем payload в test_progress через UPSERT.
+       Debounce 1.5с — иначе REST-запросы спамятся на каждое нажатие
+       кнопки выбора ответа. */
+    _scheduleTestProgressDbSave(payload);
   } catch(_){ /* QuotaExceeded и т.п. — молча, чтобы не ронять рендер */ }
+}
+
+/* === Дебаунс UPSERT в test_progress ===
+   Каждое изменение ответа дёргает persistTestProgress() — это нормально для
+   localStorage, но БД-запрос на каждый клик создаёт лишний трафик. Копим
+   изменения 1.5 секунды, потом один UPSERT с финальным состоянием. */
+let _testProgressDbTimer = null;
+let _testProgressDbInFlight = false;
+function _scheduleTestProgressDbSave(payload){
+  if(!sb || !MY_PROFILE || !MY_PROFILE.id) return;
+  if(_testProgressDbTimer) clearTimeout(_testProgressDbTimer);
+  _testProgressDbTimer = setTimeout(() => {
+    _testProgressDbTimer = null;
+    if(_testProgressDbInFlight) return;
+    _testProgressDbInFlight = true;
+    restRequest('POST',
+      '/test_progress?on_conflict=user_id',
+      [{
+        user_id: MY_PROFILE.id,
+        payload: payload,
+        updated_at: new Date().toISOString()
+      }],
+      { prefer: 'resolution=merge-duplicates,return=minimal' })
+      .catch(err => console.warn('[testProgress] db save fail:', err && err.message))
+      .finally(() => { _testProgressDbInFlight = false; });
+  }, 1500);
+}
+function _scheduleTestProgressDbDelete(){
+  if(!sb || !MY_PROFILE || !MY_PROFILE.id) return;
+  if(_testProgressDbTimer){ clearTimeout(_testProgressDbTimer); _testProgressDbTimer = null; }
+  restRequest('DELETE',
+    '/test_progress?user_id=eq.' + encodeURIComponent(MY_PROFILE.id),
+    null,
+    { prefer: 'return=minimal' })
+    .catch(err => console.warn('[testProgress] db delete fail:', err && err.message));
 }
 function _serializeTestCommas(obj){
   /* STATE.testCommas[qIdx][sentIdx] — это Set, JSON.stringify его не сохранит.
@@ -643,16 +686,8 @@ function tryRestoreTestProgress(){
       localStorage.removeItem(_testProgressKey());
       return false;
     }
-    STATE.testOpen             = p.testOpen;
-    STATE.testAnswers          = p.testAnswers || {};
-    STATE.testChecked          = !!p.testChecked;
-    STATE.testInstantSubmitted = p.testInstantSubmitted || {};
-    STATE.testShuffle          = p.testShuffle || null;
-    STATE.testLimit            = p.testLimit || null;
-    STATE.testCollection       = p.testCollection || null;
-    STATE.shuffledBank         = p.shuffledBank || null;
-    STATE.testCommas           = _deserializeTestCommas(p.testCommas);
-    console.log('[testProgress] восстановлен прогресс тренажёра задания', p.testOpen,
+    _applyTestProgressPayload(p);
+    console.log('[testProgress] восстановлен из localStorage задания', p.testOpen,
                 '· ответов:', Object.keys(STATE.testAnswers).length);
     return true;
   } catch(err){
@@ -660,8 +695,78 @@ function tryRestoreTestProgress(){
     return false;
   }
 }
+
+/* Применяет payload в STATE — вынесено отдельно, чтобы реиспользовать
+   при восстановлении из БД и из localStorage. */
+function _applyTestProgressPayload(p){
+  if(!p || !p.testOpen) return;
+  STATE.testOpen             = p.testOpen;
+  STATE.testAnswers          = p.testAnswers || {};
+  STATE.testChecked          = !!p.testChecked;
+  STATE.testInstantSubmitted = p.testInstantSubmitted || {};
+  STATE.testShuffle          = p.testShuffle || null;
+  STATE.testLimit            = p.testLimit || null;
+  STATE.testCollection       = p.testCollection || null;
+  STATE.shuffledBank         = p.shuffledBank || null;
+  STATE.testCommas           = _deserializeTestCommas(p.testCommas);
+}
+
+/* === Восстановление прогресса из БД (между устройствами) ===
+   При загрузке ученика: fetch test_progress по user_id. Если БД-payload
+   новее localStorage (или localStorage пуст/устарел) — применяем БД-версию.
+   Иначе оставляем localStorage как есть. Так ученик после перехода
+   с одного устройства на другое (или после возврата через много часов)
+   найдёт свой прогресс там, где остановился. */
+async function tryRestoreTestProgressFromDb(){
+  if(!sb || !MY_PROFILE || !MY_PROFILE.id) return false;
+  try {
+    const arr = await restRequest('GET',
+      '/test_progress?user_id=eq.' + encodeURIComponent(MY_PROFILE.id) +
+      '&select=payload,updated_at&limit=1');
+    if(!Array.isArray(arr) || !arr.length) return false;
+    const dbPayload = arr[0].payload;
+    if(!dbPayload || !dbPayload.testOpen) return false;
+    const dbTs = arr[0].updated_at ? Date.parse(arr[0].updated_at) : (dbPayload._t || 0);
+    /* TTL — тот же, что и для localStorage. Если в БД лежит «забытая»
+       запись (например ученик не закончил неделю назад) — игнорируем. */
+    if(dbTs && (Date.now() - dbTs) > TEST_PROGRESS_TTL_MS){
+      return false;
+    }
+    /* Сравнение с локальным: если локальный новее — он уже применён через
+       tryRestoreTestProgress, ничего не делаем. */
+    let localTs = 0;
+    try {
+      const localRaw = localStorage.getItem(_testProgressKey());
+      if(localRaw){
+        const lp = JSON.parse(localRaw);
+        if(lp && lp._t) localTs = lp._t;
+      }
+    } catch(_){}
+    if(localTs && localTs >= dbTs){
+      /* Локальный свежее или равен — оставляем как есть */
+      return false;
+    }
+    /* БД новее — применяем и обновляем localStorage */
+    _applyTestProgressPayload(dbPayload);
+    try { localStorage.setItem(_testProgressKey(), JSON.stringify(dbPayload)); } catch(_){}
+    console.log('[testProgress] восстановлен из БД задания', dbPayload.testOpen,
+                '· ответов:', Object.keys(STATE.testAnswers).length,
+                '· updated_at:', arr[0].updated_at);
+    /* Дёргаем рендер если ученик уже видит интерфейс */
+    if(typeof render === 'function') render();
+    if(typeof showToast === 'function'){
+      showToast('↩ Восстановлен прогресс с другого устройства');
+    }
+    return true;
+  } catch(err){
+    console.warn('[testProgress] db restore failed:', err && err.message);
+    return false;
+  }
+}
+
 function clearTestProgress(){
   try { localStorage.removeItem(_testProgressKey()); } catch(_){}
+  _scheduleTestProgressDbDelete();
 }
 /* При уходе в фон срочно сохраняем — на iOS Safari это лучший момент,
    потому что render() может не успеть, если страница выгружается. */
@@ -883,14 +988,47 @@ function getSeenDays(){
     return (p && typeof p === 'object') ? p : {};
   } catch(_){ return {}; }
 }
-function markDayAsSeen(scopeKey){
-  /* scopeKey = "warmup-<dayId>" или "intensive-<dayOrd>" */
+function markDayAsSeen(scopeKey, tsOverride){
+  /* scopeKey = "warmup-<dayId>" или "intensive-<dayOrd>"
+     tsOverride — опционально использовать конкретное время (для merge с БД,
+     где first_viewed_at может быть раньше текущего времени). По умолчанию now(). */
   if(!scopeKey) return;
   try {
     const map = getSeenDays();
-    map[scopeKey] = Date.now();
+    const ts = typeof tsOverride === 'number' ? tsOverride : Date.now();
+    /* Не перезаписываем более поздним: max(текущее, новое) */
+    const existing = Number(map[scopeKey] || 0);
+    map[scopeKey] = Math.max(existing, ts);
     localStorage.setItem(_seenDaysKey(), JSON.stringify(map));
   } catch(_){}
+}
+
+/* === Синхронизация прочитанности РАЗОГРЕВА между устройствами ===
+   Прецедент 25.05.2026: Никита Х открыл день на одном телефоне → на другом
+   устройстве «непрочитано» рендерилось заново (localStorage не делится).
+   Решение: при загрузке ученика подтягиваем свои warmup_views из БД (где
+   уже логируются открытия из logWarmupDayView) и мержим в локальный кэш.
+   Дальше всё работает через localStorage как раньше — кросс-девайс
+   синхронизация получается «бесплатно». */
+async function syncMyWarmupViewsToLocal(){
+  if(!sb || !MY_PROFILE || !MY_PROFILE.id) return;
+  try {
+    const arr = await restRequest('GET',
+      '/warmup_views?user_id=eq.' + encodeURIComponent(MY_PROFILE.id) +
+      '&select=day_id,first_viewed_at');
+    if(!Array.isArray(arr) || !arr.length) return;
+    arr.forEach(r => {
+      if(r.day_id != null){
+        const ts = r.first_viewed_at ? Date.parse(r.first_viewed_at) : Date.now();
+        if(!isNaN(ts)){
+          markDayAsSeen('warmup-' + r.day_id, ts);
+        }
+      }
+    });
+    console.log('[warmup-sync] подтянуто открытий из БД:', arr.length);
+  } catch(e){
+    console.warn('[warmup-sync] не удалось:', e && e.message);
+  }
 }
 /* ============================================================
    Отметка прочитанности ответов учителя на вопросы ученика.
@@ -9204,6 +9342,21 @@ function viewStudentHome(){
         loadWarmupBlocks(d.id).then(render);
       }
     });
+  }
+  /* Один раз за сессию подтягиваем свою историю просмотров — чтобы
+     прочитанность синхронизировалась между устройствами (см.
+     syncMyWarmupViewsToLocal). Без этого ученик с другого устройства
+     видит все дни «непрочитанными» заново. */
+  if(!STATE._warmupViewsSynced && MY_PROFILE && MY_PROFILE.id){
+    STATE._warmupViewsSynced = true;
+    syncMyWarmupViewsToLocal().then(() => render());
+  }
+  /* Также один раз пытаемся подтянуть незаконченный тренажёр с другого
+     устройства (test_progress). Если в БД свежее чем в localStorage —
+     применится и появится тост «↩ Восстановлен прогресс с другого устройства». */
+  if(!STATE._testProgressDbSynced && MY_PROFILE && MY_PROFILE.id){
+    STATE._testProgressDbSynced = true;
+    tryRestoreTestProgressFromDb();
   }
   /* То же самое для постов дней интенсива — иначе плашка/бейдж не считают
      новые посты дней, пока ученик сам не зашёл в таб «Дни». */
