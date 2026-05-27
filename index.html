@@ -862,11 +862,38 @@ if(typeof document !== 'undefined'){
     };
   }
 
+  /* CDN-rotation guard: Cloudflare Pages раздаёт страницу с разных нод,
+     ETag может слегка отличаться между ними. Без защиты плашка «новая
+     версия» появлялась снова и снова после каждого reload. Поэтому
+     показываем её ТОЛЬКО если новый ETag подтвердился ещё одним запросом
+     через 30 секунд (т.е. изменение реально стабильно, а не CDN-«моргание»).
+     Прецедент 27.05.2026. */
+  let candidateKey = null;
   async function check(){
     const k = await probeKey();
     if(!k) return;
     if(!baselineKey){ baselineKey = k; return; }
-    if(k !== baselineKey) showUpdateBanner();
+    if(k === baselineKey){
+      candidateKey = null;
+      return;
+    }
+    if(!candidateKey){
+      candidateKey = k;
+      /* Перепроверяем через 30 секунд — если значение то же, значит реально
+         новый деплой. Если другое (или вернулось к baseline) — это была
+         CDN-rotation, никакой плашки. */
+      setTimeout(async () => {
+        const k2 = await probeKey();
+        if(k2 && k2 === candidateKey && k2 !== baselineKey){
+          showUpdateBanner();
+        }
+        candidateKey = null;
+      }, 30 * 1000);
+    } else if(k !== candidateKey){
+      /* Между первой и второй проверкой ETag ещё раз сменился —
+         значит CDN активно «прыгает», обнуляем кандидата. */
+      candidateKey = null;
+    }
   }
 
   /* Базовый отпечаток снимаем через секунду после загрузки —
@@ -10708,19 +10735,33 @@ function modalTest(taskN){
     return out;
   };
   /* Подсветка корней в обычном тексте (sourceText) — каждый корень окрашиваем
-     ярко-жёлтым, чтобы глаз сразу находил указанные слова в потоке. */
+     ярко-жёлтым, чтобы глаз сразу находил указанные слова в потоке.
+     ПРИОРИТЕТ (повтор логики из highlightRootsInTextGlobal):
+       1) если есть <strong>…</strong> — учитель разметил вручную через **слово**
+          в редакторе банка, используем ТОЛЬКО их;
+       2) иначе fallback по корням, но без флага `g` — только первое вхождение
+          каждого корня, иначе вместе с «простая» подсвечивается «простоты» и т.п.
+     Прецедент 27.05.2026 — Ольга разметила нужные слова, а у ученика всё равно
+     загорались все формы потому что эта (локальная) копия функции не проверяла
+     <strong>. */
+  const MARK_STYLE_LOCAL = 'background:#FEF08A;padding:1px 3px;border-radius:3px;font-weight:700;text-decoration:underline;text-decoration-color:#D97706;text-decoration-thickness:2px;text-underline-offset:2px';
   const highlightRootsInText = (htmlSafe, capsWords) => {
-    if(!capsWords || !capsWords.length) return htmlSafe;
+    let html = String(htmlSafe || '');
+    /* 1) Явная разметка через <strong> — приоритет, ничего автоматического */
+    if(/<strong>/i.test(html)){
+      return html.replace(/<strong>([\s\S]*?)<\/strong>/gi,
+        '<mark style="' + MARK_STYLE_LOCAL + '">$1</mark>');
+    }
+    /* 2) Fallback по корням: только первое вхождение каждого корня */
+    if(!capsWords || !capsWords.length) return html;
     const seen = new Set();
-    let html = htmlSafe;
     capsWords.forEach(w => {
       const root = rootOfCaps(w);
       if(!root || root.length < 3 || seen.has(root)) return;
       seen.add(root);
       try {
-        const rgx = new RegExp('([А-Яа-яЁё]*' + root + '[А-Яа-яЁё]*)', 'gi');
-        /* Жирный + подчёркивание + жёлтый фон — так Ольга подчёркивает в тетради */
-        html = html.replace(rgx, '<mark style="background:#FEF08A;padding:1px 3px;border-radius:3px;font-weight:700;text-decoration:underline;text-decoration-color:#D97706;text-decoration-thickness:2px;text-underline-offset:2px">$1</mark>');
+        const rgx = new RegExp('([А-Яа-яЁё]*' + root + '[А-Яа-яЁё]*)', 'i');
+        html = html.replace(rgx, '<mark style="' + MARK_STYLE_LOCAL + '">$1</mark>');
       } catch(_){}
     });
     return html;
