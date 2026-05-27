@@ -1,0 +1,1805 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Игротека ОГЭ по русскому · Часть 1</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Unbounded:wght@400;600;800&family=Onest:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --honey: #F5B82E;
+    --honey-deep: #D89F1A;
+    --amber: #FFE38A;
+    --cream: #FFF8E7;
+    --ink: #2A1810;
+    --ink-soft: #5C3D29;
+    --bee: #3D2817;
+    --paper: #FFFCF5;
+    --green-ok: #4A8A3E;
+    --red-no: #C24545;
+    --stripe: repeating-linear-gradient(45deg, #2A1810 0 6px, transparent 6px 18px);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Onest', sans-serif;
+    background: var(--cream);
+    color: var(--ink);
+    line-height: 1.5;
+    background-image:
+      radial-gradient(circle at 10% 5%, rgba(245,184,46,0.15) 0%, transparent 30%),
+      radial-gradient(circle at 90% 80%, rgba(245,184,46,0.1) 0%, transparent 40%);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  header {
+    position: relative;
+    text-align: center;
+    padding: 60px 24px 40px;
+    background: linear-gradient(180deg, var(--amber) 0%, transparent 100%);
+  }
+  header::before {
+    content: ''; position: absolute; bottom: 0; left: 0; right: 0;
+    height: 10px; background: var(--stripe); opacity: 0.4;
+  }
+  .bee-icon { font-size: 64px; display: inline-block; animation: fly 4s ease-in-out infinite; }
+  @keyframes fly {
+    0%, 100% { transform: translate(0, 0) rotate(-5deg); }
+    50% { transform: translate(15px, -10px) rotate(8deg); }
+  }
+  h1 {
+    font-family: 'Unbounded', sans-serif;
+    font-size: clamp(2.2rem, 6vw, 3.6rem);
+    font-weight: 800;
+    color: var(--bee);
+    margin: 16px 0 8px;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+  }
+  .subtitle {
+    font-family: 'Caveat', cursive;
+    font-size: clamp(1.4rem, 3vw, 2rem);
+    color: var(--honey-deep);
+    font-weight: 700;
+  }
+  .greeting {
+    font-family: 'Onest', sans-serif;
+    font-size: 1rem;
+    color: var(--ink-soft);
+    margin-top: 16px;
+    max-width: 600px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  .source-note {
+    margin-top: 14px;
+    display: inline-block;
+    background: var(--bee);
+    color: var(--cream);
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+  }
+  .menu {
+    max-width: 900px;
+    margin: 40px auto;
+    padding: 0 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .menu-card {
+    background: var(--paper);
+    border: 3px solid var(--bee);
+    border-radius: 18px;
+    padding: 22px 20px;
+    cursor: pointer;
+    text-decoration: none;
+    color: var(--ink);
+    transition: all 0.2s ease;
+    box-shadow: 6px 6px 0 var(--bee);
+    position: relative;
+    overflow: hidden;
+  }
+  .menu-card:hover { transform: translate(-3px, -3px); box-shadow: 9px 9px 0 var(--bee); }
+  .menu-card:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--bee); }
+  .menu-card .num {
+    font-family: 'Unbounded', sans-serif;
+    font-weight: 800; color: var(--honey-deep);
+    font-size: 0.85rem; letter-spacing: 0.1em;
+  }
+  .menu-card h2 {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 1.3rem; font-weight: 600;
+    margin: 6px 0; color: var(--bee);
+  }
+  .menu-card p { font-size: 0.92rem; color: var(--ink-soft); }
+  .menu-card .badge {
+    display: inline-block;
+    background: var(--honey); color: var(--bee);
+    padding: 2px 10px; border-radius: 12px;
+    font-size: 0.75rem; font-weight: 600;
+    margin-top: 12px;
+  }
+  .game-section { display: none; max-width: 800px; margin: 0 auto; padding: 40px 20px 80px; animation: slideIn 0.4s ease; }
+  .game-section.active { display: block; }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .back-btn {
+    background: var(--bee); color: var(--cream); border: none;
+    padding: 10px 20px; border-radius: 30px; cursor: pointer;
+    font-family: 'Onest', sans-serif; font-weight: 500; font-size: 0.95rem;
+    margin-bottom: 24px; transition: transform 0.2s;
+  }
+  .back-btn:hover { transform: translateX(-4px); }
+  .game-title {
+    font-family: 'Unbounded', sans-serif; font-size: 2rem; font-weight: 800;
+    color: var(--bee); margin-bottom: 8px; line-height: 1.1;
+  }
+  .game-intro {
+    font-family: 'Caveat', cursive; font-size: 1.4rem;
+    color: var(--honey-deep); font-weight: 700; margin-bottom: 28px;
+  }
+  .score-bar {
+    background: var(--paper); border: 2px solid var(--bee);
+    border-radius: 14px; padding: 14px 20px; margin-bottom: 24px;
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 10px;
+  }
+  .score-label { font-family: 'Caveat', cursive; font-size: 1.3rem; color: var(--bee); font-weight: 700; }
+  .score-value { font-family: 'Unbounded', sans-serif; font-weight: 800; font-size: 1.4rem; color: var(--honey-deep); }
+  .progress-bar { width: 100%; height: 8px; background: var(--amber); border-radius: 4px; margin-top: 10px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--honey-deep); transition: width 0.4s ease; }
+  .question {
+    background: var(--paper); border: 3px solid var(--bee); border-radius: 18px;
+    padding: 28px 24px; margin-bottom: 20px; box-shadow: 5px 5px 0 var(--honey);
+    position: relative;
+  }
+  .question-num {
+    position: absolute; top: -16px; left: 20px;
+    background: var(--honey); color: var(--bee);
+    padding: 4px 14px; border-radius: 20px;
+    font-family: 'Unbounded', sans-serif; font-weight: 800;
+    font-size: 0.85rem; border: 2px solid var(--bee);
+  }
+  .source-tag {
+    position: absolute; top: -14px; right: 16px;
+    background: var(--bee); color: var(--cream);
+    padding: 3px 10px; border-radius: 14px;
+    font-family: 'Onest', sans-serif; font-size: 0.7rem;
+    font-weight: 500; letter-spacing: 0.05em;
+  }
+  .sentence {
+    font-size: 1.05rem; line-height: 1.7; color: var(--ink);
+    margin: 12px 0 20px; padding: 14px;
+    background: var(--amber); border-radius: 10px;
+    border-left: 4px solid var(--honey-deep);
+  }
+  .text-numbered {
+    font-size: 1rem; line-height: 1.7; color: var(--ink);
+    margin: 12px 0 20px; padding: 16px 18px;
+    background: var(--paper); border-radius: 10px;
+    border: 2px dashed var(--bee);
+  }
+  .text-numbered .num-mark {
+    display: inline-block; background: var(--honey-deep);
+    color: var(--cream); border-radius: 50%;
+    width: 22px; height: 22px; font-size: 0.75rem; font-weight: 700;
+    line-height: 22px; text-align: center; margin: 0 1px;
+    font-family: 'Unbounded', sans-serif; vertical-align: middle;
+  }
+  .options { display: flex; flex-direction: column; gap: 10px; }
+  .option-btn {
+    padding: 12px 18px; border: 2px solid var(--bee); background: var(--cream);
+    border-radius: 12px; font-family: 'Onest', sans-serif; font-size: 1rem;
+    text-align: left; cursor: pointer; transition: all 0.2s; color: var(--ink);
+    line-height: 1.4;
+  }
+  .option-btn:hover:not(:disabled) { background: var(--amber); transform: translateX(4px); }
+  .option-btn.selected { background: var(--honey); border-color: var(--honey-deep); }
+  .option-btn.correct { background: var(--green-ok); color: white; border-color: var(--green-ok); }
+  .option-btn.wrong { background: var(--red-no); color: white; border-color: var(--red-no); }
+  .option-btn.missed {
+    background: var(--paper);
+    color: var(--green-ok);
+    border: 3px dashed var(--green-ok);
+    font-weight: 700;
+  }
+  .option-btn.missed::before { content: "↳ надо было выбрать · "; font-style: italic; font-weight: 500; opacity: 0.85; }
+  .option-btn:disabled { cursor: not-allowed; }
+  .multi-hint {
+    font-size: 0.85rem; color: var(--ink-soft);
+    font-style: italic; margin-bottom: 10px;
+  }
+  .explanation {
+    margin-top: 18px; padding: 14px 16px; background: var(--cream);
+    border-radius: 10px; border-left: 4px solid var(--honey-deep);
+    font-size: 0.95rem; color: var(--ink-soft); display: none;
+    animation: slideIn 0.3s ease;
+  }
+  .explanation.show { display: block; }
+  .explanation strong { color: var(--bee); }
+  .next-btn {
+    margin-top: 16px; background: var(--honey); color: var(--bee);
+    border: 2px solid var(--bee); padding: 12px 28px; border-radius: 30px;
+    cursor: pointer; font-family: 'Unbounded', sans-serif;
+    font-weight: 600; font-size: 1rem; display: none; transition: transform 0.2s;
+  }
+  .next-btn:hover { transform: scale(1.05); }
+  .next-btn.show { display: inline-block; }
+  .check-btn {
+    background: var(--bee); color: var(--cream); border: none;
+    padding: 12px 24px; border-radius: 30px; cursor: pointer;
+    font-family: 'Onest', sans-serif; font-weight: 500; font-size: 1rem;
+    margin-top: 12px;
+  }
+  .check-btn:hover { background: var(--ink); }
+  .result-screen {
+    text-align: center; padding: 40px 20px; background: var(--paper);
+    border: 3px solid var(--bee); border-radius: 24px; box-shadow: 8px 8px 0 var(--honey);
+  }
+  .result-bees { font-size: 4rem; margin-bottom: 16px; animation: fly 2s ease-in-out infinite; }
+  .result-title { font-family: 'Unbounded', sans-serif; font-size: 2rem; font-weight: 800; color: var(--bee); margin-bottom: 12px; }
+  .result-score { font-family: 'Caveat', cursive; font-size: 2.5rem; color: var(--honey-deep); font-weight: 700; margin: 16px 0; }
+  .result-message { font-size: 1.05rem; color: var(--ink-soft); margin: 20px auto; max-width: 500px; }
+  .restart-btn {
+    margin-top: 24px; background: var(--bee); color: var(--cream); border: none;
+    padding: 14px 32px; border-radius: 30px; cursor: pointer;
+    font-family: 'Onest', sans-serif; font-weight: 500; font-size: 1rem; margin-right: 10px;
+  }
+  /* TIC-TAC-TOE */
+  .ttt-status {
+    text-align: center; font-family: 'Caveat', cursive; font-size: 1.5rem;
+    color: var(--bee); margin-bottom: 16px; min-height: 30px;
+  }
+  .ttt-board {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+    max-width: 500px; margin: 0 auto;
+  }
+  .ttt-cell {
+    aspect-ratio: 1; background: var(--paper); border: 3px solid var(--bee);
+    border-radius: 14px; cursor: pointer; padding: 10px;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    text-align: center; transition: all 0.2s; font-size: 0.78rem; line-height: 1.3;
+    color: var(--ink); font-weight: 500;
+  }
+  .ttt-cell:hover:not(.taken) { background: var(--amber); transform: scale(1.03); }
+  .ttt-cell.taken { cursor: not-allowed; opacity: 0.6; }
+  .ttt-cell.x { background: var(--honey); color: var(--bee); font-family: 'Unbounded', sans-serif; font-weight: 800; font-size: 2.5rem; }
+  .ttt-cell.o { background: var(--bee); color: var(--cream); font-family: 'Unbounded', sans-serif; font-weight: 800; font-size: 2.5rem; }
+  .modal-bg {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(42,24,16,0.7); display: none;
+    justify-content: center; align-items: center; z-index: 100; padding: 20px;
+  }
+  .modal-bg.show { display: flex; }
+  .modal {
+    background: var(--paper); border: 3px solid var(--bee);
+    border-radius: 18px; padding: 28px 24px; max-width: 600px;
+    width: 100%; box-shadow: 8px 8px 0 var(--honey); max-height: 90vh; overflow-y: auto;
+  }
+  .modal h3 { font-family: 'Unbounded', sans-serif; color: var(--bee); margin-bottom: 12px; font-size: 1.1rem; }
+  .modal .word {
+    font-family: 'Unbounded', sans-serif; font-size: 1.3rem;
+    color: var(--honey-deep); font-weight: 800; text-align: center;
+    margin: 12px 0; padding: 12px; background: var(--amber); border-radius: 10px;
+  }
+  /* PUZZLE - numbered text */
+  .puzzle-marks {
+    display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 16px 0;
+  }
+  .puzzle-mark {
+    width: 42px; height: 42px; border: 2px solid var(--bee); background: var(--cream);
+    border-radius: 10px; cursor: pointer; font-family: 'Unbounded', sans-serif;
+    font-size: 1.1rem; font-weight: 700; color: var(--bee); transition: transform 0.2s;
+  }
+  .puzzle-mark:hover { transform: scale(1.1); background: var(--amber); }
+  .puzzle-mark.selected { background: var(--honey); color: var(--bee); transform: scale(1.05); }
+  .puzzle-mark.correct-mark { background: var(--green-ok); color: white; }
+  .puzzle-mark.wrong-mark { background: var(--red-no); color: white; }
+  .puzzle-mark.missed-mark {
+    background: transparent;
+    color: var(--green-ok);
+    border: 3px dashed var(--green-ok);
+  }
+  footer {
+    text-align: center; padding: 30px 20px; color: var(--ink-soft);
+    font-family: 'Caveat', cursive; font-size: 1.2rem;
+    border-top: 3px dashed var(--bee); margin-top: 40px;
+  }
+  /* User bar + modal */
+  .user-bar {
+    position: absolute; top: 16px; right: 16px;
+    background: var(--paper); border: 2px solid var(--bee);
+    border-radius: 20px; padding: 6px 14px;
+    font-size: 0.85rem; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .user-bar:hover { background: var(--amber); }
+  .name-modal-bg {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(42,24,16,0.7); display: none;
+    justify-content: center; align-items: center;
+    z-index: 1000; padding: 20px;
+  }
+  .name-modal-bg.show { display: flex; }
+  .name-modal {
+    background: var(--paper); border: 3px solid var(--bee);
+    border-radius: 18px; padding: 28px 24px;
+    max-width: 480px; width: 100%;
+    box-shadow: 8px 8px 0 var(--honey);
+  }
+  .name-modal h3 {
+    font-family: 'Unbounded', sans-serif;
+    color: var(--bee); margin-bottom: 12px;
+  }
+  .name-input {
+    width: 100%; padding: 12px 14px;
+    border: 2px solid var(--bee); border-radius: 10px;
+    font-family: 'Onest', sans-serif; font-size: 1.1rem;
+    margin: 12px 0;
+  }
+  .name-btn {
+    background: var(--honey); color: var(--bee);
+    border: 2px solid var(--bee);
+    padding: 10px 24px; border-radius: 20px;
+    cursor: pointer; font-family: 'Onest', sans-serif;
+    font-weight: 600; font-size: 1rem;
+  }
+  /* Leaderboard menu card + section */
+  .menu-card.leaderboard { background: var(--bee); color: var(--cream); border-color: var(--honey); }
+  .menu-card.leaderboard h2 { color: var(--honey); }
+  .menu-card.leaderboard p { color: var(--amber); }
+  .menu-card.leaderboard .num { color: var(--amber); }
+  .lb-tabs {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin-bottom: 16px;
+    background: var(--paper);
+    border: 2px solid var(--bee);
+    border-radius: 14px;
+    padding: 8px;
+  }
+  .lb-tab {
+    flex: 1; min-width: 110px;
+    padding: 8px 12px;
+    background: transparent;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: 'Onest', sans-serif;
+    font-size: 0.85rem; font-weight: 500;
+    color: var(--ink-soft);
+    transition: all 0.15s;
+  }
+  .lb-tab:hover { background: var(--amber); }
+  .lb-tab.active { background: var(--honey); color: var(--bee); font-weight: 700; }
+  .lb-list { margin-top: 16px; }
+  .lb-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px;
+    background: var(--paper);
+    border: 2px solid var(--bee);
+    border-radius: 12px;
+    margin-bottom: 8px;
+  }
+  .lb-row.top-1 { background: linear-gradient(90deg, #FFD700 0%, var(--paper) 60%); }
+  .lb-row.top-2 { background: linear-gradient(90deg, #C0C0C0 0%, var(--paper) 60%); }
+  .lb-row.top-3 { background: linear-gradient(90deg, #CD7F32 0%, var(--paper) 60%); }
+  .lb-rank {
+    font-family: 'Unbounded', sans-serif; font-weight: 800;
+    font-size: 1.2rem; color: var(--honey-deep);
+    min-width: 40px;
+  }
+  .lb-name { flex: 1; font-weight: 600; color: var(--ink); margin: 0 12px; }
+  .lb-score {
+    font-family: 'Unbounded', sans-serif; font-weight: 800;
+    font-size: 1.2rem; color: var(--bee);
+  }
+  .lb-empty {
+    text-align: center; padding: 40px 20px;
+    color: var(--ink-soft); font-style: italic;
+  }
+  .lb-loading {
+    text-align: center; padding: 30px;
+    color: var(--ink-soft);
+  }
+  .lb-loading .dot {
+    display: inline-block;
+    animation: lbpulse 1.4s infinite;
+    font-size: 1.5rem;
+  }
+  .lb-loading .dot:nth-child(2) { animation-delay: 0.2s; }
+  .lb-loading .dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes lbpulse {
+    0%, 60%, 100% { opacity: 0.3; }
+    30% { opacity: 1; }
+  }
+  .saving-note {
+    margin-top: 14px; padding: 10px;
+    background: var(--cream); border-radius: 10px;
+    font-size: 0.85rem; color: var(--ink-soft);
+    font-style: italic;
+  }
+  @media (max-width: 600px) {
+    .menu-card { padding: 18px 16px; }
+    .game-title { font-size: 1.6rem; }
+    .question { padding: 24px 18px; }
+    .option-btn { padding: 10px 14px; font-size: 0.93rem; }
+    .ttt-cell { font-size: 0.65rem; padding: 6px; border-radius: 10px; }
+    .ttt-cell.x, .ttt-cell.o { font-size: 2rem; }
+    .puzzle-mark { width: 36px; height: 36px; font-size: 0.95rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bee-icon">🐝</div>
+  <h1>Игротека ОГЭ</h1>
+  <div class="subtitle">Готовимся к экзамену через игру</div>
+  <div class="greeting">Привет! Здесь 5 игр для подготовки к ОГЭ. Все задания — из открытого банка ФИПИ 2026, такие же ты встретишь на экзамене 🍯</div>
+  <div class="source-note">ОБЗ ФИПИ · ОГЭ-2026</div>
+  <div class="user-bar" onclick="changeUserName()">🐝 <span id="user-name">…</span></div>
+</header>
+
+<div id="menu" class="menu">
+  <a class="menu-card" onclick="openGame('find-correct')">
+    <div class="num">ИГРА 01</div>
+    <h2>🔍 Верные характеристики</h2>
+    <p>Прочитай текст — отметь верные характеристики предложений. Тренировка задания 3.</p>
+    <span class="badge">5 вариантов · задание 3</span>
+  </a>
+  <a class="menu-card" onclick="openGame('five-extra')">
+    <div class="num">ИГРА 02</div>
+    <h2>🎯 5 лишний</h2>
+    <p>Пять объяснений — найди НЕВЕРНОЕ. Тренировка задания 6.</p>
+    <span class="badge">8 раундов · задание 6</span>
+  </a>
+  <a class="menu-card" onclick="openGame('tic-tac-toe')">
+    <div class="num">ИГРА 03</div>
+    <h2>❌⭕ Крестики-нолики</h2>
+    <p>9 слов из ОБЗ. Объясни написание правильно — займи клетку.</p>
+    <span class="badge">Против бота · задание 6</span>
+  </a>
+  <a class="menu-card" onclick="openGame('puzzle')">
+    <div class="num">ИГРА 04</div>
+    <h2>🧩 Пунктуация-пазл</h2>
+    <p>Расставь цифры в текстах ОГЭ. Тренировка задания 5.</p>
+    <span class="badge">5 текстов · задание 5</span>
+  </a>
+  <a class="menu-card" onclick="openGame('match')">
+    <div class="num">ИГРА 05</div>
+    <h2>🃏 Правило-пример</h2>
+    <p>Подбери предложение к правилу. Тренировка задания 4.</p>
+    <span class="badge">3 раунда · задание 4</span>
+  </a>
+  <a class="menu-card leaderboard" onclick="openLeaderboard()">
+    <div class="num">⭐ ТОП-10</div>
+    <h2>🏆 Лидерборд</h2>
+    <p>Кто впереди в каждой игре. Топ-10 пчёлок по каждому соревнованию.</p>
+    <span class="badge" style="background: var(--honey); color: var(--bee);">общий рейтинг</span>
+  </a>
+</div>
+
+<!-- GAME 1: FIND CORRECT CHARACTERISTICS (task 3) -->
+<div id="find-correct" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🔍 Верные характеристики</div>
+  <div class="game-intro">Прочитай текст и отметь ВСЕ верные характеристики предложений.</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="fc-score">0</span> / <span id="fc-total">5</span></div>
+    <div class="progress-bar" style="flex-basis: 100%"><div class="progress-fill" id="fc-progress" style="width: 0%"></div></div>
+  </div>
+  <div id="fc-content"></div>
+</div>
+
+<!-- GAME 2: FIVE EXTRA (task 6) -->
+<div id="five-extra" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🎯 5 лишний</div>
+  <div class="game-intro">Найди ВСЕ верные объяснения (от 1 до 4 верных в каждом задании).</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="fx-score">0</span> / <span id="fx-total">8</span></div>
+    <div class="progress-bar" style="flex-basis: 100%"><div class="progress-fill" id="fx-progress" style="width: 0%"></div></div>
+  </div>
+  <div id="fx-content"></div>
+</div>
+
+<!-- GAME 3: TIC TAC TOE -->
+<div id="tic-tac-toe" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">❌⭕ Крестики-нолики</div>
+  <div class="game-intro">Хочешь занять клетку — объясни написание правильно. Все слова из ОБЗ ФИПИ.</div>
+  <div style="text-align: center; margin-bottom: 12px;">
+    <span style="background: var(--honey); color: var(--bee); padding: 6px 16px; border-radius: 20px; font-family: 'Unbounded', sans-serif; font-weight: 700; font-size: 0.95rem; border: 2px solid var(--bee);">
+      РАУНД <span id="ttt-round-num">1</span> из 3
+    </span>
+    <span style="margin-left: 12px; color: var(--ink-soft); font-size: 0.95rem;">
+      🐝 Побед: <strong id="ttt-wins">0</strong>
+    </span>
+  </div>
+  <div class="ttt-status" id="ttt-status">Ты ходишь крестиком. Кликни любую клетку 🐝</div>
+  <div class="ttt-board" id="ttt-board"></div>
+  <div style="text-align:center; margin-top:20px;">
+    <button class="restart-btn" id="ttt-next-round-btn" style="display: none; background: var(--honey); color: var(--bee); border: 2px solid var(--bee);" onclick="tttNextRound()">➡️ Следующий раунд</button>
+    <button class="restart-btn" onclick="tttResetGame()">🔄 Начать с раунда 1</button>
+  </div>
+</div>
+
+<div class="modal-bg" id="ttt-modal">
+  <div class="modal">
+    <h3>Верно ли объяснение?</h3>
+    <div class="word" id="ttt-word"></div>
+    <div id="ttt-question" style="margin-bottom: 16px; font-size: 0.95rem; color: var(--ink-soft); line-height: 1.5;"></div>
+    <div class="options" id="ttt-options"></div>
+  </div>
+</div>
+
+<!-- GAME 4: PUZZLE (task 5) -->
+<div id="puzzle" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🧩 Пунктуация-пазл</div>
+  <div class="game-intro">Прочитай текст и выбери все цифры, на месте которых должны стоять запятые.</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="pz-score">0</span> / <span id="pz-total">5</span></div>
+    <div class="progress-bar" style="flex-basis: 100%"><div class="progress-fill" id="pz-progress" style="width: 0%"></div></div>
+  </div>
+  <div id="pz-content"></div>
+</div>
+
+<!-- GAME 5: MATCH (task 4) -->
+<div id="match" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🃏 Правило-пример</div>
+  <div class="game-intro">Подбери к каждому правилу подходящее предложение.</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="mt-score">0</span> / <span id="mt-total">3</span></div>
+    <div class="progress-bar" style="flex-basis: 100%"><div class="progress-fill" id="mt-progress" style="width: 0%"></div></div>
+  </div>
+  <div id="mt-content"></div>
+</div>
+
+<!-- LEADERBOARD SECTION -->
+<div id="leaderboard" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🏆 Топ-10 игр</div>
+  <div class="game-intro">Лучшие пчёлки по каждой игре. Выбери игру выше — посмотри рейтинг.</div>
+  <div class="lb-tabs" id="lb-tabs"></div>
+  <div class="lb-list" id="lb-list"></div>
+</div>
+
+<!-- NAME MODAL -->
+<div class="name-modal-bg" id="name-modal">
+  <div class="name-modal">
+    <h3>🐝 Привет! Как тебя зовут?</h3>
+    <p style="font-size: 0.95rem; color: var(--ink-soft); margin-bottom: 8px;">
+      Чтобы педагог увидел твой результат в общем рейтинге, введи своё имя.
+    </p>
+    <input type="text" id="name-input" class="name-input" placeholder="Например: Лиза К." maxlength="30">
+    <button class="name-btn" onclick="saveName()">Сохранить и играть 🐝</button>
+  </div>
+</div>
+
+<footer>Игротека ОГЭ по русскому 🐝 Задания из ОБЗ ФИПИ · ЗебРус 2026</footer>
+
+<script>
+// =============== LEADERBOARD CONFIG ===============
+// ⚙️ После настройки Google Apps Script вставьте сюда полученный URL:
+const LEADERBOARD_URL = "https://script.google.com/macros/s/AKfycbx1m0nlyn_cG-4u3fZ8gWP6JwuKhmjiRaB2PrRwaKm5WRygpaQkvOmTvM1E1XsAKDj9/exec";
+
+// =============== USER NAME ===============
+function getUserName() {
+  return localStorage.getItem('crashIntensiveUserName') || '';
+}
+function setUserName(name) {
+  localStorage.setItem('crashIntensiveUserName', name);
+  document.getElementById('user-name').textContent = name || '…';
+}
+function askForName() {
+  document.getElementById('name-input').value = getUserName();
+  document.getElementById('name-modal').classList.add('show');
+}
+function saveName() {
+  const v = document.getElementById('name-input').value.trim();
+  if (v.length < 2) { alert('Пожалуйста, введи имя'); return; }
+  setUserName(v);
+  document.getElementById('name-modal').classList.remove('show');
+}
+function changeUserName() { askForName(); }
+
+// =============== ANSWER LOGGING ===============
+// Each game logs every answer as { taskId: "234 (1/1)" }
+// In the end, submitGameResults posts the whole map.
+let answersByTask = {};
+function logTaskAnswer(taskId, userAnswer, isCorrect, max) {
+  if (!taskId) return;
+  const score = isCorrect ? (max || 1) : 0;
+  answersByTask[taskId] = `${userAnswer || '—'} (${score}/${max || 1})`;
+}
+function resetAnswersLog() { answersByTask = {}; }
+
+async function submitGameResults(game, score, total) {
+  const name = getUserName();
+  if (!name) return false;
+  const payload = { name, game, score, total, answers: answersByTask };
+  if (LEADERBOARD_URL.startsWith('ВСТАВЬТЕ')) {
+    console.log('Leaderboard not configured. Would send:', payload);
+    return false;
+  }
+  try {
+    await fetch(LEADERBOARD_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      body: JSON.stringify(payload)
+    });
+    return true;
+  } catch (e) {
+    console.error('Submit error:', e);
+    return false;
+  }
+}
+
+// Compatibility
+async function submitScore(game, score) { return submitGameResults(game, score, 1); }
+// Legacy alias for older calls
+function logError(taskId, userAnswer, correctAnswer) {
+  logTaskAnswer(taskId, userAnswer, false, 1);
+}
+function resetErrorLog() { resetAnswersLog(); }
+
+// =============== LEADERBOARD UI ===============
+const GAMES = [
+  { id: 'Верные характеристики', short: '🔍 Хар-ки', max: 5 },
+  { id: '5 лишний', short: '🎯 5 лишний', max: 8 },
+  { id: 'Крестики-нолики', short: '❌⭕ Кр-нолики', max: 1 },
+  { id: 'Пунктуация-пазл', short: '🧩 Пазл', max: 5 },
+  { id: 'Правило-пример', short: '🃏 Правила', max: 3 }
+];
+let lbCurrentGame = GAMES[0].id;
+function openLeaderboard() {
+  document.getElementById('menu').style.display = 'none';
+  document.querySelector('header').style.display = 'none';
+  document.querySelectorAll('.game-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('leaderboard').classList.add('active');
+  window.scrollTo(0, 0);
+  initLB();
+}
+function initLB() {
+  const tabs = document.getElementById('lb-tabs');
+  tabs.innerHTML = GAMES.map(g => `
+    <button class="lb-tab ${g.id === lbCurrentGame ? 'active' : ''}" onclick="lbSwitch('${g.id}', this)">${g.short}</button>
+  `).join('');
+  loadLB(lbCurrentGame);
+}
+function lbSwitch(game, btn) {
+  lbCurrentGame = game;
+  document.querySelectorAll('.lb-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  loadLB(game);
+}
+async function loadLB(game) {
+  const list = document.getElementById('lb-list');
+  if (LEADERBOARD_URL.startsWith('ВСТАВЬТЕ')) {
+    list.innerHTML = '<div class="lb-empty">⚙️ Таблица лидеров ещё не настроена.<br>Педагог скоро её подключит!</div>';
+    return;
+  }
+  list.innerHTML = '<div class="lb-loading"><span class="dot">🐝</span><span class="dot">🐝</span><span class="dot">🐝</span></div>';
+  try {
+    const res = await fetch(LEADERBOARD_URL + '?game=' + encodeURIComponent(game));
+    const data = await res.json();
+    if (!data.ok || !data.top || data.top.length === 0) {
+      list.innerHTML = '<div class="lb-empty">Пока пчёлок нет 🐝<br>Будь первым(ой)!</div>';
+      return;
+    }
+    list.innerHTML = data.top.map((r, i) => `
+      <div class="lb-row ${i < 3 ? 'top-' + (i+1) : ''}">
+        <div class="lb-rank">${i+1}</div>
+        <div class="lb-name">${escapeHTML(r.name)}</div>
+        <div class="lb-score">${r.score} 🐝</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    list.innerHTML = '<div class="lb-empty">😔 Не удалось загрузить таблицу.<br>Попробуй позже.</div>';
+  }
+}
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+// =============== NAVIGATION ===============
+function openGame(id) {
+  if (!getUserName()) { askForName(); return; }
+  document.getElementById('menu').style.display = 'none';
+  document.querySelector('header').style.display = 'none';
+  document.querySelectorAll('.game-section').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  window.scrollTo(0, 0);
+  if (id === 'find-correct') initFC();
+  if (id === 'five-extra') initFX();
+  if (id === 'tic-tac-toe') initTTT();
+  if (id === 'puzzle') initPZ();
+  if (id === 'match') initMT();
+}
+function backToMenu() {
+  document.querySelectorAll('.game-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('menu').style.display = '';
+  document.querySelector('header').style.display = '';
+  window.scrollTo(0, 0);
+}
+
+// ====== GAME 1: TASK 3 — Find correct characteristics ======
+// Варианты 3–7 из ОБЗ ФИПИ 2026 (варианты 1–2 идут в презентации, эти — только для игры)
+const findCorrectData = [
+  {
+    fipiId: "C0E483",
+    text: "(1) Бурый медведь обитает по всей лесной зоне, кроме юга европейской части России, и местами в лесотундре. (2) Кожа у него тёмная, почти чёрного цвета, что способствует наименьшей теплоотдаче. (3) А мех полярных медведей выглядит белым, он лишён пигментной окраски, и шерстинки полые. (4) Медведь выглядит белым, потому что неровная внутренняя поверхность трубочек меха дробит свет и отражает его под различными углами, что и создаёт видимость белого цвета. (5) Летом мех может желтеть из-за постоянного воздействия солнечного света.",
+    options: [
+      "Предложение 1 осложнено однородными обстоятельствами и обособленным дополнением.",
+      "В сложном предложении 2 первая часть представлена односоставным назывным предложением.",
+      "Предложение 3 содержит 3 (три) грамматические основы.",
+      "Предложение 4 сложносочинённое.",
+      "Предложение 5 односоставное безличное."
+    ],
+    answer: "13"
+  },
+  {
+    fipiId: "7B8668",
+    text: "(1) В воздухе пахучей струёй разливался аромат недавно распустившихся цветов. (2) Сирень, как невеста, стояла вся в белом. (3) Подстриженные щёткой акации образовали живые зелёные стены, и в них уютно прятались крошечные садовые диванчики и чугунные круглые столики. (4) В этих нишах, напоминающих зелёные гнёздышки, хотелось отдохнуть. (5) Вообще садовник хорошо знал своё дело: зимой у него расцветали камелии, ранней весной радовали глаз тюльпаны и гиацинты.",
+    options: [
+      "В предложении 1 содержится составное глагольное сказуемое.",
+      "Предложение 2 содержит сравнительный оборот.",
+      "Предложение 3 сложносочинённое.",
+      "Предложение 4 односоставное безличное.",
+      "Предложение 5 сложное с бессоюзной и союзной сочинительной связью."
+    ],
+    answer: "234"
+  },
+  {
+    fipiId: "7A0645",
+    text: "(1) В истории человечества есть две формы коммуникации: устная и письменная. (2) Сегодня с появлением Интернета, новой сферы общения, можно утверждать, что возник некий промежуточный тип коммуникации, который в каком-то смысле является письменным (визуальным), а в каком-то — устным. (3) По способу восприятия это, без сомнения, визуальная речь, то есть воспринимаемая глазами. (4) К тому же мы можем делать длительные паузы в процессе интернет-разговора, что недопустимо во время устной беседы, так как «живой» диалог предполагает мгновенные реплики. (5) Итак, технически это письменная речь, а вот с точки зрения структуры используемого в Интернете языка, безусловно, устная.",
+    options: [
+      "Предложение 1 простое, двусоставное.",
+      "В предложении 2 последовательное подчинение придаточных.",
+      "Предложение 3 осложнено обособленным обстоятельством, выраженным деепричастным оборотом.",
+      "Предложение 4 сложное.",
+      "В предложении 5 содержится 3 (три) грамматические основы."
+    ],
+    answer: "124"
+  },
+  {
+    fipiId: "10D166",
+    text: "(1) В мировой художественной литературе немало примеров того, как с помощью слова можно описать музыку и те сложные впечатления, которые возникают у слушателя при восприятии музыкального произведения. (2) Одним из таких художников слова являлся Иван Сергеевич Тургенев. (3) Музыкальность, тонкий слух и музыкальный вкус, постоянное пребывание с раннего детства в атмосфере музыки и красоты способствовали глубокому пониманию писателем музыкального искусства и сказались на характере его творчества. (4) Произведения Тургенева в большинстве своём связаны с музыкой. (5) Музыка становится средством характеристики героев, выражением авторской позиции.",
+    options: [
+      "Предложение 1 сложноподчинённое с последовательным подчинением придаточных.",
+      "Предложение 2 неполное.",
+      "Предложение 3 односоставное, распространённое.",
+      "Предложение 4 простое двусоставное.",
+      "Предложение 5 сложное бессоюзное."
+    ],
+    answer: "14"
+  },
+  {
+    fipiId: "B63B89",
+    text: "(1) В научной деятельности перед человеком стоят две основные задачи: добыть новое знание о мире и сделать это знание достоянием общества. (2) Соответственно, выделяются и два этапа в научной деятельности человека: этап совершения открытия и этап оформления открытия, когда возникает необходимость в речевом оформлении нового знания. (3) Поэтому закономерно, что исконной формой существования научной речи стала письменная форма. (4) Во-первых, письменная форма долговременно фиксирует информацию; во-вторых, она более удобна для обнаружения неточностей и логических нарушений; наконец, она не только даёт адресату возможность устанавливать свой личный темп восприятия, но и позволяет многократно обращаться к информации: это также очень важно в научной работе. (5) Устная форма всё-таки часто используется в научном общении, но она вторична: научное произведение сначала пишут, а потом воспроизводят в устной речи.",
+    options: [
+      "Предложение 1 сложное.",
+      "Предложение 2 сложное с бессоюзной и союзной подчинительной связью.",
+      "Во второй части предложения 3 содержится составное именное сказуемое.",
+      "В предложении 4 содержится 3 (три) грамматические основы.",
+      "Предложение 5 сложное с союзной сочинительной и бессоюзной связью."
+    ],
+    answer: "35"
+  }
+];
+
+let fcState = { cur: 0, score: 0, sel: [] };
+function initFC() {
+  fcState = { cur: 0, score: 0, sel: [] };
+  resetErrorLog();
+  document.getElementById('fc-score').textContent = 0;
+  document.getElementById('fc-total').textContent = findCorrectData.length;
+  document.getElementById('fc-progress').style.width = '0%';
+  renderFC();
+}
+function renderFC() {
+  const c = document.getElementById('fc-content');
+  if (fcState.cur >= findCorrectData.length) {
+    showResult(c, fcState.score, findCorrectData.length, 'initFC');
+    return;
+  }
+  const q = findCorrectData[fcState.cur];
+  fcState.sel = [];
+  c.innerHTML = `
+    <div class="question">
+      <div class="question-num">ВАРИАНТ ${fcState.cur + 1}</div>
+      <div class="source-tag">ФИПИ ${q.fipiId}</div>
+      <div class="text-numbered">${q.text}</div>
+      <div class="multi-hint">⚠️ Можно выбрать НЕСКОЛЬКО ответов. Отметь все верные характеристики:</div>
+      <div class="options" id="fc-opts"></div>
+      <button class="check-btn" id="fc-check" onclick="fcCheck()">Проверить →</button>
+      <div class="explanation" id="fc-exp"></div>
+      <button class="next-btn" id="fc-next" onclick="fcNext()">Дальше →</button>
+    </div>
+  `;
+  const opts = document.getElementById('fc-opts');
+  q.options.forEach((opt, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'option-btn';
+    btn.textContent = (i + 1) + ') ' + opt;
+    btn.onclick = () => fcToggle(i + 1, btn);
+    opts.appendChild(btn);
+  });
+}
+function fcToggle(n, btn) {
+  if (fcState.sel.includes(n)) {
+    fcState.sel = fcState.sel.filter(x => x !== n);
+    btn.classList.remove('selected');
+  } else {
+    fcState.sel.push(n);
+    btn.classList.add('selected');
+  }
+}
+function fcCheck() {
+  const q = findCorrectData[fcState.cur];
+  const correctSet = q.answer.split('').map(Number).sort();
+  const userSet = [...fcState.sel].sort();
+  const isCorrect = JSON.stringify(correctSet) === JSON.stringify(userSet);
+  logTaskAnswer(q.fipiId, userSet.join('') || '—', isCorrect, 1);
+  const opts = document.querySelectorAll('#fc-opts .option-btn');
+  opts.forEach((b, i) => {
+    b.disabled = true;
+    b.classList.remove('selected');
+    const n = i + 1;
+    const userPicked = userSet.includes(n);
+    const isRight = correctSet.includes(n);
+    if (userPicked && isRight) b.classList.add('correct');
+    else if (userPicked && !isRight) b.classList.add('wrong');
+    else if (!userPicked && isRight) b.classList.add('missed');
+    // else: untouched
+  });
+  document.getElementById('fc-check').style.display = 'none';
+  const exp = document.getElementById('fc-exp');
+  const userAnsStr = userSet.length > 0 ? userSet.join(', ') : '—';
+  const correctStr = q.answer.split('').join(', ');
+  const answerLine = `<div style="background: var(--paper); padding: 10px 14px; border-radius: 8px; margin: 10px 0; border: 2px solid var(--bee); font-family: 'Unbounded', sans-serif; font-size: 1rem;">
+    🐝 <strong>Твой ответ:</strong> <span style="color: ${isCorrect ? 'var(--green-ok)' : 'var(--red-no)'};">${userAnsStr}</span>
+    &nbsp;·&nbsp; <strong>Правильный:</strong> <span style="color: var(--green-ok);">${correctStr}</span>
+  </div>`;
+  if (isCorrect) {
+    fcState.score++;
+    document.getElementById('fc-score').textContent = fcState.score;
+    exp.innerHTML = answerLine + `<strong>🎉 Точно!</strong>`;
+  } else {
+    exp.innerHTML = answerLine + `<span style="font-size: 0.88rem; color: var(--ink-soft);">🟢 Зелёным — то, что ты выбрал правильно. 🔴 Красным — то, что выбрал зря. 🟢 Пунктиром — то, что надо было выбрать, но пропустил.</span>`;
+  }
+  exp.classList.add('show');
+  document.getElementById('fc-next').classList.add('show');
+  document.getElementById('fc-progress').style.width = ((fcState.cur + 1) / findCorrectData.length * 100) + '%';
+}
+function fcNext() { fcState.cur++; renderFC(); }
+
+// ====== GAME 2: TASK 6 — 5 EXTRA (find ALL correct) ======
+// 8 свежих заданий 6 из ОБЗ ФИПИ — НЕ пересекаются с заданиями в эфире и домашке
+const fiveExtraData = [
+  {
+    fipiId: "399AFA",
+    options: [
+      "(говорит) ПО-ГРУЗИНСКИ — написание наречия через дефис определяется наличием приставки ПО- и суффикса -И.",
+      "СЖИМАТЬ (кулаки) — правописание чередующейся гласной в корне определяется наличием суффикса -А-.",
+      "НЕ НАМЕРЕН — частица НЕ с кратким страдательным причастием пишется раздельно.",
+      "ПЛЕЩУЩИЙСЯ — в действительном причастии настоящего времени, образованном от основы глагола I спряжения, пишется суффикс -УЩ-.",
+      "СКОРРЕКТИРОВАТЬ — на конце приставки перед буквой, обозначающей глухой согласный звук, пишется буква С."
+    ],
+    answer: "124"
+  },
+  {
+    fipiId: "22A925",
+    options: [
+      "РОСКОШНЫЙ — в корне слова с чередующейся гласной перед -С- пишется буква О.",
+      "ПРИМОРСКИЙ — написание приставки определяется её значением — расположение вблизи.",
+      "ЧИСТОСЕРДЕЧНЫЙ — сложное имя прилагательное, образованное на основе подчинительного словосочетания, пишется слитно.",
+      "БЛЕДНОЛИЦЫЙ (мальчик) — в суффиксе имени прилагательного после Ц пишется буква Ы.",
+      "(отнюдь) НЕ РЕШИТЕЛЬНЫЙ (поступок) — раздельное написание частицы НЕ с именем прилагательным определяется словом, усиливающим отрицание."
+    ],
+    answer: "235"
+  },
+  {
+    fipiId: "9CED21",
+    options: [
+      "ВОЗРАСТАТЬ — написание безударной чередующейся гласной в корне слова определяется сочетанием последующих согласных.",
+      "(дуб) МОГУЧ — в кратком имени прилагательном после шипящего согласного на конце слова буква Ь не пишется.",
+      "С ЛУЧОМ — в суффиксе имени существительного после шипящего согласного под ударением пишется буква О.",
+      "(ещё) НЕ ТОПЛЕННАЯ (печь) — частица НЕ с кратким причастием пишется раздельно.",
+      "ЛЕЧАЩИЙ (врач) — в суффиксе действительного причастия настоящего времени, образованного от основы глагола II спряжения, пишется буква А."
+    ],
+    answer: "125"
+  },
+  {
+    fipiId: "82332D",
+    options: [
+      "ПРЕМУДРЫЙ — выбор приставки определяется её значением, близким к значению слова очень.",
+      "(до новых) ВСТРЕЧ — в форме родительного падежа множественного числа существительного 3-го склонения после шипящего Ь не пишется.",
+      "КОЖАНЫЙ — в имени прилагательном, образованном с помощью суффикса -АН-, пишется одна буква Н.",
+      "ЗАКЛЕИЛ (конверт) — перед суффиксом -Л- глагола прошедшего времени пишется та же буква, что и перед -ТЬ в неопределённой форме глагола.",
+      "ДРУЖЕЛЮБНЫЙ (вид) — в сложном слове после мягкого согласного пишется соединительная гласная Е."
+    ],
+    answer: "134"
+  },
+  {
+    fipiId: "EC01DB",
+    options: [
+      "ПОДРИСОВАТЬ — на конце приставки перед звонким согласным пишется буква Д.",
+      "ПЕШЕХОД — в сложном слове после шипящего согласного пишется соединительная гласная Е.",
+      "УВИДЕВШИЙ — правописание гласной в суффиксе причастия прошедшего времени зависит от спряжения глагола.",
+      "ОБЪЕЗДИЛ (всю страну) — после приставки, оканчивающейся на согласный, перед буквой Е пишется разделительный твёрдый знак.",
+      "ЧИТАЕТ — в личном окончании глагола I спряжения пишется буква Е."
+    ],
+    answer: "245"
+  },
+  {
+    fipiId: "A33EA4",
+    options: [
+      "ИЗЖЕЛТА-КРАСНЫЙ — сложное имя прилагательное, обозначающее оттенок цвета, пишется через дефис.",
+      "ЛОМАНАЯ (линия) — в имени прилагательном, образованном с помощью суффикса -АН-, пишется одна буква Н.",
+      "КОЛОРИТ — в корне слова пишутся непроверяемые гласные.",
+      "(вещь) НЕ ПОГЛАЖЕНА — частица НЕ с деепричастием пишется раздельно.",
+      "КЛАНЯВШИЙСЯ — в причастии прошедшего времени перед суффиксом -ВШ- пишется та же буква, что и перед -ТЬ в неопределённой форме глагола."
+    ],
+    answer: "135"
+  },
+  {
+    fipiId: "C77FAC",
+    options: [
+      "РАСЧЕРТИТЬ — на конце приставки перед буквой, обозначающей глухой согласный звук, пишется буква С.",
+      "ПРОСЕЯННЫЙ (сквозь сито) — написание гласной в суффиксе страдательного причастия прошедшего времени определяется спряжением глагола.",
+      "(овощи) СВАРЕНЫ — в краткой форме причастия пишется одна буква Н.",
+      "ПАЛЬЧИК — в имени существительном пишется суффикс -ИК-, потому что при склонении гласный И выпадает.",
+      "НЕУДОБНЫЙ — НЕ пишется слитно с именем прилагательным, которое не употребляется без НЕ."
+    ],
+    answer: "13"
+  },
+  {
+    fipiId: "063191",
+    options: [
+      "ВЫМОКНУТЬ (под дождём) — написание безударной чередующейся гласной в корне зависит от лексического значения.",
+      "НЕ ДУМАЯ — глагол с частицей НЕ пишется раздельно.",
+      "(резать) НОЖОМ — в суффиксе имени существительного после шипящего согласного под ударением пишется буква О.",
+      "(ландыш) ПАХУЧ — в кратком имени прилагательном после шипящего согласного на конце слова буква Ь не пишется.",
+      "ВОСТОРЖЕННО (смотрел) — в наречии на -о пишется столько букв Н, сколько и в слове, от которого оно образовано."
+    ],
+    answer: "145"
+  }
+];
+
+let fxState = { cur: 0, score: 0, sel: [] };
+function initFX() {
+  fxState = { cur: 0, score: 0, sel: [] };
+  resetErrorLog();
+  document.getElementById('fx-score').textContent = 0;
+  document.getElementById('fx-total').textContent = fiveExtraData.length;
+  document.getElementById('fx-progress').style.width = '0%';
+  renderFX();
+}
+function renderFX() {
+  const c = document.getElementById('fx-content');
+  if (fxState.cur >= fiveExtraData.length) {
+    showResult(c, fxState.score, fiveExtraData.length, 'initFX');
+    return;
+  }
+  const q = fiveExtraData[fxState.cur];
+  fxState.sel = [];
+  c.innerHTML = `
+    <div class="question">
+      <div class="question-num">РАУНД ${fxState.cur + 1}</div>
+      <div class="source-tag">ФИПИ ${q.fipiId}</div>
+      <div class="multi-hint">⚠️ Отметь ВСЕ верные объяснения (их может быть от 2 до 4):</div>
+      <div class="options" id="fx-opts"></div>
+      <button class="check-btn" id="fx-check" onclick="fxCheck()">Проверить →</button>
+      <div class="explanation" id="fx-exp"></div>
+      <button class="next-btn" id="fx-next" onclick="fxNext()">Дальше →</button>
+    </div>
+  `;
+  const opts = document.getElementById('fx-opts');
+  q.options.forEach((opt, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'option-btn';
+    btn.textContent = (i + 1) + ') ' + opt;
+    btn.onclick = () => fxToggle(i + 1, btn);
+    opts.appendChild(btn);
+  });
+}
+function fxToggle(n, btn) {
+  if (fxState.sel.includes(n)) {
+    fxState.sel = fxState.sel.filter(x => x !== n);
+    btn.classList.remove('selected');
+  } else {
+    fxState.sel.push(n);
+    btn.classList.add('selected');
+  }
+}
+function fxCheck() {
+  const q = fiveExtraData[fxState.cur];
+  const correctSet = q.answer.split('').map(Number).sort();
+  const userSet = [...fxState.sel].sort();
+  const isCorrect = JSON.stringify(correctSet) === JSON.stringify(userSet);
+  logTaskAnswer(q.fipiId, userSet.join('') || '—', isCorrect, 1);
+  const opts = document.querySelectorAll('#fx-opts .option-btn');
+  opts.forEach((b, i) => {
+    b.disabled = true;
+    b.classList.remove('selected');
+    const n = i + 1;
+    const userPicked = userSet.includes(n);
+    const isRight = correctSet.includes(n);
+    if (userPicked && isRight) b.classList.add('correct');
+    else if (userPicked && !isRight) b.classList.add('wrong');
+    else if (!userPicked && isRight) b.classList.add('missed');
+  });
+  document.getElementById('fx-check').style.display = 'none';
+  const exp = document.getElementById('fx-exp');
+  const userAnsStr = userSet.length > 0 ? userSet.join(', ') : '—';
+  const correctStr = q.answer.split('').join(', ');
+  const answerLine = `<div style="background: var(--paper); padding: 10px 14px; border-radius: 8px; margin: 10px 0; border: 2px solid var(--bee); font-family: 'Unbounded', sans-serif; font-size: 1rem;">
+    🐝 <strong>Твой ответ:</strong> <span style="color: ${isCorrect ? 'var(--green-ok)' : 'var(--red-no)'};">${userAnsStr}</span>
+    &nbsp;·&nbsp; <strong>Правильный:</strong> <span style="color: var(--green-ok);">${correctStr}</span>
+  </div>`;
+  if (isCorrect) {
+    fxState.score++;
+    document.getElementById('fx-score').textContent = fxState.score;
+    exp.innerHTML = answerLine + `<strong>🎯 В точку!</strong>`;
+  } else {
+    exp.innerHTML = answerLine + `<span style="font-size: 0.88rem; color: var(--ink-soft);">🟢 Зелёным — то, что ты выбрал правильно. 🔴 Красным — то, что выбрал зря. 🟢 Пунктиром — то, что надо было выбрать.</span>`;
+  }
+  exp.classList.add('show');
+  document.getElementById('fx-next').classList.add('show');
+  document.getElementById('fx-progress').style.width = ((fxState.cur + 1) / fiveExtraData.length * 100) + '%';
+}
+function fxNext() { fxState.cur++; renderFX(); }
+
+// ====== GAME 3: TIC TAC TOE — слова из заданий, НЕ использованных в эфире ======
+const tttRounds = [
+  [
+    {
+      word: "ОТТАЯВШИЙ",
+      fipiId: "FA317A",
+      explanation: "перед суффиксом -ВШ- действительного причастия прошедшего времени пишется та же буква, что перед -ТЬ в неопределённой форме глагола, от которого оно образовано.",
+      correct: true,
+      why: "✓ Правописание причастий — правило верное."
+    },
+    {
+      word: "ПРЕГРАДА",
+      fipiId: "05A40D",
+      explanation: "написание приставки определяется её значением, близким к значению приставки пере-.",
+      correct: true,
+      why: "✓ Приставка ПРЕ-/ПРИ- определяется значением. Здесь правило сформулировано верно."
+    },
+    {
+      word: "ЛЫЖНИЦЫ",
+      fipiId: "F17BBC",
+      explanation: "в окончании имени существительного после Ц пишется буква Ы.",
+      correct: true,
+      why: "✓ Правило про Ь/Ъ верное."
+    },
+    {
+      word: "УХАЖЁР",
+      fipiId: "E3A4D6",
+      explanation: "в корне имени существительного после шипящего согласного под ударением пишется буква Ё.",
+      correct: false,
+      why: "❌ Возможно, корень с чередованием — он НЕ проверяется ударением."
+    },
+    {
+      word: "ДРУЖЕЛЮБНЫЙ (вид)",
+      fipiId: "82332D",
+      explanation: "в сложном слове после мягкого согласного пишется соединительная гласная Е.",
+      correct: false,
+      why: "❌ Объяснение неверное — формулировка не подходит для этого слова."
+    },
+    {
+      word: "ЗАНИМАТЬСЯ",
+      fipiId: "47986B",
+      explanation: "написание безударной чередующейся гласной в корне определяется наличием суффикса -А-.",
+      correct: true,
+      why: "✓ Корень с чередованием. Правило верное."
+    },
+    {
+      word: "(взглянул) ИСКОСА",
+      fipiId: "8932A4",
+      explanation: "написание суффикса -А в наречии определяется наличием приставки ИС-.",
+      correct: true,
+      why: "✓ Это наречие — правило про дефис/слитное написание верное."
+    },
+    {
+      word: "ВЛАДЕЮЩИЙ",
+      fipiId: "DA4522",
+      explanation: "в действительном причастии настоящего времени, образованном от основы глагола II спряжения, пишется суффикс -ЮЩ-.",
+      correct: false,
+      why: "❌ Проверь, что это: окончание или суффикс? Часто ФИПИ подменяет одно другим."
+    },
+    {
+      word: "(ещё) НЕ ТОПЛЕННАЯ (печь)",
+      fipiId: "9CED21",
+      explanation: "частица НЕ с кратким причастием пишется раздельно.",
+      correct: false,
+      why: "❌ Объяснение неверное — формулировка не подходит для этого слова."
+    }
+  ],
+  [
+    {
+      word: "ОКОНЧЕННАЯ (работа)",
+      fipiId: "8020E1",
+      explanation: "в суффиксе имени прилагательного, образованного от имени существительного с помощью суффикса -ЕНН-, пишется НН.",
+      correct: false,
+      why: "❌ Проверь, что это: окончание или суффикс? Часто ФИПИ подменяет одно другим."
+    },
+    {
+      word: "СТЕКОЛЬЩИК",
+      fipiId: "738693",
+      explanation: "в слове пишется разделительный Ь.",
+      correct: false,
+      why: "❌ Объяснение неверное — формулировка не подходит для этого слова."
+    },
+    {
+      word: "ПЕСЧАНЫЙ",
+      fipiId: "FA317A",
+      explanation: "в имени прилагательном, образованном с помощью суффикса -АН-, пишется одна буква Н.",
+      correct: true,
+      why: "✓ Правило про Ь/Ъ верное."
+    },
+    {
+      word: "ДИСЦИПЛИНА",
+      fipiId: "959156",
+      explanation: "в корне слова пишутся непроверяемые безударные гласные.",
+      correct: true,
+      why: "✓ Правило сформулировано верно."
+    },
+    {
+      word: "ВСТРЕЧЕННЫЙ",
+      fipiId: "F23F0C",
+      explanation: "в полном страдательном причастии прошедшего времени совершенного вида пишется НН.",
+      correct: true,
+      why: "✓ Правописание причастий — правило верное."
+    },
+    {
+      word: "(консультация с) ВРАЧОМ",
+      fipiId: "B85CE0",
+      explanation: "в суффиксе имени существительного после шипящего согласного под ударением пишется буква О.",
+      correct: false,
+      why: "❌ Возможно, корень с чередованием — он НЕ проверяется ударением."
+    },
+    {
+      word: "ИСПЕЧЬ",
+      fipiId: "360AFE",
+      explanation: "на конце неопределённой формы глагола после шипящих согласных пишется буква Ь.",
+      correct: true,
+      why: "✓ Правило сформулировано верно."
+    },
+    {
+      word: "(верен) ПО-ПРЕЖНЕМУ",
+      fipiId: "966B67",
+      explanation: "наречие пишется через дефис, потому что оно образовано от основы имени прилагательного с помощью приставки ПО- и суффикса -ЕМУ.",
+      correct: true,
+      why: "✓ Приставка ПРЕ-/ПРИ- определяется значением. Здесь правило сформулировано верно."
+    },
+    {
+      word: "РАСКЛЕИВШИЙ",
+      fipiId: "22D4B1",
+      explanation: "написание гласной перед суффиксом -ВШ- действительного причастия прошедшего времени зависит от принадлежности к спряжению глагола.",
+      correct: false,
+      why: "❌ Проверь, что это: окончание или суффикс? Часто ФИПИ подменяет одно другим."
+    }
+  ],
+  [
+    {
+      word: "КАРТИННАЯ (галерея)",
+      fipiId: "772834",
+      explanation: "в имени прилагательном, образованном от имени существительного с основой на -Н, пишется НН.",
+      correct: true,
+      why: "✓ Правило про Ь/Ъ верное."
+    },
+    {
+      word: "ЗАВЕДОВАТЬ",
+      fipiId: "A51FE5",
+      explanation: "правописание суффикса зависит от формы настоящего времени 1-го лица единственного числа этого глагола.",
+      correct: true,
+      why: "✓ Правило сформулировано верно."
+    },
+    {
+      word: "НЕСКЛОНЯЕМЫЕ (существительные)",
+      fipiId: "E86334",
+      explanation: "правописание гласной в суффиксе причастия настоящего времени определяется принадлежностью ко II спряжению глагола, от основы которого оно образовано.",
+      correct: false,
+      why: "❌ Проверь, что это: окончание или суффикс? Часто ФИПИ подменяет одно другим."
+    },
+    {
+      word: "ЗАМИРАТЬ",
+      fipiId: "E6FF38",
+      explanation: "безударную гласную в корне можно проверить словом мир.",
+      correct: false,
+      why: "❌ Объяснение неверное — формулировка не подходит для этого слова."
+    },
+    {
+      word: "ПОЛАСКАТЬ (котёнка)",
+      fipiId: "A51FE5",
+      explanation: "в корне слова пишется непроверяемая гласная.",
+      correct: false,
+      why: "❌ Объяснение неверное — формулировка не подходит для этого слова."
+    },
+    {
+      word: "ТАЮЩИЙ (лёд)",
+      fipiId: "05A40D",
+      explanation: "в действительном причастии настоящего времени, образованном от основы глагола I спряжения, пишется суффикс -ЮЩ-.",
+      correct: true,
+      why: "✓ Правописание причастий — правило верное."
+    },
+    {
+      word: "СЪЁЖИТЬСЯ",
+      fipiId: "A51FE5",
+      explanation: "буква разделительный Ъ пишется после приставки, оканчивающейся на согласный, перед буквой Ё.",
+      correct: true,
+      why: "✓ Правило про Ь/Ъ верное."
+    },
+    {
+      word: "ПЯТЬДЕСЯТ",
+      fipiId: "9AAB6F",
+      explanation: "в имени числительном пишется разделительный Ь.",
+      correct: false,
+      why: "❌ Объяснение неверное — формулировка не подходит для этого слова."
+    },
+    {
+      word: "ГОРЕЧЬ",
+      fipiId: "E6FF38",
+      explanation: "в имени существительном 3-го склонения после шипящего согласного пишется буква Ь.",
+      correct: true,
+      why: "✓ Правило про Ь/Ъ верное."
+    }
+  ]
+];
+let tttRoundIdx = 0;
+let tttWins = 0;
+
+let tttBoard, tttPlayerTurn, tttCurrentCell;
+
+function initTTT() {
+  // Full reset: round 1, wins 0
+  tttRoundIdx = 0;
+  tttWins = 0;
+  resetErrorLog();
+  tttSetupRound();
+}
+
+function tttResetGame() {
+  initTTT();
+}
+
+function tttNextRound() {
+  if (tttRoundIdx >= tttRounds.length - 1) return;
+  tttRoundIdx++;
+  tttSetupRound();
+}
+
+function tttSetupRound() {
+  tttBoard = [null, null, null, null, null, null, null, null, null];
+  tttPlayerTurn = true;
+  tttCurrentCell = null;
+  document.getElementById('ttt-round-num').textContent = tttRoundIdx + 1;
+  document.getElementById('ttt-wins').textContent = tttWins;
+  document.getElementById('ttt-next-round-btn').style.display = 'none';
+  document.getElementById('ttt-status').textContent = 'Ты ходишь крестиком 🐝 Кликни любую клетку';
+  document.getElementById('ttt-modal').classList.remove('show');
+  const board = document.getElementById('ttt-board');
+  board.innerHTML = '';
+  const currentWords = tttRounds[tttRoundIdx];
+  for (let i = 0; i < 9; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'ttt-cell';
+    cell.textContent = currentWords[i].word;
+    cell.onclick = () => tttCellClick(i);
+    board.appendChild(cell);
+  }
+}
+
+function tttCellClick(idx) {
+  if (!tttPlayerTurn || tttBoard[idx] !== null) return;
+  tttCurrentCell = idx;
+  const w = tttRounds[tttRoundIdx][idx];
+  document.getElementById('ttt-word').textContent = w.word;
+  document.getElementById('ttt-question').innerHTML =
+    `<strong>Объяснение из ОБЗ ФИПИ:</strong> «${w.explanation}»<br><br>Это объяснение верное или нет?`;
+  const opts = document.getElementById('ttt-options');
+  opts.innerHTML = '';
+  const btnYes = document.createElement('button');
+  btnYes.className = 'option-btn';
+  btnYes.textContent = '✓ Верное';
+  btnYes.onclick = () => tttAnswer(true, w.correct, w.why);
+  const btnNo = document.createElement('button');
+  btnNo.className = 'option-btn';
+  btnNo.textContent = '✗ Неверное';
+  btnNo.onclick = () => tttAnswer(false, w.correct, w.why);
+  opts.appendChild(btnYes);
+  opts.appendChild(btnNo);
+  document.getElementById('ttt-modal').classList.add('show');
+}
+
+function tttFinishRound(playerWon) {
+  // Called when this round ends (win/lose/draw)
+  if (playerWon) tttWins++;
+  document.getElementById('ttt-wins').textContent = tttWins;
+
+  const isLast = (tttRoundIdx >= tttRounds.length - 1);
+  if (isLast) {
+    // Final result message
+    const totalPossible = tttRounds.length;
+    let finalMsg;
+    if (tttWins === totalPossible) {
+      finalMsg = `🏆 Игра окончена! ${tttWins}/${totalPossible} — все раунды твои! 🐝`;
+    } else if (tttWins >= totalPossible - 1) {
+      finalMsg = `🐝 Игра окончена! ${tttWins}/${totalPossible} — отличный результат`;
+    } else if (tttWins >= 1) {
+      finalMsg = `🐝 Игра окончена! Победы: ${tttWins}/${totalPossible}. Повторим алгоритмы и попробуем ещё раз!`;
+    } else {
+      finalMsg = `Игра окончена. Не сдавайся — ошибки сейчас учат лучше всего!`;
+    }
+    document.getElementById('ttt-status').textContent = finalMsg;
+    // Submit final score
+    submitGameResults('Крестики-нолики', tttWins, tttRounds.length);
+  } else {
+    // Show next-round button
+    document.getElementById('ttt-next-round-btn').style.display = 'inline-block';
+  }
+}
+
+function tttAnswer(userSaidYes, isCorrect, why) {
+  const opts = document.querySelectorAll('#ttt-options .option-btn');
+  opts.forEach(b => b.disabled = true);
+  const userCorrect = (userSaidYes === isCorrect);
+  if (userCorrect) {
+    opts[userSaidYes ? 0 : 1].classList.add('correct');
+  } else {
+    opts[userSaidYes ? 0 : 1].classList.add('wrong');
+    opts[isCorrect ? 0 : 1].classList.add('correct');
+  }
+  // Log answer
+  const w = tttRounds[tttRoundIdx][tttCurrentCell];
+  logTaskAnswer(w.fipiId, userSaidYes ? 'верное' : 'неверное', userCorrect, 1);
+
+  // Show hint inline
+  const hint = document.createElement('div');
+  hint.style.marginTop = '12px';
+  hint.style.padding = '10px';
+  hint.style.background = 'var(--cream)';
+  hint.style.borderRadius = '8px';
+  hint.style.fontSize = '0.88rem';
+  hint.style.color = 'var(--ink-soft)';
+  hint.innerHTML = '<strong>Почему:</strong> ' + why;
+  document.getElementById('ttt-options').appendChild(hint);
+
+  setTimeout(() => {
+    document.getElementById('ttt-modal').classList.remove('show');
+    const cells = document.querySelectorAll('.ttt-cell');
+    if (userCorrect) {
+      tttBoard[tttCurrentCell] = 'X';
+      cells[tttCurrentCell].classList.add('x', 'taken');
+      cells[tttCurrentCell].textContent = '×';
+      if (checkTTTWin('X')) {
+        document.getElementById('ttt-status').textContent = '🎉 Раунд выигран! +1 победа 🐝';
+        tttFinishRound(true);
+        return;
+      }
+      if (tttBoard.every(c => c !== null)) {
+        document.getElementById('ttt-status').textContent = 'Ничья! Хорошая игра 🐝';
+        tttFinishRound(false);
+        return;
+      }
+      tttPlayerTurn = false;
+      document.getElementById('ttt-status').textContent = 'Ход бота...';
+      setTimeout(botMove, 800);
+    } else {
+      tttBoard[tttCurrentCell] = 'O';
+      cells[tttCurrentCell].classList.add('o', 'taken');
+      cells[tttCurrentCell].textContent = 'О';
+      if (checkTTTWin('O')) {
+        document.getElementById('ttt-status').textContent = '😔 Бот собрал ряд в этом раунде.';
+        tttFinishRound(false);
+        return;
+      }
+      if (tttBoard.every(c => c !== null)) {
+        document.getElementById('ttt-status').textContent = 'Ничья 🐝';
+        tttFinishRound(false);
+        return;
+      }
+      document.getElementById('ttt-status').textContent = 'Промах! Клетка ушла боту. Твой ход 🐝';
+    }
+  }, 2500);
+}
+function botMove() {
+  const empty = [];
+  for (let i = 0; i < 9; i++) if (tttBoard[i] === null) empty.push(i);
+  if (empty.length === 0) return;
+  const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+  let move = null;
+  for (const ln of lines) {
+    const o = ln.filter(i => tttBoard[i] === 'O').length;
+    const x = ln.filter(i => tttBoard[i] === 'X').length;
+    if (o === 2 && x === 0) { move = ln.find(i => tttBoard[i] === null); break; }
+  }
+  if (move === null) {
+    for (const ln of lines) {
+      const x = ln.filter(i => tttBoard[i] === 'X').length;
+      const o = ln.filter(i => tttBoard[i] === 'O').length;
+      if (x === 2 && o === 0) { move = ln.find(i => tttBoard[i] === null); break; }
+    }
+  }
+  if (move === null) move = empty[Math.floor(Math.random() * empty.length)];
+  tttBoard[move] = 'O';
+  const cells = document.querySelectorAll('.ttt-cell');
+  cells[move].classList.add('o', 'taken');
+  cells[move].textContent = 'О';
+  if (checkTTTWin('O')) {
+    document.getElementById('ttt-status').textContent = '😔 Бот собрал ряд в этом раунде.';
+    tttFinishRound(false);
+    return;
+  }
+  if (tttBoard.every(c => c !== null)) {
+    document.getElementById('ttt-status').textContent = 'Ничья 🐝';
+    tttFinishRound(false);
+    return;
+  }
+  tttPlayerTurn = true;
+  document.getElementById('ttt-status').textContent = 'Твой ход 🐝';
+}
+function checkTTTWin(p) {
+  const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+  return lines.some(ln => ln.every(i => tttBoard[i] === p));
+}
+
+// ====== GAME 4: PUZZLE — 5 свежих текстов задания 5 из ОБЗ ФИПИ ======
+const puzzleData = [
+  {
+    fipiId: "39BCA6",
+    text: "В природе чувствовалась (1) какая-то тоска. Неподвижный и отяжелевший от сырости воздух (2) казалось (3) навалился на землю (4) и от этого всё кругом притаилось. Хмурое небо (5) мокрая растительность (6) лужи стоячей воды и царившая кругом тишина (7) всё свидетельствовало о ненастье (8) которое сделало передышку (9) чтобы снова вот-вот разразиться дождём с ещё большей силой.",
+    correctNumbers: [2,3,4,5,6,8,9],
+    answer: "2345689",
+    hint: "Запятые вокруг вводного слова «казалось» (2, 3), перед И в ССП (4), между однородными подлежащими (5, 6), перед придаточным определительным (8) и перед придаточным цели (9). Цифра 7 — тире перед обобщающим словом «всё», там стоит ТИРЕ, а не запятая."
+  },
+  {
+    fipiId: "3BF556",
+    text: "Водопад Серебряные струи (1) спрятавшийся среди заповедного букового леса в Большом каньоне (2) считается одной из достопримечательностей Крыма. Это (3) покрытая зелёной моховой «шапкой» (4) скала (5) по которой стекают тоненькие потоки воды (6) и падают затем с высоты 6 метров. В ясную погоду струи водопада переливаются на солнце (7) играя серебром (8) и становится понятно (9) откуда взялось такое живописное название.",
+    correctNumbers: [1,2,5,7,8,9],
+    answer: "125789",
+    hint: "Запятые вокруг причастного оборота (1, 2), перед придаточным определительным (5), перед деепричастным оборотом (7), перед И в ССП (8) и перед придаточным изъяснительным (9). Цифры 3 и 4 — это причастный оборот ПЕРЕД определяемым словом «скала», поэтому НЕ обособляется."
+  },
+  {
+    fipiId: "7157DC",
+    text: "Город Кировск (1) расположенный в центре горного массива Хибины (2) знаменит не только крупнейшими залежами апатитов (3) но и самым известным российским горнолыжным курортом. Местные жители шутят (4) что дети здесь встают на лыжи раньше (5) чем начинают ходить. Это неудивительно (6) так как повсюду (7) утрамбованные свирепыми северными буранами (8) снежные поля и обширные склоны Хибин. Всё словно создано для того (9) чтобы прокатиться на лыжах или сноуборде.",
+    correctNumbers: [1,2,3,4,5,6,9],
+    answer: "1234569",
+    hint: "Запятые вокруг причастного оборота (1, 2), перед второй частью двойного союза «не только..., но и» (3), перед придаточным изъяснительным (4) и сравнительным (5), перед придаточным причины (6) и цели (9). Цифры 7 и 8 — причастный оборот ПЕРЕД определяемым словом «поля»."
+  },
+  {
+    fipiId: "57680A",
+    text: "Госудáрственная Третьякóвская галерéя (1) московский художественный музей (2) основанный в 1856 году купцом Павлом Третьяковым (3) происходившим из небогатого купеческого рода. Коллекционер хотел создать национальный музей (4) в котором (5) были бы представлены работы русских художников. Сегодня (6) экспозиция галереи насчитывает более 180 000 предметов (7) и включает в себя картины (8) скульптуры и изделия из драгоценных металлов (9) созданные с X по XX век.",
+    correctNumbers: [2,3,4,8,9],
+    answer: "23489",
+    hint: "Запятая перед причастным оборотом (2), перед вторым причастным оборотом (3), перед придаточным определительным (4), между однородными членами (8) и перед причастным оборотом (9). Цифра 1 — приложение «галерея — музей» (там должно быть тире), 6 — «сегодня» не вводное, 7 — однородные сказуемые с И без запятой."
+  },
+  {
+    fipiId: "06E8E5",
+    text: "Два с половиной столетия (1) историки спорят о значении петровских преобразований. Действительно (2) эти нововведения можно оценивать по-разному. Но все исследователи согласны в одном (3) Петровские реформы (4) были важнейшим этапом в истории России. Знаменитый историк С.М. Соловьёв писал (5) «Различие взглядов (6) происходило от громадности дела (7) совершённого Петром (8) от продолжительности влияния (9) этого дела».",
+    correctNumbers: [2,7,8],
+    answer: "278",
+    hint: "Запятая после вводного слова «действительно» (2), вокруг причастного оборота внутри цитаты (7, 8). Цифры 3 и 5 — двоеточия перед пояснением и прямой речью."
+  }
+];
+
+let pzState = { cur: 0, score: 0, sel: [] };
+function initPZ() {
+  pzState = { cur: 0, score: 0, sel: [] };
+  resetErrorLog();
+  document.getElementById('pz-score').textContent = 0;
+  document.getElementById('pz-total').textContent = puzzleData.length;
+  document.getElementById('pz-progress').style.width = '0%';
+  renderPZ();
+}
+function renderPZ() {
+  const c = document.getElementById('pz-content');
+  if (pzState.cur >= puzzleData.length) {
+    showResult(c, pzState.score, puzzleData.length, 'initPZ');
+    return;
+  }
+  const q = puzzleData[pzState.cur];
+  pzState.sel = [];
+  // Replace (N) with circle marker
+  let textHTML = q.text.replace(/\((\d+)\)/g, '<span class="num-mark">$1</span>');
+  // Find max number in text
+  const matches = q.text.match(/\((\d+)\)/g) || [];
+  const maxN = Math.max(...matches.map(m => parseInt(m.slice(1,-1))));
+  let marks = '';
+  for (let i = 1; i <= maxN; i++) {
+    marks += `<button class="puzzle-mark" data-n="${i}" onclick="pzToggle(${i}, this)">${i}</button>`;
+  }
+  c.innerHTML = `
+    <div class="question">
+      <div class="question-num">ТЕКСТ ${pzState.cur + 1}</div>
+      <div class="source-tag">ФИПИ ${q.fipiId}</div>
+      <div class="text-numbered">${textHTML}</div>
+      <div class="multi-hint">⚠️ Кликни все цифры, на месте которых должны стоять <strong>запятые</strong>:</div>
+      <div class="puzzle-marks">${marks}</div>
+      <div style="text-align: center;">
+        <button class="check-btn" id="pz-check" onclick="pzCheck()">Проверить →</button>
+      </div>
+      <div class="explanation" id="pz-exp"></div>
+      <button class="next-btn" id="pz-next" onclick="pzNext()">Дальше →</button>
+    </div>
+  `;
+}
+function pzToggle(n, btn) {
+  if (pzState.sel.includes(n)) {
+    pzState.sel = pzState.sel.filter(x => x !== n);
+    btn.classList.remove('selected');
+  } else {
+    pzState.sel.push(n);
+    btn.classList.add('selected');
+  }
+}
+function pzCheck() {
+  const q = puzzleData[pzState.cur];
+  const correct = q.correctNumbers.sort((a,b)=>a-b);
+  const user = [...pzState.sel].sort((a,b)=>a-b);
+  const isCorrect = JSON.stringify(correct) === JSON.stringify(user);
+  logTaskAnswer(q.fipiId, user.join('') || '—', isCorrect, 1);
+  // Show colored marks: 4 cases
+  document.querySelectorAll('.puzzle-mark').forEach(btn => {
+    btn.disabled = true;
+    btn.classList.remove('selected');
+    const n = parseInt(btn.dataset.n);
+    const userPicked = user.includes(n);
+    const isCorrectPosition = correct.includes(n);
+    if (userPicked && isCorrectPosition) {
+      // Correct hit — green
+      btn.classList.add('correct-mark');
+    } else if (userPicked && !isCorrectPosition) {
+      // Wrong hit — red
+      btn.classList.add('wrong-mark');
+    } else if (!userPicked && isCorrectPosition) {
+      // Missed — green dashed border
+      btn.classList.add('missed-mark');
+    }
+    // else: not picked, not correct — no styling needed
+  });
+  document.getElementById('pz-check').style.display = 'none';
+  const exp = document.getElementById('pz-exp');
+  const userAnswerStr = user.length > 0 ? user.join('') : '—';
+  const answerLine = `<div style="background: var(--paper); padding: 10px 14px; border-radius: 8px; margin: 10px 0; border: 2px solid var(--bee); font-family: 'Unbounded', sans-serif; font-size: 1rem;">
+    🐝 <strong>Твой ответ:</strong> <span style="color: ${isCorrect ? 'var(--green-ok)' : 'var(--red-no)'};">${userAnswerStr}</span>
+    &nbsp;·&nbsp; <strong>Правильный:</strong> <span style="color: var(--green-ok);">${q.answer}</span>
+  </div>`;
+  if (isCorrect) {
+    pzState.score++;
+    document.getElementById('pz-score').textContent = pzState.score;
+    exp.innerHTML = answerLine + `<strong>🎉 Точно!</strong> ${q.hint}`;
+  } else {
+    exp.innerHTML = answerLine + `🤔 ${q.hint}<br><br><span style="font-size: 0.88rem; color: var(--ink-soft);">🟢 Зелёным — нужны запятые. 🔴 Красным — лишние. 🟢 Пунктиром — пропущенные тобой.</span>`;
+  }
+  exp.classList.add('show');
+  document.getElementById('pz-next').classList.add('show');
+  document.getElementById('pz-progress').style.width = ((pzState.cur + 1) / puzzleData.length * 100) + '%';
+}
+function pzNext() { pzState.cur++; renderPZ(); }
+
+// ====== GAME 5: MATCH (task 4) — варианты 4, 5, 6 из ОБЗ ФИПИ (свежие, не в эфире) ======
+const matchData = [
+  {
+    fipiId: "D16749",
+    rules: [
+      "А) Если обобщающее слово стоит после однородных членов предложения, то перед ним ставится тире.",
+      "Б) Определение, выраженное причастным оборотом, стоящим после определяемого слова, обособляется.",
+      "В) Между однородными членами предложения перед второй частью двойного союза ставится запятая."
+    ],
+    sentences: [
+      "Портреты И.Н. Крамского отличаются глубиной раскрытия не только психологии, характера модели, но и её прелести и очарования.",
+      "Я поднял голову: ни насмешки, ни гнева не было в лице моей собеседницы, а была лишь свежая, весёлая улыбка.",
+      "«Скорей, скорей в город за лекарствами!» — кричал Владимир.",
+      "Река, роща, оба берега, деревья и поле — всё было залито ярким солнечным светом.",
+      "Книги — корабли мысли, странствующие по волнам времени, бережно несущие драгоценный груз от поколения к поколению."
+    ],
+    answer: [4, 5, 1]
+  },
+  {
+    fipiId: "665CF4",
+    rules: [
+      "А) Если вторая часть бессоюзного сложного предложения дополняет первую, то между частями предложения ставится двоеточие.",
+      "Б) Уточняющее обстоятельство обособляется.",
+      "В) Между частями сложносочинённого предложения ставится запятая."
+    ],
+    sentences: [
+      "Вот север, тучи нагоняя, дохнýл, завыл, и вот сама идёт волшебница зима.",
+      "Казалось, что там, на краю моря, облаков бесконечно много.",
+      "Лук царевич опустил, смотрит: коршун в море тонет и не птичьим криком стонет.",
+      "Ах, поля мои, борозды милые, хороши вы в печали своей.",
+      "Почти везде: на суше, в океане, в атмосфере и даже в вечных льдах — обитают живые существа."
+    ],
+    answer: [3, 2, 1]
+  },
+  {
+    fipiId: "F31B0C",
+    rules: [
+      "А) Если вторая часть бессоюзного сложного предложения указывает на результат, вывод, то между частями предложения ставится тире.",
+      "Б) Обращение обособляется.",
+      "В) Между подлежащим и сказуемым, выраженными именами существительными в именительном падеже, при отсутствии связки ставится тире."
+    ],
+    sentences: [
+      "Принимаю тебя, неудача, и, удача, тебе мой привет!",
+      "Давно замечено, что одиноко растёт, не подпуская никого селиться возле себя, лишь одно дерево — берёза.",
+      "Сила воли — это не только умение чего-то добиться, но и умение заставить себя отказаться от чего-то, когда это нужно.",
+      "Иван подошёл к воротам, загремел щеколдой — со двора поднялся собачий лай.",
+      "Местность кругом была ровная, прятаться на ней было негде, за исключением, пожалуй, кустарника, росшего на опушке."
+    ],
+    answer: [4, 1, 3]
+  }
+];
+
+let mtState = { cur: 0, score: 0, sel: {} };
+function initMT() {
+  mtState = { cur: 0, score: 0, sel: {} };
+  resetErrorLog();
+  document.getElementById('mt-score').textContent = 0;
+  document.getElementById('mt-total').textContent = matchData.length;
+  document.getElementById('mt-progress').style.width = '0%';
+  renderMT();
+}
+function renderMT() {
+  const c = document.getElementById('mt-content');
+  if (mtState.cur >= matchData.length) {
+    showResult(c, mtState.score, matchData.length, 'initMT');
+    return;
+  }
+  const q = matchData[mtState.cur];
+  mtState.sel = { А: null, Б: null, В: null };
+
+  let rulesHTML = '';
+  ['А', 'Б', 'В'].forEach((letter, i) => {
+    rulesHTML += `
+      <div style="margin-bottom: 18px; padding: 14px; background: var(--amber); border-radius: 10px;">
+        <div style="font-weight: 700; margin-bottom: 8px; color: var(--bee);">${q.rules[i]}</div>
+        <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px;">
+          ${[1,2,3,4,5].map(n => `<button class="puzzle-mark" data-letter="${letter}" data-n="${n}" onclick="mtPick('${letter}', ${n}, this)">${n}</button>`).join('')}
+        </div>
+        <div style="font-size: 0.82rem; color: var(--ink-soft); margin-top: 6px;">
+          Выбрано: <strong id="mt-sel-${letter}">—</strong>
+        </div>
+      </div>
+    `;
+  });
+
+  let sentencesHTML = '';
+  q.sentences.forEach((s, i) => {
+    sentencesHTML += `<div style="margin-bottom: 10px; padding: 12px; background: var(--paper); border: 2px solid var(--bee); border-radius: 10px;">
+      <strong style="color: var(--honey-deep);">${i+1})</strong> ${s}
+    </div>`;
+  });
+
+  c.innerHTML = `
+    <div class="question">
+      <div class="question-num">РАУНД ${mtState.cur + 1}</div>
+      <div class="source-tag">ФИПИ ${q.fipiId}</div>
+      <div style="font-weight: 700; margin: 10px 0 14px;">ПРЕДЛОЖЕНИЯ:</div>
+      ${sentencesHTML}
+      <div style="font-weight: 700; margin: 20px 0 14px;">ПРАВИЛА — выбери номер подходящего предложения:</div>
+      ${rulesHTML}
+      <div style="text-align: center;">
+        <button class="check-btn" id="mt-check" onclick="mtCheck()">Проверить →</button>
+      </div>
+      <div class="explanation" id="mt-exp"></div>
+      <button class="next-btn" id="mt-next" onclick="mtNext()">Дальше →</button>
+    </div>
+  `;
+}
+function mtPick(letter, n, btn) {
+  // Clear other selections for this letter
+  document.querySelectorAll(`[data-letter="${letter}"]`).forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+  mtState.sel[letter] = n;
+  document.getElementById(`mt-sel-${letter}`).textContent = n;
+}
+function mtCheck() {
+  const q = matchData[mtState.cur];
+  const user = [mtState.sel['А'], mtState.sel['Б'], mtState.sel['В']];
+  const correct = q.answer;
+  const isCorrect = JSON.stringify(user) === JSON.stringify(correct);
+  const userStr = `А${user[0]||'?'} Б${user[1]||'?'} В${user[2]||'?'}`;
+  logTaskAnswer(q.fipiId, userStr, isCorrect, 1);
+  // Highlight all buttons
+  document.querySelectorAll('[data-letter]').forEach(b => b.disabled = true);
+  ['А', 'Б', 'В'].forEach((letter, i) => {
+    const correctN = correct[i];
+    const userN = mtState.sel[letter];
+    const correctBtn = document.querySelector(`[data-letter="${letter}"][data-n="${correctN}"]`);
+    if (correctBtn) {
+      correctBtn.style.background = 'var(--green-ok)';
+      correctBtn.style.color = 'white';
+    }
+    if (userN && userN !== correctN) {
+      const wrongBtn = document.querySelector(`[data-letter="${letter}"][data-n="${userN}"]`);
+      if (wrongBtn) {
+        wrongBtn.style.background = 'var(--red-no)';
+        wrongBtn.style.color = 'white';
+      }
+    }
+  });
+  document.getElementById('mt-check').style.display = 'none';
+  const exp = document.getElementById('mt-exp');
+  if (isCorrect) {
+    mtState.score++;
+    document.getElementById('mt-score').textContent = mtState.score;
+    exp.innerHTML = `🐝 <strong>Все три правильно!</strong> А${correct[0]} Б${correct[1]} В${correct[2]}`;
+  } else {
+    exp.innerHTML = `🤔 Правильно: <strong>А${correct[0]} Б${correct[1]} В${correct[2]}</strong>. Зелёным выделены верные варианты, красным — твои ошибочные выборы.`;
+  }
+  exp.classList.add('show');
+  document.getElementById('mt-next').classList.add('show');
+  document.getElementById('mt-progress').style.width = ((mtState.cur + 1) / matchData.length * 100) + '%';
+}
+function mtNext() { mtState.cur++; renderMT(); }
+
+// ============ RESULT SCREEN ============
+// Game names mapping for leaderboard
+const GAME_NAMES = {
+  'initFC': 'Верные характеристики',
+  'initFX': '5 лишний',
+  'initPZ': 'Пунктуация-пазл',
+  'initMT': 'Правило-пример'
+};
+
+function showResult(container, score, total, restartFn) {
+  let title, message, bees;
+  const pct = score / total;
+  if (pct >= 0.9) {
+    title = "Великолепно!"; bees = "🐝🐝🐝🐝";
+    message = "Ты разнесла эту игру в пух и прах! На ОГЭ ты будешь как пчёлка-королева 🐝👑";
+  } else if (pct >= 0.7) {
+    title = "Молодец!"; bees = "🐝🐝🐝";
+    message = "Хороший результат! Несколько ошибок — это нормально, теперь знаем, что повторить.";
+  } else if (pct >= 0.5) {
+    title = "Уже почти!"; bees = "🐝🐝";
+    message = "Нужно повторить алгоритмы. Зайди ещё раз через денёк, у тебя точно получится лучше!";
+  } else {
+    title = "Не сдавайся!"; bees = "🐝";
+    message = "Ошибки сейчас — лучше, чем на экзамене. Попробуй ещё раз — не торопись, читай объяснения и алгоритмы!";
+  }
+
+  // Submit results with error log to leaderboard
+  const gameName = GAME_NAMES[restartFn];
+  if (gameName) {
+    submitGameResults(gameName, score, total).then(submitted => {
+      const note = document.getElementById('result-saving-note');
+      if (note) note.textContent = submitted ? '✓ Результат сохранён в общий рейтинг' : '⚠️ Рейтинг временно недоступен';
+    });
+  }
+
+  container.innerHTML = `
+    <div class="result-screen">
+      <div class="result-bees">${bees}</div>
+      <div class="result-title">${title}</div>
+      <div class="result-score">${score} из ${total}</div>
+      <div class="result-message">${message}</div>
+      ${gameName ? '<div class="saving-note" id="result-saving-note">⏳ Отправляю результат в рейтинг...</div>' : ''}
+      <div style="margin-top: 16px;">
+        <button class="restart-btn" onclick="${restartFn}()">🔄 Ещё раз</button>
+        <button class="restart-btn" onclick="backToMenu()" style="background: var(--honey); color: var(--bee);">🏠 К играм</button>
+        ${gameName ? '<button class="restart-btn" onclick="openLeaderboard()" style="background: var(--honey-deep); color: white;">🏆 Топ-10</button>' : ''}
+      </div>
+    </div>
+  `;
+}
+
+// =============== INIT ===============
+(function init() {
+  const name = getUserName();
+  document.getElementById('user-name').textContent = name || '…';
+  if (!name) askForName();
+})();
+</script>
+</body>
+</html>

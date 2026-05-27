@@ -1,0 +1,1593 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Игротека ОГЭ по русскому · Часть 2 · Лексика</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Unbounded:wght@400;600;800&family=Onest:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --honey: #F5B82E;
+    --honey-deep: #D89F1A;
+    --amber: #FFE38A;
+    --cream: #FFF8E7;
+    --ink: #2A1810;
+    --ink-soft: #5C3D29;
+    --bee: #3D2817;
+    --paper: #FFFCF5;
+    --green-ok: #4A8A3E;
+    --red-no: #C24545;
+    --sea: #4A8FB8;
+    --sea-deep: #2C5F7F;
+    --grass: #6B9B4A;
+    --flower-pink: #E89BC6;
+    --flower-violet: #B47CC7;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Onest', sans-serif;
+    background: var(--cream);
+    color: var(--ink);
+    line-height: 1.5;
+    min-height: 100vh;
+    overflow-x: hidden;
+    background-image:
+      radial-gradient(circle at 10% 5%, rgba(245,184,46,0.15) 0%, transparent 30%),
+      radial-gradient(circle at 90% 80%, rgba(245,184,46,0.1) 0%, transparent 40%);
+  }
+  header {
+    text-align: center;
+    padding: 60px 24px 40px;
+    background: linear-gradient(180deg, var(--amber) 0%, transparent 100%);
+    position: relative;
+  }
+  .bee-icon { font-size: 64px; display: inline-block; animation: fly 4s ease-in-out infinite; }
+  @keyframes fly {
+    0%, 100% { transform: translate(0, 0) rotate(-5deg); }
+    50% { transform: translate(15px, -10px) rotate(8deg); }
+  }
+  h1 {
+    font-family: 'Unbounded', sans-serif;
+    font-size: clamp(2rem, 5vw, 3rem);
+    font-weight: 800;
+    color: var(--bee);
+    margin: 16px 0 8px;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+  }
+  .subtitle {
+    font-family: 'Caveat', cursive;
+    font-size: clamp(1.4rem, 3vw, 2rem);
+    color: var(--honey-deep);
+    font-weight: 700;
+  }
+  .greeting {
+    font-size: 1rem;
+    color: var(--ink-soft);
+    margin-top: 16px;
+    max-width: 600px;
+    margin-left: auto; margin-right: auto;
+  }
+  .source-note {
+    margin-top: 14px;
+    display: inline-block;
+    background: var(--bee);
+    color: var(--cream);
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 500;
+  }
+  .user-bar {
+    position: absolute; top: 16px; right: 16px;
+    background: var(--paper); border: 2px solid var(--bee);
+    border-radius: 20px; padding: 6px 14px;
+    font-size: 0.85rem; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .user-bar:hover { background: var(--amber); }
+  .menu {
+    max-width: 900px;
+    margin: 40px auto;
+    padding: 0 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .menu-card {
+    background: var(--paper);
+    border: 3px solid var(--bee);
+    border-radius: 18px;
+    padding: 22px 20px;
+    cursor: pointer;
+    text-decoration: none;
+    color: var(--ink);
+    transition: all 0.2s;
+    box-shadow: 6px 6px 0 var(--bee);
+  }
+  .menu-card:hover { transform: translate(-3px, -3px); box-shadow: 9px 9px 0 var(--bee); }
+  .menu-card:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--bee); }
+  .menu-card .num {
+    font-family: 'Unbounded', sans-serif;
+    font-weight: 800; color: var(--honey-deep);
+    font-size: 0.85rem; letter-spacing: 0.1em;
+  }
+  .menu-card h2 {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 1.3rem; font-weight: 600;
+    margin: 6px 0; color: var(--bee);
+  }
+  .menu-card p { font-size: 0.92rem; color: var(--ink-soft); }
+  .menu-card .badge {
+    display: inline-block; background: var(--honey); color: var(--bee);
+    padding: 2px 10px; border-radius: 12px;
+    font-size: 0.75rem; font-weight: 600; margin-top: 12px;
+  }
+  .menu-card.leaderboard { background: var(--bee); color: var(--cream); border-color: var(--honey); }
+  .menu-card.leaderboard h2 { color: var(--honey); }
+  .menu-card.leaderboard p { color: var(--amber); }
+  .menu-card.leaderboard .num { color: var(--amber); }
+
+  .game-section {
+    display: none; max-width: 800px; margin: 0 auto;
+    padding: 40px 20px 80px; animation: slideIn 0.4s ease;
+  }
+  .game-section.active { display: block; }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .back-btn {
+    background: var(--bee); color: var(--cream); border: none;
+    padding: 10px 20px; border-radius: 30px; cursor: pointer;
+    font-family: 'Onest', sans-serif; font-weight: 500; font-size: 0.95rem;
+    margin-bottom: 24px; transition: transform 0.2s;
+  }
+  .back-btn:hover { transform: translateX(-4px); }
+  .game-title {
+    font-family: 'Unbounded', sans-serif; font-size: 2rem; font-weight: 800;
+    color: var(--bee); margin-bottom: 8px; line-height: 1.1;
+  }
+  .game-intro {
+    font-family: 'Caveat', cursive; font-size: 1.4rem;
+    color: var(--honey-deep); font-weight: 700; margin-bottom: 28px;
+  }
+  .score-bar {
+    background: var(--paper); border: 2px solid var(--bee);
+    border-radius: 14px; padding: 14px 20px; margin-bottom: 24px;
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 10px;
+  }
+  .score-label { font-family: 'Caveat', cursive; font-size: 1.3rem; color: var(--bee); font-weight: 700; }
+  .score-value { font-family: 'Unbounded', sans-serif; font-weight: 800; font-size: 1.4rem; color: var(--honey-deep); }
+  .progress-bar { width: 100%; height: 8px; background: var(--amber); border-radius: 4px; margin-top: 10px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--honey-deep); transition: width 0.4s ease; }
+  .question {
+    background: var(--paper); border: 3px solid var(--bee);
+    border-radius: 18px; padding: 28px 24px; margin-bottom: 20px;
+    box-shadow: 5px 5px 0 var(--honey); position: relative;
+  }
+  .question-num {
+    position: absolute; top: -16px; left: 20px;
+    background: var(--honey); color: var(--bee);
+    padding: 4px 14px; border-radius: 20px;
+    font-family: 'Unbounded', sans-serif; font-weight: 800;
+    font-size: 0.85rem; border: 2px solid var(--bee);
+  }
+  .source-tag {
+    position: absolute; top: -14px; right: 16px;
+    background: var(--bee); color: var(--cream);
+    padding: 3px 10px; border-radius: 14px;
+    font-family: 'Onest', sans-serif; font-size: 0.7rem;
+    font-weight: 500; letter-spacing: 0.05em;
+  }
+  .check-btn {
+    background: var(--bee); color: var(--cream); border: none;
+    padding: 12px 24px; border-radius: 30px; cursor: pointer;
+    font-family: 'Onest', sans-serif; font-weight: 500; font-size: 1rem;
+    margin-top: 12px;
+  }
+  .check-btn:hover { background: var(--ink); }
+  .next-btn {
+    margin-top: 16px; background: var(--honey); color: var(--bee);
+    border: 2px solid var(--bee); padding: 12px 28px; border-radius: 30px;
+    cursor: pointer; font-family: 'Unbounded', sans-serif;
+    font-weight: 600; font-size: 1rem; display: none;
+  }
+  .next-btn.show { display: inline-block; }
+  .explanation {
+    margin-top: 18px; padding: 14px 16px; background: var(--cream);
+    border-radius: 10px; border-left: 4px solid var(--honey-deep);
+    font-size: 0.95rem; color: var(--ink-soft); display: none;
+  }
+  .explanation.show { display: block; }
+  .explanation strong { color: var(--bee); }
+
+  /* GAME 6: FLOWER FIELD (task 7) */
+  .flower-field {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 12px; margin: 20px 0;
+    padding: 18px; background: linear-gradient(180deg, #B8DCA8 0%, #E8F0D8 100%);
+    border-radius: 16px; border: 3px solid var(--grass);
+  }
+  .flower {
+    background: var(--paper);
+    border: 3px solid var(--bee); border-radius: 16px;
+    padding: 10px 4px 12px;
+    cursor: pointer; text-align: center;
+    transition: all 0.2s;
+    position: relative;
+  }
+  .flower:hover:not(.disabled) { transform: translateY(-4px) scale(1.05); }
+  .flower-emoji { font-size: 2rem; display: block; margin-bottom: 4px; }
+  .flower-word {
+    font-family: 'Unbounded', sans-serif;
+    font-weight: 600; font-size: 0.85rem; color: var(--bee);
+    word-break: break-word; line-height: 1.2;
+  }
+  .flower-pos {
+    font-size: 0.7rem; color: var(--ink-soft);
+    background: var(--amber); border-radius: 10px;
+    padding: 1px 6px; display: inline-block; margin-top: 4px;
+  }
+  .flower.selected { background: var(--honey); border-color: var(--honey-deep); }
+  .flower.correct {
+    background: #FFE08A; border-color: var(--honey-deep);
+    box-shadow: 0 0 0 3px var(--green-ok);
+  }
+  .flower.correct .flower-emoji { content: "🍯"; }
+  .flower.wrong { background: #FFB3B3; border-color: var(--red-no); }
+  .flower.missed {
+    background: var(--paper);
+    border: 3px dashed var(--green-ok);
+  }
+  .flower.missed .flower-word { color: var(--green-ok); font-weight: 700; }
+  .flower.missed .flower-emoji { opacity: 0.6; }
+  .flower.disabled { cursor: not-allowed; opacity: 0.85; }
+
+  /* GAME 7: MAZE (task 8) */
+  .maze-question {
+    text-align: center; margin: 20px 0;
+    padding: 20px; background: var(--amber);
+    border-radius: 14px; border: 2px dashed var(--bee);
+  }
+  .maze-question .word-target {
+    font-family: 'Caveat', cursive; font-size: 1.6rem;
+    color: var(--honey-deep); font-weight: 700;
+    background: var(--paper); padding: 6px 16px;
+    border-radius: 30px; display: inline-block; margin: 8px 0;
+  }
+  .maze-options {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
+    margin: 24px 0;
+  }
+  .maze-cell {
+    background: var(--paper); border: 3px solid var(--bee);
+    border-radius: 14px; padding: 20px 14px;
+    cursor: pointer; text-align: center;
+    font-family: 'Unbounded', sans-serif; font-weight: 700;
+    font-size: 1.2rem; color: var(--bee);
+    transition: all 0.2s;
+  }
+  .maze-cell:hover:not(.disabled) { background: var(--amber); transform: scale(1.03); }
+  .maze-cell.correct { background: var(--green-ok); color: white; border-color: var(--green-ok); }
+  .maze-cell.wrong { background: var(--red-no); color: white; border-color: var(--red-no); }
+  .maze-cell.disabled { cursor: not-allowed; }
+  .maze-progress {
+    display: flex; justify-content: center; gap: 8px;
+    margin: 16px 0;
+  }
+  .maze-step {
+    width: 36px; height: 36px; border-radius: 50%;
+    background: var(--cream); border: 2px solid var(--bee);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Unbounded', sans-serif; font-weight: 700;
+    font-size: 0.85rem; color: var(--ink-soft);
+  }
+  .maze-step.passed { background: var(--green-ok); color: white; }
+  .maze-step.current { background: var(--honey); color: var(--bee); }
+
+  /* GAME 8: HIVE (task 9) */
+  .hive {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 14px; margin: 20px 0;
+  }
+  .honeycomb {
+    background: var(--paper);
+    border: 3px solid var(--bee);
+    border-radius: 14px;
+    padding: 16px 14px;
+    text-align: center;
+    cursor: pointer;
+    position: relative;
+    transition: all 0.2s;
+  }
+  .honeycomb-question {
+    font-family: 'Caveat', cursive;
+    font-size: 1.4rem;
+    color: var(--bee); font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .honeycomb-input {
+    width: 100%;
+    padding: 8px 10px;
+    border: 2px solid var(--bee);
+    border-radius: 8px;
+    background: var(--cream);
+    font-family: 'Onest', sans-serif;
+    font-size: 0.95rem;
+    color: var(--ink);
+    text-align: center;
+  }
+  .honeycomb.correct { background: var(--green-ok); }
+  .honeycomb.correct .honeycomb-question { color: white; }
+  .honeycomb.wrong { background: #FFD0D0; }
+
+  /* GAME 9: AQUARIUM (task 11) */
+  .aquarium {
+    background: linear-gradient(180deg, #87CEEB 0%, #4A8FB8 100%);
+    border: 3px solid var(--sea-deep);
+    border-radius: 18px; padding: 18px;
+    margin: 20px 0; position: relative;
+    min-height: 200px;
+  }
+  .aquarium-task {
+    text-align: center; margin-bottom: 14px;
+    color: white; font-family: 'Caveat', cursive;
+    font-size: 1.4rem; font-weight: 700;
+    text-shadow: 1px 1px 3px rgba(0,0,0,0.3);
+  }
+  .fish-tank {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .fish {
+    background: var(--paper);
+    border: 3px solid var(--sea-deep);
+    border-radius: 30px;
+    padding: 14px 18px;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    box-shadow: 3px 3px 0 var(--sea-deep);
+  }
+  .fish:hover:not(.disabled) { transform: translateX(4px) scale(1.02); }
+  .fish::before {
+    content: "🐠"; position: absolute;
+    left: -8px; top: 50%; transform: translateY(-50%);
+    font-size: 1.6rem;
+  }
+  .fish-text { padding-left: 30px; font-size: 0.95rem; line-height: 1.4; }
+  .fish.selected { background: var(--honey); }
+  .fish.correct {
+    background: #FFD700;
+    border-color: var(--honey-deep);
+  }
+  .fish.correct::before { content: "✨🐟"; }
+  .fish.wrong { background: #FFB3B3; opacity: 0.7; }
+  .fish.wrong::before { content: "❌"; }
+  .fish.missed {
+    background: var(--paper);
+    border: 3px dashed var(--green-ok);
+    color: var(--green-ok);
+    font-weight: 700;
+  }
+  .fish.missed::before { content: "↳"; }
+  .fish.disabled { cursor: not-allowed; }
+
+  /* GAME 10: CATS (task 12) */
+  .cats-task {
+    background: var(--amber);
+    padding: 16px 18px;
+    border-radius: 14px;
+    margin-bottom: 16px;
+    border: 2px dashed var(--bee);
+  }
+  .cats-meaning {
+    font-family: 'Caveat', cursive;
+    font-size: 1.4rem;
+    color: var(--bee);
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .cats-text {
+    font-size: 0.95rem;
+    line-height: 1.9;
+    color: var(--ink);
+    background: var(--paper);
+    padding: 16px;
+    border-radius: 10px;
+    margin-top: 10px;
+    border: 2px solid var(--bee);
+    max-height: 280px;
+    overflow-y: auto;
+    word-spacing: 2px;
+    text-align: left;
+  }
+  .cats-text .num-mark {
+    display: inline-block;
+    background: var(--honey-deep);
+    color: white;
+    border-radius: 50%;
+    width: 22px;
+    height: 22px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    line-height: 22px;
+    text-align: center;
+    font-family: 'Unbounded', sans-serif;
+    vertical-align: middle;
+    margin: 0 1px;
+  }
+  .cats-text .clickable-word {
+    cursor: pointer;
+    padding: 1px 3px;
+    border-radius: 4px;
+    transition: background-color 0.15s;
+  }
+  .cats-text .clickable-word:hover {
+    background: var(--amber);
+  }
+  .cats-text .clickable-word.selected {
+    background: var(--honey);
+    font-weight: 700;
+  }
+  .cats-text .clickable-word.correct {
+    background: var(--green-ok);
+    color: white;
+    font-weight: 700;
+  }
+  .cats-text .clickable-word.wrong {
+    background: var(--red-no);
+    color: white;
+  }
+  .cats-instruction {
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+    margin: 10px 0;
+    font-style: italic;
+  }
+
+  /* LEADERBOARD */
+  .lb-tabs {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin-bottom: 16px;
+    background: var(--paper);
+    border: 2px solid var(--bee);
+    border-radius: 14px;
+    padding: 8px;
+  }
+  .lb-tab {
+    flex: 1; min-width: 110px;
+    padding: 8px 12px;
+    background: transparent;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: 'Onest', sans-serif;
+    font-size: 0.85rem; font-weight: 500;
+    color: var(--ink-soft);
+    transition: all 0.15s;
+  }
+  .lb-tab:hover { background: var(--amber); }
+  .lb-tab.active { background: var(--honey); color: var(--bee); font-weight: 700; }
+  .lb-list { margin-top: 16px; }
+  .lb-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px;
+    background: var(--paper);
+    border: 2px solid var(--bee);
+    border-radius: 12px;
+    margin-bottom: 8px;
+  }
+  .lb-row.top-1 { background: linear-gradient(90deg, #FFD700 0%, var(--paper) 60%); }
+  .lb-row.top-2 { background: linear-gradient(90deg, #C0C0C0 0%, var(--paper) 60%); }
+  .lb-row.top-3 { background: linear-gradient(90deg, #CD7F32 0%, var(--paper) 60%); }
+  .lb-rank {
+    font-family: 'Unbounded', sans-serif; font-weight: 800;
+    font-size: 1.2rem; color: var(--honey-deep);
+    min-width: 40px;
+  }
+  .lb-name { flex: 1; font-weight: 600; color: var(--ink); margin: 0 12px; }
+  .lb-score {
+    font-family: 'Unbounded', sans-serif; font-weight: 800;
+    font-size: 1.2rem; color: var(--bee);
+  }
+  .lb-empty {
+    text-align: center; padding: 40px 20px;
+    color: var(--ink-soft); font-style: italic;
+  }
+  .lb-loading {
+    text-align: center; padding: 30px;
+    color: var(--ink-soft);
+  }
+  .lb-loading .dot {
+    display: inline-block;
+    animation: pulse 1.4s infinite;
+    font-size: 1.5rem;
+  }
+  .lb-loading .dot:nth-child(2) { animation-delay: 0.2s; }
+  .lb-loading .dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes pulse {
+    0%, 60%, 100% { opacity: 0.3; }
+    30% { opacity: 1; }
+  }
+
+  /* RESULT */
+  .result-screen {
+    text-align: center; padding: 40px 20px;
+    background: var(--paper);
+    border: 3px solid var(--bee);
+    border-radius: 24px;
+    box-shadow: 8px 8px 0 var(--honey);
+  }
+  .result-bees { font-size: 4rem; margin-bottom: 16px; animation: fly 2s ease-in-out infinite; }
+  .result-title {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 2rem; font-weight: 800;
+    color: var(--bee); margin-bottom: 12px;
+  }
+  .result-score {
+    font-family: 'Caveat', cursive;
+    font-size: 2.5rem; color: var(--honey-deep);
+    font-weight: 700; margin: 16px 0;
+  }
+  .result-message {
+    font-size: 1.05rem; color: var(--ink-soft);
+    margin: 20px auto; max-width: 500px;
+  }
+  .restart-btn {
+    margin-top: 24px; background: var(--bee); color: var(--cream);
+    border: none; padding: 14px 32px; border-radius: 30px;
+    cursor: pointer; font-family: 'Onest', sans-serif;
+    font-weight: 500; font-size: 1rem; margin-right: 10px;
+  }
+  .saving-note {
+    margin-top: 14px; padding: 10px;
+    background: var(--cream); border-radius: 10px;
+    font-size: 0.85rem; color: var(--ink-soft);
+    font-style: italic;
+  }
+
+  /* MODAL: name input */
+  .modal-bg {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(42,24,16,0.7); display: none;
+    justify-content: center; align-items: center;
+    z-index: 100; padding: 20px;
+  }
+  .modal-bg.show { display: flex; }
+  .modal {
+    background: var(--paper); border: 3px solid var(--bee);
+    border-radius: 18px; padding: 28px 24px;
+    max-width: 480px; width: 100%;
+    box-shadow: 8px 8px 0 var(--honey);
+  }
+  .modal h3 {
+    font-family: 'Unbounded', sans-serif;
+    color: var(--bee); margin-bottom: 12px;
+  }
+  .modal-input {
+    width: 100%; padding: 12px 14px;
+    border: 2px solid var(--bee); border-radius: 10px;
+    font-family: 'Onest', sans-serif; font-size: 1.1rem;
+    margin: 12px 0;
+  }
+  .modal-btn {
+    background: var(--honey); color: var(--bee);
+    border: 2px solid var(--bee);
+    padding: 10px 24px; border-radius: 20px;
+    cursor: pointer; font-family: 'Onest', sans-serif;
+    font-weight: 600; font-size: 1rem;
+  }
+  .modal-btn:hover { background: var(--honey-deep); color: var(--cream); }
+
+  footer {
+    text-align: center; padding: 30px 20px;
+    color: var(--ink-soft); font-family: 'Caveat', cursive;
+    font-size: 1.2rem; border-top: 3px dashed var(--bee);
+    margin-top: 40px;
+  }
+  @media (max-width: 600px) {
+    .menu-card { padding: 18px 16px; }
+    .game-title { font-size: 1.6rem; }
+    .question { padding: 24px 18px; }
+    .flower-field { grid-template-columns: repeat(3, 1fr); }
+    .maze-options { grid-template-columns: 1fr; }
+    .lb-tab { font-size: 0.78rem; padding: 6px 8px; }
+    .hive { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bee-icon">🐝</div>
+  <h1>Игротека · Лексика</h1>
+  <div class="subtitle">Часть 2 · Задания 7, 8, 9, 11, 12</div>
+  <div class="greeting">Дорогие мои! Здесь 5 игр на лексику и правописание — все задания из ОБЗ ФИПИ. После каждой игры ваш результат попадает в общий рейтинг 🍯</div>
+  <div class="source-note">ОБЗ ФИПИ · ОГЭ-2026</div>
+  <div class="user-bar" onclick="changeUserName()">🐝 <span id="user-name">…</span></div>
+</header>
+
+<div id="menu" class="menu">
+  <a class="menu-card" onclick="openGame('flower-field')">
+    <div class="num">ИГРА 06 · ЗАДАНИЕ 7</div>
+    <h2>🌻 Цветочное поле</h2>
+    <p>Собери цветы с пропущенными буквами А, И, Е или О. Тренировка правописания корней.</p>
+    <span class="badge">5 полей</span>
+  </a>
+  <a class="menu-card" onclick="openGame('maze')">
+    <div class="num">ИГРА 07 · ЗАДАНИЕ 8</div>
+    <h2>🌀 Лабиринт форм</h2>
+    <p>Выбери правильную форму слова, чтобы пройти лабиринт.</p>
+    <span class="badge">10 развилок</span>
+  </a>
+  <a class="menu-card" onclick="openGame('hive')">
+    <div class="num">ИГРА 08 · ЗАДАНИЕ 9</div>
+    <h2>🐝 Сборка улья</h2>
+    <p>Замени словосочетания на синонимичные с другой связью. Соты улья.</p>
+    <span class="badge">12 сот</span>
+  </a>
+  <a class="menu-card" onclick="openGame('aquarium')">
+    <div class="num">ИГРА 09 · ЗАДАНИЕ 11</div>
+    <h2>🐠 Аквариум</h2>
+    <p>Поймай рыбок-сравнения сачком. Изобразительные средства речи.</p>
+    <span class="badge">5 аквариумов</span>
+  </a>
+  <a class="menu-card" onclick="openGame('cats')">
+    <div class="num">ИГРА 10 · ЗАДАНИЕ 12</div>
+    <h2>🐱 Собери котят</h2>
+    <p>Найди слово по его лексическому значению. Тык на правильное слово в тексте.</p>
+    <span class="badge">6 раундов</span>
+  </a>
+  <a class="menu-card leaderboard" onclick="openLeaderboard()">
+    <div class="num">⭐ ТОП-10</div>
+    <h2>🏆 Лидерборд</h2>
+    <p>Кто впереди в каждой игре. Топ-10 пчёлок по каждому соревнованию.</p>
+    <span class="badge" style="background: var(--honey); color: var(--bee);">общий рейтинг</span>
+  </a>
+</div>
+
+<!-- GAME 6: FLOWER FIELD -->
+<div id="flower-field" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🌻 Цветочное поле</div>
+  <div class="game-intro">Собери цветы со словами, в которых на пропущенном месте пишется буква А (или другая указанная). Каждое поле — отдельный текст.</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="ff-score">0</span> / <span id="ff-total">5</span></div>
+    <div class="progress-bar" style="flex-basis: 100%"><div class="progress-fill" id="ff-progress" style="width: 0%"></div></div>
+  </div>
+  <div id="ff-content"></div>
+</div>
+
+<!-- GAME 7: MAZE -->
+<div id="maze" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🌀 Лабиринт форм</div>
+  <div class="game-intro">На каждой развилке — два варианта формы слова. Выбери правильный, чтобы пройти дальше.</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="mz-score">0</span> / <span id="mz-total">10</span></div>
+    <div class="progress-bar" style="flex-basis: 100%"><div class="progress-fill" id="mz-progress" style="width: 0%"></div></div>
+  </div>
+  <div id="mz-content"></div>
+</div>
+
+<!-- GAME 8: HIVE -->
+<div id="hive" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🐝 Сборка улья</div>
+  <div class="game-intro">В каждой соте — словосочетание с управлением. Напиши синонимичное с согласованием. Каждая правильная сота наполняется мёдом 🍯</div>
+  <div class="score-bar">
+    <div><span class="score-label">Сот заполнено:</span> <span class="score-value" id="hv-score">0</span> / <span id="hv-total">12</span></div>
+    <div class="progress-bar" style="flex-basis: 100%"><div class="progress-fill" id="hv-progress" style="width: 0%"></div></div>
+  </div>
+  <div id="hv-content"></div>
+</div>
+
+<!-- GAME 9: AQUARIUM -->
+<div id="aquarium" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🐠 Аквариум</div>
+  <div class="game-intro">Лови рыбок-предложения, в которых есть сравнение. Кликай по правильным!</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="aq-score">0</span> / <span id="aq-total">5</span></div>
+    <div class="progress-bar" style="flex-basis: 100%"><div class="progress-fill" id="aq-progress" style="width: 0%"></div></div>
+  </div>
+  <div id="aq-content"></div>
+</div>
+
+<!-- GAME 10: CATS -->
+<div id="cats" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🐱 Собери котят</div>
+  <div class="game-intro">В тексте «спрятался» котёнок-слово с нужным значением. Кликни на правильное слово в тексте.</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="ct-score">0</span> / <span id="ct-total">6</span></div>
+    <div class="progress-bar" style="flex-basis: 100%"><div class="progress-fill" id="ct-progress" style="width: 0%"></div></div>
+  </div>
+  <div id="ct-content"></div>
+</div>
+
+<!-- LEADERBOARD -->
+<div id="leaderboard" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🏆 Топ-10 игр</div>
+  <div class="game-intro">Лучшие пчёлки по каждой игре. Выбери игру выше — посмотри рейтинг.</div>
+  <div class="lb-tabs" id="lb-tabs"></div>
+  <div class="lb-list" id="lb-list"></div>
+</div>
+
+<!-- NAME MODAL -->
+<div class="modal-bg" id="name-modal">
+  <div class="modal">
+    <h3>🐝 Привет! Как тебя зовут?</h3>
+    <p style="font-size: 0.95rem; color: var(--ink-soft); margin-bottom: 8px;">
+      Чтобы педагог увидел твой результат в общем рейтинге, введи своё имя.
+    </p>
+    <input type="text" id="name-input" class="modal-input" placeholder="Например: Лиза К." maxlength="30">
+    <button class="modal-btn" onclick="saveName()">Сохранить и играть 🐝</button>
+  </div>
+</div>
+
+<footer>Игротека ОГЭ по русскому 🐝 Задания из ОБЗ ФИПИ · ЗебРус 2026</footer>
+
+<script>
+// =============== LEADERBOARD CONFIG ===============
+// ⚙️ После настройки Google Apps Script вставьте сюда полученный URL:
+const LEADERBOARD_URL = "https://script.google.com/macros/s/AKfycbx1m0nlyn_cG-4u3fZ8gWP6JwuKhmjiRaB2PrRwaKm5WRygpaQkvOmTvM1E1XsAKDj9/exec";
+
+// =============== USER NAME ===============
+function getUserName() {
+  return localStorage.getItem('crashIntensiveUserName') || '';
+}
+function setUserName(name) {
+  localStorage.setItem('crashIntensiveUserName', name);
+  document.getElementById('user-name').textContent = name || '…';
+}
+function askForName() {
+  document.getElementById('name-input').value = getUserName();
+  document.getElementById('name-modal').classList.add('show');
+}
+function saveName() {
+  const v = document.getElementById('name-input').value.trim();
+  if (v.length < 2) { alert('Пожалуйста, введи имя'); return; }
+  setUserName(v);
+  document.getElementById('name-modal').classList.remove('show');
+}
+function changeUserName() {
+  askForName();
+}
+
+// =============== ANSWER LOGGING ===============
+let answersByTask = {};
+function logTaskAnswer(taskId, userAnswer, isCorrect, max) {
+  if (!taskId) return;
+  const score = isCorrect ? (max || 1) : 0;
+  answersByTask[taskId] = `${userAnswer || '—'} (${score}/${max || 1})`;
+}
+function resetAnswersLog() { answersByTask = {}; }
+
+async function submitGameResults(game, score, total) {
+  const name = getUserName();
+  if (!name) return false;
+  const payload = { name, game, score, total, answers: answersByTask };
+  if (LEADERBOARD_URL.startsWith('ВСТАВЬТЕ')) {
+    console.log('Leaderboard not configured. Would send:', payload);
+    return false;
+  }
+  try {
+    await fetch(LEADERBOARD_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      body: JSON.stringify(payload)
+    });
+    return true;
+  } catch (e) {
+    console.error('Submit error:', e);
+    return false;
+  }
+}
+
+async function submitScore(game, score) { return submitGameResults(game, score, 1); }
+function logError(taskId, userAnswer, correctAnswer) { logTaskAnswer(taskId, userAnswer, false, 1); }
+function resetErrorLog() { resetAnswersLog(); }
+
+// =============== NAVIGATION ===============
+function openGame(id) {
+  if (!getUserName()) { askForName(); return; }
+  document.getElementById('menu').style.display = 'none';
+  document.querySelector('header').style.display = 'none';
+  document.querySelectorAll('.game-section').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  window.scrollTo(0, 0);
+  if (id === 'flower-field') initFF();
+  if (id === 'maze') initMZ();
+  if (id === 'hive') initHV();
+  if (id === 'aquarium') initAQ();
+  if (id === 'cats') initCT();
+}
+function openLeaderboard() {
+  document.getElementById('menu').style.display = 'none';
+  document.querySelector('header').style.display = 'none';
+  document.querySelectorAll('.game-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('leaderboard').classList.add('active');
+  window.scrollTo(0, 0);
+  initLB();
+}
+function backToMenu() {
+  document.querySelectorAll('.game-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('menu').style.display = '';
+  document.querySelector('header').style.display = '';
+  window.scrollTo(0, 0);
+}
+
+// =============== GAME 6: FLOWER FIELD (Task 7) ===============
+// Тексты из ОБЗ ФИПИ. Полный текст показывается над цветами (как в ОГЭ),
+// на каждом цветке — слово с пропуском (например, «к..ртина»).
+// Ребёнок решает, нужна ли буква А в этом пропуске.
+const flowerFieldData = [
+  {
+    fipiId: "49E9FF",
+    letter: "А",
+    fullText: "Возле самой воды, в густых зар..(1)слях, вдруг увидишь подвеш..(2)нное к стеблям гнездо кр..(3)пивницы или выд..(4)лбленное в трухлявом осиновом пне гнездо мух..(5)ловки-пеструшки. Но нечаст..(6) обн..(7)ружишь искусно свитые, искусно спрят..(8)нные в буйной зелени гнёзда, хотя их, должно быть, очень много: вокруг весь буерак н..(9)полнен щебетаньем, пересвистом птиц.",
+    parts: [
+      { word: "зар..слях", pos: 1, hasA: false },
+      { word: "подвеш..нное", pos: 2, hasA: false },
+      { word: "кр..пивницы", pos: 3, hasA: true },
+      { word: "выд..лбленное", pos: 4, hasA: false },
+      { word: "мух..ловки", pos: 5, hasA: false },
+      { word: "нечаст..", pos: 6, hasA: false },
+      { word: "обн..ружишь", pos: 7, hasA: true },
+      { word: "спрят..нные", pos: 8, hasA: true },
+      { word: "н..полнен", pos: 9, hasA: true }
+    ],
+    answer: "3789",
+    hint: "А: «крАпивницы» (корневое А), «обнАружишь» (от слова «нАружу»), «спрятАнные» (от спрятАть), «нАполнен» (от наполнИть)."
+  },
+  {
+    fipiId: "37861F",
+    letter: "А",
+    fullText: "Вот к..(1)ртина засухи: жаркий сух..(2)вей обжигает р..(3)стения. Повисла мгла. Это мириады г..(4)рячих пылинок в воздухе. От жара свёрт..(5)ваются в труб..(6)чку листья, к..(7)лосья зерновых высыхают, поля чахнут. Лёгкое дуновение ветерка подобн..(8) обжигающему пламени. Даже изредк..(9) не набегают облака.",
+    parts: [
+      { word: "к..ртина", pos: 1, hasA: true },
+      { word: "сух..вей", pos: 2, hasA: false },
+      { word: "р..стения", pos: 3, hasA: true },
+      { word: "г..рячих", pos: 4, hasA: false },
+      { word: "свёрт..ваются", pos: 5, hasA: false },
+      { word: "труб..чку", pos: 6, hasA: false },
+      { word: "к..лосья", pos: 7, hasA: false },
+      { word: "подобн..", pos: 8, hasA: false },
+      { word: "изредк..", pos: 9, hasA: true }
+    ],
+    answer: "139",
+    hint: "А: «кАртина» (словарное), «рАстения» (чередование РАСТ/РОС — перед СТ пишется А), «изредкА» (наречие с приставкой ИЗ-, суффикс А)."
+  },
+  {
+    fipiId: "3D8305",
+    letter: "А",
+    fullText: "Девушка р..(1)душно предл..(2)жила мне чаю, но я попросил её сначал..(3) показать мне сад, выр..(4)щенный чуть ли не под самым Полярным кругом. Мы вышли из дома. За калиткой я неожиданн..(5) увидел ябл..(6)ньки, малинник, усыпанный ягод..(7)й. Почувствовав смолистый аромат, я повернул голову налев..(8): там крас..(9)вались кедры.",
+    parts: [
+      { word: "р..душно", pos: 1, hasA: true },
+      { word: "предл..жила", pos: 2, hasA: false },
+      { word: "сначал..", pos: 3, hasA: true },
+      { word: "выр..щенный", pos: 4, hasA: true },
+      { word: "неожиданн..", pos: 5, hasA: false },
+      { word: "ябл..ньки", pos: 6, hasA: false },
+      { word: "ягод..й", pos: 7, hasA: false },
+      { word: "налев..", pos: 8, hasA: false },
+      { word: "крас..вались", pos: 9, hasA: false }
+    ],
+    answer: "134",
+    hint: "А: «рАдушно» (от слова «рАд»), «сначалА» (наречие с приставкой С-, суффикс А), «вырАщенный» (чередование РАСТ/РАЩ/РОС — перед Щ пишется А)."
+  },
+  {
+    fipiId: "1C9CE2",
+    letter: "А",
+    fullText: "Дни стояли невыносим..(1) жаркие. Только в смеш..(2)нном лесу можно было насл..(3)диться свежестью. Листья молодых дубков были упруги, как будто их только что обм..(4)кнули в зелёный воск. В траве р..(5)сли грибы, нежные колокольчики накл..(6)нили к земле свои головки. Тихо, только изредк..(7) были слышны стрекоч..(8)щие кузнечики. На опушку выск..(9)чил заяц и бросился наутёк.",
+    parts: [
+      { word: "невыносим..", pos: 1, hasA: false },
+      { word: "смеш..нном", pos: 2, hasA: true },
+      { word: "насл..диться", pos: 3, hasA: true },
+      { word: "обм..кнули", pos: 4, hasA: true },
+      { word: "р..сли", pos: 5, hasA: false },
+      { word: "накл..нили", pos: 6, hasA: false },
+      { word: "изредк..", pos: 7, hasA: true },
+      { word: "стрекоч..щие", pos: 8, hasA: false },
+      { word: "выск..чил", pos: 9, hasA: false }
+    ],
+    answer: "2347",
+    hint: "А: «смешАнном» (от смешАть), «наслАдиться» (от слАдкий), «обмАкнули» (чередование МАК/МОК — «погрузить в жидкость» → А), «изредкА» (наречие с приставкой ИЗ-)."
+  },
+  {
+    fipiId: "A119FD",
+    letter: "А",
+    fullText: "Золотой осенний денёк. Кругом тишина. Лишь изредк..(1) прокурлыч..(2)т в небе жур..(3)вли или пролетит с призывным криком куличок. Дожди см..(4)чили землю, и теперь она скрад..(5)вает и топ..(6)т конских к..(7)пыт, и шорох с..(8)бачьих лап. Лес поредел, но всё ещё р..(9)скошен в осеннем уборе.",
+    parts: [
+      { word: "изредк..", pos: 1, hasA: true },
+      { word: "прокурлыч..т", pos: 2, hasA: false },
+      { word: "жур..вли", pos: 3, hasA: true },
+      { word: "см..чили", pos: 4, hasA: false },
+      { word: "скрад..вает", pos: 5, hasA: false },
+      { word: "топ..т", pos: 6, hasA: false },
+      { word: "к..пыт", pos: 7, hasA: false },
+      { word: "с..бачьих", pos: 8, hasA: false },
+      { word: "р..скошен", pos: 9, hasA: false }
+    ],
+    answer: "13",
+    hint: "А: «изредкА» (наречие с приставкой ИЗ-), «журАвли» (словарное слово, корневое А)."
+  }
+];
+
+let ffState = { cur: 0, score: 0, sel: [] };
+const FLOWERS = ['🌻', '🌷', '🌼', '🌸', '🌺', '💮', '🏵️', '🌹', '🪻'];
+function initFF() {
+  ffState = { cur: 0, score: 0, sel: [] };
+  resetErrorLog();
+  document.getElementById('ff-score').textContent = 0;
+  document.getElementById('ff-total').textContent = flowerFieldData.length;
+  document.getElementById('ff-progress').style.width = '0%';
+  renderFF();
+}
+function renderFF() {
+  const c = document.getElementById('ff-content');
+  if (ffState.cur >= flowerFieldData.length) {
+    showResult(c, ffState.score, flowerFieldData.length, 'Цветочное поле', 'initFF');
+    return;
+  }
+  const q = flowerFieldData[ffState.cur];
+  ffState.sel = [];
+  // Words already contain gap (..) — just display as-is
+  let fieldHTML = '';
+  q.parts.forEach((p, i) => {
+    fieldHTML += `
+      <div class="flower" data-pos="${p.pos}" onclick="ffToggle(${p.pos}, this)">
+        <span class="flower-emoji">${FLOWERS[i % FLOWERS.length]}</span>
+        <div class="flower-word">${p.word}</div>
+        <div class="flower-pos">(${p.pos})</div>
+      </div>`;
+  });
+  // Highlight (N) markers in the full text
+  const highlightedText = q.fullText.replace(/\((\d+)\)/g, '<span style="display:inline-block; background:var(--honey-deep); color:white; border-radius:50%; width:22px; height:22px; font-size:0.75rem; font-weight:700; line-height:22px; text-align:center; margin:0 2px; font-family:Unbounded,sans-serif; vertical-align:middle;">$1</span>');
+  c.innerHTML = `
+    <div class="question">
+      <div class="question-num">ПОЛЕ ${ffState.cur + 1}</div>
+      <div class="source-tag">ФИПИ ${q.fipiId}</div>
+      <div style="margin-bottom: 12px; font-size: 0.95rem; color: var(--ink-soft);">
+        Прочитай текст из ОБЗ ФИПИ. На пропущенных местах нужно вставить буквы:
+      </div>
+      <div style="background: var(--paper); border: 2px dashed var(--bee); border-radius: 12px; padding: 14px 16px; margin-bottom: 16px; font-size: 0.98rem; line-height: 1.7; color: var(--ink);">
+        ${highlightedText}
+      </div>
+      <div style="margin-bottom: 10px; font-size: 0.95rem; color: var(--ink-soft);">
+        Собери ВСЕ цветы со словами, в которых на месте пропуска пишется буква <strong style="color: var(--honey-deep); font-size: 1.4rem;">${q.letter}</strong>:
+      </div>
+      <div class="flower-field" id="ff-field">${fieldHTML}</div>
+      <div style="text-align: center;">
+        <button class="check-btn" id="ff-check" onclick="ffCheck()">🌻 Собрать урожай</button>
+      </div>
+      <div class="explanation" id="ff-exp"></div>
+      <button class="next-btn" id="ff-next" onclick="ffNext()">Дальше →</button>
+    </div>
+  `;
+}
+function ffToggle(pos, el) {
+  if (el.classList.contains('disabled')) return;
+  if (ffState.sel.includes(pos)) {
+    ffState.sel = ffState.sel.filter(x => x !== pos);
+    el.classList.remove('selected');
+  } else {
+    ffState.sel.push(pos);
+    el.classList.add('selected');
+  }
+}
+function ffCheck() {
+  const q = flowerFieldData[ffState.cur];
+  const correct = q.answer.split('').map(Number).sort();
+  const user = [...ffState.sel].sort();
+  const isCorrect = JSON.stringify(correct) === JSON.stringify(user);
+  logTaskAnswer(q.fipiId, user.join('') || '—', isCorrect, 1);
+  document.querySelectorAll('#ff-field .flower').forEach(el => {
+    el.classList.add('disabled');
+    el.classList.remove('selected');
+    el.onclick = null;
+    const p = parseInt(el.dataset.pos);
+    if (correct.includes(p) && user.includes(p)) {
+      el.classList.add('correct');
+      el.querySelector('.flower-emoji').textContent = '🍯';
+    } else if (user.includes(p)) {
+      el.classList.add('wrong');
+    } else if (correct.includes(p)) {
+      el.classList.add('missed');
+    }
+  });
+  document.getElementById('ff-check').style.display = 'none';
+  const exp = document.getElementById('ff-exp');
+  const userAnsStr = user.length > 0 ? user.join('') : '—';
+  const answerLine = `<div style="background: var(--paper); padding: 10px 14px; border-radius: 8px; margin: 10px 0; border: 2px solid var(--bee); font-family: 'Unbounded', sans-serif; font-size: 1rem;">
+    🐝 <strong>Твой ответ:</strong> <span style="color: ${isCorrect ? 'var(--green-ok)' : 'var(--red-no)'};">${userAnsStr}</span>
+    &nbsp;·&nbsp; <strong>Правильный:</strong> <span style="color: var(--green-ok);">${q.answer}</span>
+  </div>`;
+  if (isCorrect) {
+    ffState.score++;
+    document.getElementById('ff-score').textContent = ffState.score;
+    exp.innerHTML = answerLine + `<strong>🎉 Точно!</strong> ${q.hint}`;
+  } else {
+    exp.innerHTML = answerLine + `${q.hint}<br><br><span style="font-size: 0.88rem; color: var(--ink-soft);">🍯 Жёлтые — твои верные находки. 🔴 Красные — выбрал зря. 🟢 Пунктирные — надо было собрать, но пропустил.</span>`;
+  }
+  exp.classList.add('show');
+  document.getElementById('ff-next').classList.add('show');
+  document.getElementById('ff-progress').style.width = ((ffState.cur + 1) / flowerFieldData.length * 100) + '%';
+}
+function ffNext() { ffState.cur++; renderFF(); }
+
+// =============== GAME 7: MAZE (Task 8 — formы слов) ===============
+const mazeData = [
+  { fipiId: "AF523B", base: "директор", sentence: "(Директор) нескольких школ нашего района столкнулись с проблемой нехватки компьютеров.", options: ["директора", "директоры"], correct: 0, hint: "В именительном падеже множественного числа — «директора»." },
+  { fipiId: "44F3F1", base: "герб", sentence: "Древние (герб) часто содержали изображения животных и растений.", options: ["гербы", "герба"], correct: 0, hint: "Мн. число — «гербы» (ударение на окончание)." },
+  { fipiId: "57ACFD", base: "кондитер", sentence: "(Кондитер) использовали свежие фрукты для украшения тортов.", options: ["кондитера", "кондитеры"], correct: 1, hint: "Мн. число — «кондитеры» (с ударением на корень). Не путать с «директора»!" },
+  { fipiId: "C3A37F", base: "месяц", sentence: "Летние (месяц): июнь, июль, август — самые тёплые в году.", options: ["месяцы", "месяца"], correct: 0, hint: "Мн. число — «месяцы»." },
+  { fipiId: "C99934", base: "контейнер", sentence: "Мы купили новые (контейнер) для хранения продуктов.", options: ["контейнера", "контейнеры"], correct: 1, hint: "Мн. число — «контейнеры» (с ударением на «е»)." },
+  { fipiId: "A2A9DE", base: "стог", sentence: "На поле стояли высокие (стог) сена.", options: ["стога", "стоги"], correct: 0, hint: "Мн. число — «стога»." },
+  { fipiId: "658515", base: "бухгалтер", sentence: "Новому предприятию требуются опытные (бухгалтер).", options: ["бухгалтера", "бухгалтеры"], correct: 1, hint: "Мн. число — «бухгалтеры» (литературная норма)." },
+  { fipiId: "4844DF", base: "катер", sentence: "У пристани стояли небольшие прогулочные (катер).", options: ["катеры", "катера"], correct: 1, hint: "Мн. число — «катера»." },
+  { fipiId: "F7A4AC", base: "вафли", sentence: "Бабушка купила две пачки (вафли) по цене одной.", options: ["вафлей", "вафель"], correct: 1, hint: "Род. падеж мн. числа — «вафель» (без окончания)." },
+  { fipiId: "415D28", base: "мускулы", sentence: "Бывает, что за лёгким движением лицевых (мускулы) скрывается множество эмоций.", options: ["мускулов", "мускул"], correct: 0, hint: "Род. падеж мн. числа — «мускулов»." }
+];
+
+let mzState = { cur: 0, score: 0 };
+function initMZ() {
+  mzState = { cur: 0, score: 0 };
+  resetErrorLog();
+  document.getElementById('mz-score').textContent = 0;
+  document.getElementById('mz-total').textContent = mazeData.length;
+  document.getElementById('mz-progress').style.width = '0%';
+  renderMZ();
+}
+function renderMZ() {
+  const c = document.getElementById('mz-content');
+  if (mzState.cur >= mazeData.length) {
+    showResult(c, mzState.score, mazeData.length, 'Лабиринт форм', 'initMZ');
+    return;
+  }
+  const q = mazeData[mzState.cur];
+
+  // build steps
+  let stepsHTML = '';
+  for (let i = 0; i < mazeData.length; i++) {
+    let cls = 'maze-step';
+    if (i < mzState.cur) cls += ' passed';
+    else if (i === mzState.cur) cls += ' current';
+    stepsHTML += `<div class="${cls}">${i+1}</div>`;
+  }
+
+  c.innerHTML = `
+    <div class="question">
+      <div class="question-num">РАЗВИЛКА ${mzState.cur + 1}</div>
+      <div class="source-tag">ФИПИ ${q.fipiId}</div>
+      <div class="maze-progress">${stepsHTML}</div>
+      <div class="maze-question">
+        <div style="font-size: 0.95rem; color: var(--ink-soft); margin-bottom: 8px;">Поставь слово в нужную форму:</div>
+        <div class="word-target">«${q.base}»</div>
+        <div style="margin-top: 12px; font-size: 0.95rem;">${q.sentence}</div>
+      </div>
+      <div class="maze-options">
+        ${q.options.map((opt, i) => `<div class="maze-cell" onclick="mzPick(${i})">${opt}</div>`).join('')}
+      </div>
+      <div class="explanation" id="mz-exp"></div>
+      <button class="next-btn" id="mz-next" onclick="mzNext()">Дальше →</button>
+    </div>
+  `;
+}
+function mzPick(idx) {
+  const q = mazeData[mzState.cur];
+  const cells = document.querySelectorAll('.maze-cell');
+  cells.forEach(c => { c.onclick = null; c.classList.add('disabled'); });
+  logTaskAnswer(q.fipiId, q.options[idx] || '—', idx === q.correct, 1);
+  if (idx === q.correct) {
+    cells[idx].classList.add('correct');
+    mzState.score++;
+    document.getElementById('mz-score').textContent = mzState.score;
+    document.getElementById('mz-exp').innerHTML = `🐝 <strong>Шаг сделан!</strong> ${q.hint}`;
+  } else {
+    cells[idx].classList.add('wrong');
+    cells[q.correct].classList.add('correct');
+    document.getElementById('mz-exp').innerHTML = `🤔 Правильно: «${q.options[q.correct]}». ${q.hint}`;
+  }
+  document.getElementById('mz-exp').classList.add('show');
+  document.getElementById('mz-next').classList.add('show');
+  document.getElementById('mz-progress').style.width = ((mzState.cur + 1) / mazeData.length * 100) + '%';
+}
+function mzNext() { mzState.cur++; renderMZ(); }
+
+// =============== GAME 8: HIVE (Task 9 — управление → согласование) ===============
+const hiveData = [
+  { fipiId: "47E444", phrase: "белок яйца", answer: ["яичный белок", "белок яичный"] },
+  { fipiId: "FAE859", phrase: "выставка книг", answer: ["книжная выставка", "выставка книжная"] },
+  { fipiId: "4075D4", phrase: "гнездо птицы", answer: ["птичье гнездо", "гнездо птичье"] },
+  { fipiId: "15551A", phrase: "гребень петуха", answer: ["петушиный гребень", "гребень петушиный"] },
+  { fipiId: "095E1D", phrase: "грива коня", answer: ["конская грива", "грива конская"] },
+  { fipiId: "021704", phrase: "дар артиста", answer: ["артистический дар", "дар артистический"] },
+  { fipiId: "478EDF", phrase: "день без ветра", answer: ["безветренный день", "день безветренный"] },
+  { fipiId: "4B0C99", phrase: "день в январе", answer: ["январский день", "день январский"] },
+  { fipiId: "09628F", phrase: "дом из брёвен", answer: ["бревенчатый дом", "дом бревенчатый"] },
+  { fipiId: "DD79B4", phrase: "зал для зрителей", answer: ["зрительный зал", "зал зрительный"] },
+  { fipiId: "25B988", phrase: "клумба с цветами", answer: ["цветочная клумба", "клумба цветочная"] },
+  { fipiId: "3233FD", phrase: "колосья ржи", answer: ["ржаные колосья", "колосья ржаные"] }
+];
+
+let hvState = { score: 0, answered: new Set() };
+function initHV() {
+  hvState = { score: 0, answered: new Set() };
+  resetErrorLog();
+  document.getElementById('hv-score').textContent = 0;
+  document.getElementById('hv-total').textContent = hiveData.length;
+  document.getElementById('hv-progress').style.width = '0%';
+  renderHV();
+}
+function renderHV() {
+  const c = document.getElementById('hv-content');
+  let hiveHTML = '<div class="hive">';
+  hiveData.forEach((h, i) => {
+    const ans = hvState.answered.has(i);
+    const correct = hvState.answered.has(i + 1000); // hack: 1000+i = correct
+    hiveHTML += `
+      <div class="honeycomb ${correct ? 'correct' : ans ? 'wrong' : ''}" data-idx="${i}">
+        <div class="honeycomb-question">${correct ? '🍯' : '🐝'}<br>«${h.phrase}»</div>
+        ${correct ? '<div style="color: white; font-weight: 700;">' + h.answer[0] + '</div>' :
+          `<input class="honeycomb-input" id="hv-in-${i}" placeholder="напиши ответ..." onkeypress="if(event.key==='Enter')hvCheck(${i})"
+                  ${ans ? 'disabled' : ''}>
+          ${!ans ? `<button class="check-btn" style="padding: 6px 14px; font-size: 0.85rem; margin-top: 8px;" onclick="hvCheck(${i})">Проверить</button>` : ''}`}
+      </div>`;
+  });
+  hiveHTML += '</div>';
+
+  let done = hvState.score >= hiveData.length;
+  c.innerHTML = `
+    <div style="margin-bottom: 16px; padding: 14px; background: var(--amber); border-radius: 12px; border: 2px dashed var(--bee);">
+      <div style="font-size: 0.95rem; color: var(--ink-soft);">
+        💡 Замени словосочетания с УПРАВЛЕНИЕМ на синонимичные с СОГЛАСОВАНИЕМ.<br>
+        Например: «<strong>стая птиц</strong>» (управление) → «<strong>птичья стая</strong>» (согласование).
+      </div>
+    </div>
+    ${hiveHTML}
+    ${done ? '<div style="text-align: center; margin-top: 20px;"><button class="check-btn" onclick="hvFinish()">🏆 Завершить игру</button></div>' : ''}
+  `;
+}
+function hvCheck(idx) {
+  const input = document.getElementById('hv-in-' + idx);
+  if (!input) return;
+  const val = input.value.trim().toLowerCase().replace(/ё/g, 'е');
+  if (!val) return;
+  const correct = hiveData[idx].answer.map(a => a.toLowerCase().replace(/ё/g, 'е'));
+  if (correct.includes(val)) {
+    hvState.answered.add(idx);
+    hvState.answered.add(idx + 1000);
+    hvState.score++;
+    logTaskAnswer(hiveData[idx].fipiId, val, true, 1);
+    document.getElementById('hv-score').textContent = hvState.score;
+    document.getElementById('hv-progress').style.width = (hvState.score / hiveData.length * 100) + '%';
+  } else {
+    hvState.answered.add(idx);
+    logTaskAnswer(hiveData[idx].fipiId, val, false, 1);
+    alert('Ой, не то. Правильный ответ: «' + hiveData[idx].answer[0] + '». Попробуй следующую соту 🐝');
+  }
+  renderHV();
+}
+function hvFinish() {
+  const c = document.getElementById('hv-content');
+  showResult(c, hvState.score, hiveData.length, 'Сборка улья', 'initHV');
+}
+
+// =============== GAME 9: AQUARIUM (Task 11 — сравнения) ===============
+const aquariumData = [
+  {
+    fipiId: "EE24FA",
+    category: "сравнение",
+    options: [
+      "— Евгенья, снимай иконы! Наталья, одевай ребят! — строго, крепким голосом командовала бабушка, а дед тихонько выл: — И-и-ы...",
+      "Я выбежал в кухню; окно на двор сверкало, точно золотое; босой дядя Яков, обувая сапоги, прыгал на них, будто ему жгло подошвы, и кричал: — Это Мишка поджёг, поджёг да ушёл, ага!",
+      "Сквозь иней на стёклах было видно, как горит крыша мастерской, как за открытой дверью её вихрится кудрявый огонь.",
+      "В тихой ночи красные цветы его цвели бездымно; лишь очень высоко над ними колебалось темноватое облако, не мешая видеть серебряный поток Млечного Пути.",
+      "Багрово светился снег, и стены построек дрожали, качались, как будто стремясь в жаркий угол двора, где весело играл огонь, заливая красным широкие щели в стене мастерской, вырисовываясь из них раскалёнными кривыми гвоздями."
+    ],
+    answer: "25"
+  },
+  {
+    fipiId: "3A1595",
+    category: "сравнение",
+    options: [
+      "Война застала на Эзеле нескольких советских актёров — мужчин и женщин.",
+      "Егоров всегда играл в темноте, и единственной точкой света, которую он часто видел перед собой, была большая звезда.",
+      "Играть было легко, будто сухие, лёгкие пальцы Паганини водили смычком по изуродованной скрипке.",
+      "Она зажужжала, как шмель, и затихла.",
+      "Скрипка замолчала надолго."
+    ],
+    answer: "34"
+  },
+  {
+    fipiId: "4DDCB6",
+    category: "сравнение",
+    options: [
+      "Когда первый раз пошли на яхтах, пришлось его особенно тщательно наряжать в спасательный жилет и предупредить других членов экипажа: «Поглядывайте за ним».",
+      "Посреди озера нас прижала гроза.",
+      "Но холодно отверг предложение освободить его от ночной вахты.",
+      "Был он маленький, щуплый, как воробей, слишком серьёзный.",
+      "Дождь лупил его по спине, по берету, наливался в сапоги, гроза атаковала его оглушительным треском и вспышками, а он оставался на посту, маленький и прямой, как стойкий оловянный солдатик."
+    ],
+    answer: "45"
+  },
+  {
+    fipiId: "CEF5A9",
+    category: "сравнение",
+    options: [
+      "Снег, похожий на старое серебро, лежал на окрестных полях, и океан вздыхал у берегов, отсыпаясь перед зимними штормами.",
+      "Анну О'Нейль Седых разыскал только в 1918 году в приморском городке на севере Шотландии.",
+      "У моряков есть поверье, что среди бушующих нордов и трамонтан, муссонов и сокрушительных тайфунов есть жаркий ветер соранг, дующий один раз за многие сотни лет.",
+      "У детей от радости темнеют глаза, а корабли зажигают приветственные сигналы, качаются и кланяются этому ветру, как ласковые звери с мокрой от дождя шкурой.",
+      "Тёплый воздух проносится над Шотландией, превращая зиму в свежее мгновенное лето."
+    ],
+    answer: "14"
+  },
+  {
+    fipiId: "6A051B",
+    category: "сравнение",
+    options: [
+      "Сколько маленький Коля помнил себя в войну, он всегда был голодным.",
+      "Черноволосый, взъерошенный, с проступающими рёбрышками, он был похож на маленького исхудалого волчонка, и его ввалившиеся глаза постоянно искали добычу.",
+      "Коржи были пахучие, румяные. Они светились, как два маленьких посоленных солнца.",
+      "А второй корж, румяный, целёхонький, лежал на столе и призывно улыбался всей своей рожицей.",
+      "Но через некоторое время он вернулся, взял со стола остывший корж, аккуратно завернул его в чистую тряпицу и положил в дедушкин сундук, где лежали старые сапоги, мешок с самосадом и штык, привезённый с прошлой войны."
+    ],
+    answer: "23"
+  }
+];
+
+let aqState = { cur: 0, score: 0, sel: [] };
+function initAQ() {
+  aqState = { cur: 0, score: 0, sel: [] };
+  resetErrorLog();
+  document.getElementById('aq-score').textContent = 0;
+  document.getElementById('aq-total').textContent = aquariumData.length;
+  document.getElementById('aq-progress').style.width = '0%';
+  renderAQ();
+}
+function renderAQ() {
+  const c = document.getElementById('aq-content');
+  if (aqState.cur >= aquariumData.length) {
+    showResult(c, aqState.score, aquariumData.length, 'Аквариум', 'initAQ');
+    return;
+  }
+  const q = aquariumData[aqState.cur];
+  aqState.sel = [];
+  let fishHTML = '';
+  q.options.forEach((opt, i) => {
+    fishHTML += `<div class="fish" data-i="${i+1}" onclick="aqToggle(${i+1}, this)">
+      <div class="fish-text">${i+1}) ${opt}</div>
+    </div>`;
+  });
+  c.innerHTML = `
+    <div class="question">
+      <div class="question-num">АКВАРИУМ ${aqState.cur + 1}</div>
+      <div class="source-tag">ФИПИ ${q.fipiId}</div>
+      <div class="aquarium">
+        <div class="aquarium-task">🎣 Лови рыбок, в которых средством выразительности является ${q.category.toUpperCase()}!</div>
+        <div class="fish-tank">${fishHTML}</div>
+      </div>
+      <div style="text-align: center;">
+        <button class="check-btn" onclick="aqCheck()">🎣 Проверить улов</button>
+      </div>
+      <div class="explanation" id="aq-exp"></div>
+      <button class="next-btn" id="aq-next" onclick="aqNext()">Дальше →</button>
+    </div>
+  `;
+}
+function aqToggle(n, el) {
+  if (el.classList.contains('disabled')) return;
+  if (aqState.sel.includes(n)) {
+    aqState.sel = aqState.sel.filter(x => x !== n);
+    el.classList.remove('selected');
+  } else {
+    aqState.sel.push(n);
+    el.classList.add('selected');
+  }
+}
+function aqCheck() {
+  const q = aquariumData[aqState.cur];
+  const correct = q.answer.split('').map(Number).sort();
+  const user = [...aqState.sel].sort();
+  const isCorrect = JSON.stringify(correct) === JSON.stringify(user);
+  logTaskAnswer(q.fipiId, user.join('') || '—', isCorrect, 1);
+  document.querySelectorAll('.fish').forEach(el => {
+    el.classList.add('disabled');
+    el.classList.remove('selected');
+    el.onclick = null;
+    const n = parseInt(el.dataset.i);
+    if (correct.includes(n) && user.includes(n)) {
+      el.classList.add('correct');
+    } else if (user.includes(n)) {
+      el.classList.add('wrong');
+    } else if (correct.includes(n)) {
+      el.classList.add('missed');
+    }
+  });
+  const exp = document.getElementById('aq-exp');
+  const userAnsStr = user.length > 0 ? user.join('') : '—';
+  const answerLine = `<div style="background: var(--paper); padding: 10px 14px; border-radius: 8px; margin: 10px 0; border: 2px solid var(--bee); font-family: 'Unbounded', sans-serif; font-size: 1rem;">
+    🐝 <strong>Твой улов:</strong> <span style="color: ${isCorrect ? 'var(--green-ok)' : 'var(--red-no)'};">${userAnsStr}</span>
+    &nbsp;·&nbsp; <strong>Правильный:</strong> <span style="color: var(--green-ok);">${q.answer}</span>
+  </div>`;
+  if (isCorrect) {
+    aqState.score++;
+    document.getElementById('aq-score').textContent = aqState.score;
+    exp.innerHTML = answerLine + `<strong>🐟 Отличный улов!</strong>`;
+  } else {
+    exp.innerHTML = answerLine + `<span style="font-size: 0.88rem; color: var(--ink-soft);">🐠 Жёлтые — твои верные. 🔴 Красные — поймал зря. 🟢 Пунктирные — пропустил рыбку-${q.category}.</span>`;
+  }
+  exp.classList.add('show');
+  document.getElementById('aq-next').classList.add('show');
+  document.getElementById('aq-progress').style.width = ((aqState.cur + 1) / aquariumData.length * 100) + '%';
+}
+function aqNext() { aqState.cur++; renderAQ(); }
+
+// =============== GAME 10: CATS (Task 12 — лексический анализ) ===============
+const catsData = [
+  {
+    fipiId: "C0E1BB",
+    meaning: "музыкант, управляющий оркестром или хором",
+    range: "43–48",
+    text: "— (43)Я передам её лучшему скрипачу нашего симфонического оркестра, — сказал лётчику дирижёр консерватории. (44)Лётчик — простой белобрысый парень — кивнул и улыбнулся. (45)Где теперь эта скрипка, я не знаю. (46)Говорят, что она в Москве. (47)Но где бы она ни была, она играет прекрасные симфонии, знакомые нам и любимые нами, как старое небо Европы, как слово Пушкина, Шекспира или Гейне. (48)Она играет мелодии Чайковского, Шостаковича и Шапорина.",
+    answer: "дирижёр"
+  },
+  {
+    fipiId: "5BE968",
+    meaning: "очертания, виднеющиеся в темноте, тумане",
+    range: "35–45",
+    text: "(35)Витька пошёл на пост. (36)Горизонты заволакивало, стояла душная тревожная тишина. (37)Костёр жался к земле. (38)Витька, возникнув из темноты, тихо сказал: — Там, в кустах, кто-то вроде бы ходит. (39)Я пойду проверю. — (40)Проверь, — сказал я. (41)И, подождав, пошёл следом. (42)Витька меня не видел. (43)Я с трудом различал его силуэт, но даже по этой смутной фигурке видно было, как он боится. (44)Боится этой глухой предгрозовой тишины, непонятной опасности в кустах, темноты. (45)Какую силу воли надо иметь, чтобы так бояться и всё-таки идти!",
+    answer: "силуэт"
+  },
+  {
+    fipiId: "66AE89",
+    meaning: "сильно взволновать, произвести большое впечатление",
+    range: "29–33",
+    text: "(29)Но нам во всём была неудача. (30)Если бы мы остались живы, я рассказал бы такие вещи о высоком мужестве и простом величии моих товарищей, что они потрясли бы каждого человека». (31)Записка лейтенанта Отса на имя Анны О'Нейль попала в руки русского матроса Василия Седых, участника экспедиции, нашедшей погибшего Скотта и троих его товарищей. (32)Анну О'Нейль Седых разыскал только в 1918 году в приморском городке на севере Шотландии. (33)Было начало зимы.",
+    answer: "потрясли"
+  },
+  {
+    fipiId: "49C430",
+    meaning: "вымощенная или покрытая асфальтом проезжая часть улицы",
+    range: "1–4",
+    text: "(1)В Ленинград пришла первая послевоенная весна. (2)Однажды я шёл с завода домой. (3)Долгий закат дымил над городом. (4)Только что прошумел дождь, ещё бренчали капли, падая с карнизов, и синие лужи на мостовых курились паром.",
+    answer: "мостовых"
+  },
+  {
+    fipiId: "F73D3A",
+    meaning: "чувство близости, основанное на преданности и симпатии",
+    range: "12–17",
+    text: "(12)Светлана Леонидовна весело рассмеялась. — (13)Дорогие мои девочки, это вы сейчас так думаете, потому что никаких забот у вас нет. (14)Потом, когда появятся у вас семьи, заботы, личные интересы, а времени свободного будет оставаться всё меньше и меньше, тогда и проверится ваша дружба. (15)Хватит ли у вас привязанности друг к другу, чтобы хотя бы в самую тяжёлую минуту прийти на помощь, или вы будете успокаивать себя рассуждениями о собственной занятости? — (16)Кстати, о мелочах, — продолжала Светлана Леонидовна. — (17)Расскажу вам историю, как мои друзья помогли мне в одной мелочи.",
+    answer: "привязанности"
+  },
+  {
+    fipiId: "BA112C",
+    meaning: "нападающий игрок в командных играх с мячом",
+    range: "1–6",
+    text: "(1)В нашей паре я был ведущим, а Павлик — ведомым. (2)Недоброжелатели считали, что Павлик был приложением ко мне. (3)На первый взгляд так оно и было. (4)Меня нельзя было приглашать на день рождения без Павлика. (5)Я покинул футбольную дворовую команду, где считался лучшим бомбардиром, когда Павлика отказались взять хотя бы запасным, и вернулся вместе с ним. (6)Так возникла иллюзия нашего неравенства.",
+    answer: "бомбардир"
+  }
+];
+
+let ctState = { cur: 0, score: 0, selected: null };
+function initCT() {
+  ctState = { cur: 0, score: 0, selected: null };
+  resetErrorLog();
+  document.getElementById('ct-score').textContent = 0;
+  document.getElementById('ct-total').textContent = catsData.length;
+  document.getElementById('ct-progress').style.width = '0%';
+  renderCT();
+}
+function renderCT() {
+  const c = document.getElementById('ct-content');
+  if (ctState.cur >= catsData.length) {
+    showResult(c, ctState.score, catsData.length, 'Собери котят', 'initCT');
+    return;
+  }
+  const q = catsData[ctState.cur];
+  ctState.selected = null;
+
+  // Build text HTML: replace (N) markers with circles, wrap each WORD in clickable span.
+  // Strategy: process character-by-character, accumulate words, leave whitespace and punctuation as-is.
+  let textHTML = '';
+  const src = q.text;
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    // Number marker like (43)
+    if (ch === '(' && /\d/.test(src[i+1])) {
+      const m = src.substring(i).match(/^\((\d+)\)/);
+      if (m) {
+        textHTML += '<span class="num-mark">' + m[1] + '</span>';
+        i += m[0].length;
+        continue;
+      }
+    }
+    // Whitespace
+    if (/\s/.test(ch)) {
+      textHTML += ch;
+      i++;
+      continue;
+    }
+    // Word (letters + hyphen for compound words)
+    if (/[А-Яа-яЁё]/.test(ch)) {
+      let word = '';
+      while (i < src.length && /[А-Яа-яЁё-]/.test(src[i])) {
+        word += src[i];
+        i++;
+      }
+      // Escape single quotes for onclick attribute
+      const safeWord = word.replace(/'/g, "\\'");
+      textHTML += '<span class="clickable-word" onclick="ctPick(this, \'' + safeWord + '\')">' + word + '</span>';
+      continue;
+    }
+    // Anything else (punctuation, brackets, dashes)
+    textHTML += ch;
+    i++;
+  }
+
+  c.innerHTML = `
+    <div class="question">
+      <div class="question-num">КОТЁНОК ${ctState.cur + 1}</div>
+      <div class="source-tag">ФИПИ ${q.fipiId}</div>
+      <div class="cats-task">
+        <div class="cats-meaning">🐱 «${q.meaning}»</div>
+        <div style="font-size: 0.9rem; color: var(--ink-soft);">Найди в предложениях ${q.range} слово с этим значением</div>
+      </div>
+      <div class="cats-instruction">Кликни на слово в тексте, которое подходит:</div>
+      <div class="cats-text">${textHTML}</div>
+      <div style="text-align: center; margin-top: 14px;">
+        <button class="check-btn" id="ct-check" onclick="ctCheck()" disabled style="opacity: 0.5;">Проверить →</button>
+      </div>
+      <div class="explanation" id="ct-exp"></div>
+      <button class="next-btn" id="ct-next" onclick="ctNext()">Дальше →</button>
+    </div>
+  `;
+}
+function ctPick(el, word) {
+  document.querySelectorAll('.clickable-word').forEach(w => w.classList.remove('selected'));
+  el.classList.add('selected');
+  ctState.selected = word.toLowerCase().replace(/[,\.\!\?:;]/g, '');
+  const btn = document.getElementById('ct-check');
+  btn.disabled = false;
+  btn.style.opacity = '1';
+}
+function ctCheck() {
+  if (!ctState.selected) return;
+  const q = catsData[ctState.cur];
+  // Compare lowercased, ignoring ё/е
+  const norm = s => s.toLowerCase().replace(/ё/g, 'е').replace(/[,\.\!\?:;«»\(\)]/g, '');
+  const userN = norm(ctState.selected);
+  const correctN = norm(q.answer);
+  // Also accept partial match (e.g. "потрясли" vs "потрясти")
+  const root = correctN.substring(0, Math.min(correctN.length - 1, 5));
+  const matches = userN === correctN || userN.startsWith(root);
+  logTaskAnswer(q.fipiId, ctState.selected || '—', matches, 1);
+
+  document.querySelectorAll('.clickable-word').forEach(w => {
+    w.onclick = null;
+    const wn = norm(w.textContent);
+    if (wn === correctN || wn.startsWith(root)) {
+      w.classList.add('correct');
+      w.classList.remove('selected');
+    } else if (w.classList.contains('selected') && !matches) {
+      w.classList.add('wrong');
+      w.classList.remove('selected');
+    }
+  });
+  document.getElementById('ct-check').style.display = 'none';
+  const exp = document.getElementById('ct-exp');
+  if (matches) {
+    ctState.score++;
+    document.getElementById('ct-score').textContent = ctState.score;
+    exp.innerHTML = `🐱 <strong>Поймал!</strong> Правильное слово: <strong>${q.answer}</strong>.`;
+  } else {
+    exp.innerHTML = `🤔 Котёнок прыгнул мимо. Правильно: <strong>${q.answer}</strong> (выделено зелёным).`;
+  }
+  exp.classList.add('show');
+  document.getElementById('ct-next').classList.add('show');
+  document.getElementById('ct-progress').style.width = ((ctState.cur + 1) / catsData.length * 100) + '%';
+}
+function ctNext() { ctState.cur++; renderCT(); }
+
+// =============== LEADERBOARD ===============
+const GAMES = [
+  { id: 'Цветочное поле', short: '🌻 Цветы', max: 5 },
+  { id: 'Лабиринт форм', short: '🌀 Лабиринт', max: 10 },
+  { id: 'Сборка улья', short: '🐝 Улей', max: 12 },
+  { id: 'Аквариум', short: '🐠 Аквариум', max: 5 },
+  { id: 'Собери котят', short: '🐱 Котята', max: 6 }
+];
+let lbCurrentGame = GAMES[0].id;
+function initLB() {
+  const tabs = document.getElementById('lb-tabs');
+  tabs.innerHTML = GAMES.map(g => `
+    <button class="lb-tab ${g.id === lbCurrentGame ? 'active' : ''}" onclick="lbSwitch('${g.id}')">${g.short}</button>
+  `).join('');
+  loadLB(lbCurrentGame);
+}
+function lbSwitch(game) {
+  lbCurrentGame = game;
+  document.querySelectorAll('.lb-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  loadLB(game);
+}
+async function loadLB(game) {
+  const list = document.getElementById('lb-list');
+  if (LEADERBOARD_URL.startsWith('ВСТАВЬТЕ')) {
+    list.innerHTML = `<div class="lb-empty">⚙️ Таблица лидеров ещё не настроена.<br>Педагог скоро её подключит!</div>`;
+    return;
+  }
+  list.innerHTML = `<div class="lb-loading"><span class="dot">🐝</span><span class="dot">🐝</span><span class="dot">🐝</span></div>`;
+  try {
+    const res = await fetch(LEADERBOARD_URL + '?game=' + encodeURIComponent(game));
+    const data = await res.json();
+    if (!data.ok || !data.top || data.top.length === 0) {
+      list.innerHTML = `<div class="lb-empty">Пока пчёлок нет 🐝<br>Будь первым(ой)!</div>`;
+      return;
+    }
+    list.innerHTML = data.top.map((r, i) => `
+      <div class="lb-row ${i < 3 ? 'top-' + (i+1) : ''}">
+        <div class="lb-rank">${i+1}</div>
+        <div class="lb-name">${escapeHTML(r.name)}</div>
+        <div class="lb-score">${r.score} 🐝</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    list.innerHTML = `<div class="lb-empty">😔 Не удалось загрузить таблицу.<br>Попробуй позже.</div>`;
+  }
+}
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[c]);
+}
+
+// =============== RESULT SCREEN ===============
+function showResult(container, score, total, gameName, restartFn) {
+  let title, msg, bees;
+  const pct = score / total;
+  if (pct >= 0.9) { title = "Великолепно!"; bees = "🐝🐝🐝🐝"; msg = "Ты — пчёлка-королева! На ОГЭ ты будешь блистать."; }
+  else if (pct >= 0.7) { title = "Молодец!"; bees = "🐝🐝🐝"; msg = "Хорошо потрудился(лась)! Теперь видишь, что ещё нужно повторить."; }
+  else if (pct >= 0.5) { title = "Уже почти!"; bees = "🐝🐝"; msg = "Повтори правила и попробуй ещё раз — у тебя получится."; }
+  else { title = "Не сдавайся!"; bees = "🐝"; msg = "Ошибки сейчас — лучше, чем на экзамене. Перечитай разборы и попробуй снова."; }
+
+  // Submit results with error log
+  submitGameResults(gameName, score, total).then(submitted => {
+    const note = document.getElementById('result-saving-note');
+    if (note) note.textContent = submitted ? '✓ Результат сохранён в общий рейтинг' : '⚠️ Рейтинг временно недоступен';
+  });
+
+  container.innerHTML = `
+    <div class="result-screen">
+      <div class="result-bees">${bees}</div>
+      <div class="result-title">${title}</div>
+      <div class="result-score">${score} из ${total}</div>
+      <div class="result-message">${msg}</div>
+      <div class="saving-note" id="result-saving-note">⏳ Отправляю результат в рейтинг...</div>
+      <div style="margin-top: 16px;">
+        <button class="restart-btn" onclick="${restartFn}()">🔄 Ещё раз</button>
+        <button class="restart-btn" onclick="backToMenu()" style="background: var(--honey); color: var(--bee);">🏠 К играм</button>
+        <button class="restart-btn" onclick="openLeaderboard()" style="background: var(--honey-deep); color: white;">🏆 Топ-10</button>
+      </div>
+    </div>
+  `;
+}
+
+// =============== INIT ===============
+(function init() {
+  const name = getUserName();
+  document.getElementById('user-name').textContent = name || '…';
+  if (!name) askForName();
+})();
+</script>
+</body>
+</html>
