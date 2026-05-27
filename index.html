@@ -16207,7 +16207,7 @@ function modalStudentDetail(){
             ' вопросов',
             el('span', { style:{ color:'var(--ink-3)', marginLeft:'8px' }}, '· ' + agoText))),
         el('div', { style:{ fontSize:'11px', color:'#7C2D12', fontWeight:'700' }},
-          isExpanded ? '▾ Свернуть' : '▸ Показать ответы'));
+          isExpanded ? '▾ Свернуть' : '▸ Показать ответы')));
       /* Развёрнутая часть: для каждого вопроса — что ответил, проверен ли. */
       if(isExpanded){
         const detailsBox = el('div', {
