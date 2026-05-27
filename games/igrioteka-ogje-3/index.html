@@ -279,6 +279,116 @@
     font-family: 'Unbounded', sans-serif; font-weight: 800;
     font-size: 0.95rem; flex-shrink: 0;
   }
+
+  /* PUZZLE GAME — clickable comma positions in text */
+  .puzzle-text {
+    background: var(--paper);
+    border: 2px dashed var(--bee);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin: 14px 0;
+    font-size: 1rem;
+    line-height: 2;
+  }
+  .puzzle-num {
+    display: inline-block;
+    background: var(--cream);
+    border: 2px solid var(--bee);
+    border-radius: 50%;
+    width: 32px; height: 32px;
+    line-height: 28px; text-align: center;
+    cursor: pointer;
+    font-family: 'Unbounded', sans-serif;
+    font-weight: 700; font-size: 0.95rem;
+    color: var(--bee);
+    margin: 0 2px;
+    vertical-align: middle;
+    transition: all 0.15s;
+  }
+  .puzzle-num:hover:not(.disabled) {
+    background: var(--amber);
+    transform: scale(1.1);
+  }
+  .puzzle-num.selected {
+    background: var(--honey);
+    border-color: var(--honey-deep);
+    color: var(--bee);
+  }
+  .puzzle-num.correct {
+    background: var(--green-ok);
+    color: white;
+    border-color: var(--green-ok);
+  }
+  .puzzle-num.wrong {
+    background: var(--red-no);
+    color: white;
+    border-color: var(--red-no);
+  }
+  .puzzle-num.missed {
+    background: var(--paper);
+    color: var(--green-ok);
+    border: 3px dashed var(--green-ok);
+    font-weight: 700;
+  }
+  .puzzle-num.disabled { cursor: not-allowed; }
+
+  /* SNIPER GAME — bullseye style for comma positions */
+  .sniper-text {
+    background: var(--paper);
+    border: 2px dashed var(--bee);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin: 14px 0;
+    font-size: 1rem;
+    line-height: 2.2;
+  }
+  .sniper-target {
+    display: inline-block;
+    position: relative;
+    background: radial-gradient(circle, var(--red-no) 0%, var(--red-no) 35%, white 36%, white 50%, var(--red-no) 51%, var(--red-no) 65%, white 66%);
+    border: 2px solid var(--bee);
+    border-radius: 50%;
+    width: 36px; height: 36px;
+    line-height: 32px; text-align: center;
+    cursor: pointer;
+    font-family: 'Unbounded', sans-serif;
+    font-weight: 800; font-size: 0.95rem;
+    color: var(--bee);
+    margin: 0 3px;
+    vertical-align: middle;
+    transition: all 0.15s;
+    box-shadow: 0 0 0 2px white inset;
+  }
+  .sniper-target:hover:not(.disabled) {
+    transform: scale(1.15) rotate(8deg);
+  }
+  .sniper-target.hit {
+    background: var(--honey);
+    border-color: var(--honey-deep);
+  }
+  .sniper-target.hit::after {
+    content: "🎯";
+    position: absolute; top: -8px; right: -8px;
+    font-size: 1.1rem;
+  }
+  .sniper-target.correct {
+    background: var(--green-ok);
+    color: white;
+    border-color: var(--green-ok);
+  }
+  .sniper-target.correct::after { content: "✓"; position: absolute; top: -10px; right: -8px; font-size: 1rem; }
+  .sniper-target.wrong {
+    background: var(--red-no);
+    color: white;
+    border-color: var(--red-no);
+  }
+  .sniper-target.wrong::after { content: "✗"; position: absolute; top: -10px; right: -8px; font-size: 1rem; }
+  .sniper-target.missed {
+    background: var(--paper);
+    color: var(--green-ok);
+    border: 3px dashed var(--green-ok);
+  }
+  .sniper-target.disabled { cursor: not-allowed; }
   .check-btn {
     background: var(--bee); color: var(--cream); border: none;
     padding: 12px 24px; border-radius: 30px; cursor: pointer;
@@ -451,7 +561,7 @@
   <div class="bee-icon">🔎</div>
   <h1>Синтаксический детектив</h1>
   <div class="subtitle">5 игр про предложения · задания 2, 3, 4, 5</div>
-  <div class="greeting">Привет! Расследуй устройство русских предложений: ищи грамматические основы, разгадывай характеристики и расставляй знаки 🐝</div>
+  <div class="greeting">Расследуй устройство русских предложений: ищи грамматические основы, разгадывай характеристики и расставляй знаки 🐝</div>
   <div class="source-note">ОБЗ ФИПИ · ОГЭ-2026</div>
   <div class="user-bar" onclick="changeUserName()">🐝 <span id="user-name">…</span></div>
 </header>
@@ -475,17 +585,17 @@
     <p>Сопоставь правила и примеры: к каждому правилу А, Б, В подбери нужное предложение из 5.</p>
     <span class="badge">5 раундов</span>
   </a>
-  <a class="menu-card coming-soon">
+  <a class="menu-card" onclick="openGame('puzzle')">
     <div class="num">ИГРА 04 · ЗАДАНИЕ 5</div>
     <h2>🧩 Пунктуация-мозаика</h2>
-    <p>Скоро: 5 новых текстов на расстановку знаков препинания.</p>
-    <span class="badge" style="background: #ccc;">скоро</span>
+    <p>5 новых текстов на расстановку знаков препинания. Кликни цифры там, где нужны запятые.</p>
+    <span class="badge">5 текстов</span>
   </a>
-  <a class="menu-card coming-soon">
+  <a class="menu-card" onclick="openGame('sniper')">
     <div class="num">ИГРА 05 · ЗАДАНИЕ 5</div>
     <h2>🎯 Снайпер запятых</h2>
-    <p>Скоро: динамичная игра — тапнуть только нужные цифры.</p>
-    <span class="badge" style="background: #ccc;">скоро</span>
+    <p>Ещё 5 текстов — больше тренировки. Без таймера, спокойно тапай нужные цифры.</p>
+    <span class="badge">5 текстов</span>
   </a>
   <a class="menu-card leaderboard" onclick="openLeaderboard()">
     <div class="num">⭐ ТОП-10</div>
@@ -529,6 +639,30 @@
     <div class="progress-bar" style="flex-basis: 100%"><div class="progress-fill" id="mt-progress" style="width: 0%"></div></div>
   </div>
   <div id="mt-content"></div>
+</div>
+
+<!-- GAME 4: PUZZLE (Task 5) -->
+<div id="puzzle" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🧩 Пунктуация-мозаика</div>
+  <div class="game-intro">Прочитай текст. Кликни на цифры там, где нужно поставить запятые.</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="pz-score">0</span> / <span id="pz-total">5</span></div>
+    <div class="progress-bar" style="flex-basis: 100%"><div class="progress-fill" id="pz-progress" style="width: 0%"></div></div>
+  </div>
+  <div id="pz-content"></div>
+</div>
+
+<!-- GAME 5: SNIPER (Task 5) -->
+<div id="sniper" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🎯 Снайпер запятых</div>
+  <div class="game-intro">Прицелься в нужные цифры — где должны стоять запятые. Спокойно, без таймера.</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="sn-score">0</span> / <span id="sn-total">5</span></div>
+    <div class="progress-bar" style="flex-basis: 100%"><div class="progress-fill" id="sn-progress" style="width: 0%"></div></div>
+  </div>
+  <div id="sn-content"></div>
 </div>
 
 <!-- LEADERBOARD -->
@@ -617,6 +751,8 @@ function openGame(id) {
   if (id === 'find-basis') initFB();
   if (id === 'columns') initCL();
   if (id === 'match') initMT();
+  if (id === 'puzzle') initPZ();
+  if (id === 'sniper') initSN();
 }
 function openLeaderboard() {
   document.getElementById('menu').style.display = 'none';
@@ -1142,11 +1278,256 @@ function mtCheck() {
 }
 function mtNext() { mtState.cur++; renderMT(); }
 
+// =============== GAME 4: PUZZLE (Task 5) ===============
+const puzzleData = [
+  {
+    fipiId: "A70F86",
+    text: "XVII век является временем (1) когда Россия «вздохнула» по-новому (2) ведь именно тогда (3) начали отстраиваться новые города и объекты (4) которые по сей день считаются историческими памятниками архитектуры. При этом первая половина XVII века (5) тесно связана с именем великого российского императора Петра I. Именно он (6) привнёс много новшеств (7) заимствованных (8) из стран Европы.",
+    answer: "1247",
+    maxNum: 8
+  },
+
+  {
+    fipiId: "2B3453",
+    text: "В годы Великой Отечественной войны (1) сотрудники музея пытались уберечь памятники Царского Села от вандалов. Памятник А.С. Пушкину и бронзовую фигуру фонтана «Девушка с кувшином» (2) удалось сохранить (3) закопав в землю (4) а вот Чесменскую колонну (5) установленную в память о военных победах (6) спрятать не смогли. Немецкие захватчики (7) пытались сбросить её в пруд танками (8) но пострадали лишь барельефы с пьедестала.",
+    answer: "34568",
+    maxNum: 8
+  },
+
+  {
+    fipiId: "7C8E12",
+    text: "В ситуации (1) когда мёрзнущего под дождём четвероногого друга не можешь оставить на улице (2) побывал почти каждый (3) но (4) к сожалению (5) не все знают (6) что делать с (7) найденным на улице (8) животным. Если вы решили помочь бездомной собаке (9) то нужно взять её за поводок и дать команду «домой».",
+    answer: "1234569",
+    maxNum: 9
+  },
+
+  {
+    fipiId: "3B5CA0",
+    text: "Вантовые мосты во Владивостоке (1) соединившие континент и остров (2) потрясают (3) своим величием каждого (4) кто приезжает посмотреть достопримечательности России. Золотой и Русский мосты впечатляют своими размерами. Длина первого (5) почти 1400 м (6) а второго (7) 3100 м. Самые красивые виды на Русский мост (8) открываются с сопки Орлиное Гнездо. Лучше всего любоваться мостами вечером (9) когда включается ночная подсветка.",
+    answer: "12469",
+    maxNum: 9
+  },
+
+  {
+    fipiId: "31A878",
+    text: "Ветер опять налетел неожиданно. Он сорвал листья с деревьев (1) и (2) подбросив их вверх (3) затих (4) любуясь разноцветным дождём: жёлтым (5) зелёным и красным. Листья (6) опускающиеся на землю (7) плавно покачивались (8) словно разноцветные рыбки в пруду. Так ветер (9) отмечал наступление осени.",
+    answer: "2345678",
+    maxNum: 9
+  }
+];
+
+let pzState = { cur: 0, score: 0, sel: [] };
+function initPZ() {
+  pzState = { cur: 0, score: 0, sel: [] };
+  resetAnswersLog();
+  document.getElementById('pz-score').textContent = 0;
+  document.getElementById('pz-total').textContent = puzzleData.length;
+  document.getElementById('pz-progress').style.width = '0%';
+  renderPZ();
+}
+function renderPZ() {
+  const c = document.getElementById('pz-content');
+  if (pzState.cur >= puzzleData.length) {
+    showResult(c, pzState.score, puzzleData.length, 'Пунктуация-мозаика', 'initPZ');
+    return;
+  }
+  const q = puzzleData[pzState.cur];
+  pzState.sel = [];
+  // Render text with (N) replaced by clickable buttons
+  const renderedText = q.text.replace(/\((\d+)\)/g, (_, n) =>
+    `<span class="puzzle-num" data-n="${n}" onclick="pzToggle(${n}, this)">${n}</span>`
+  );
+  c.innerHTML = `
+    <div class="question">
+      <div class="question-num">ТЕКСТ ${pzState.cur + 1}</div>
+      <div class="source-tag">ФИПИ ${q.fipiId}</div>
+      <div style="margin-bottom: 12px; font-size: 0.95rem; color: var(--ink-soft);">
+        Прочитай текст. Кликни на ВСЕ цифры, на месте которых должны стоять запятые.
+      </div>
+      <div class="puzzle-text">${renderedText}</div>
+      <div style="text-align: center;">
+        <button class="check-btn" id="pz-check" onclick="pzCheck()">🧩 Проверить</button>
+      </div>
+      <div class="explanation" id="pz-exp"></div>
+      <button class="next-btn" id="pz-next" onclick="pzNext()">Дальше →</button>
+    </div>
+  `;
+}
+function pzToggle(n, el) {
+  if (el.classList.contains('disabled')) return;
+  if (pzState.sel.includes(n)) {
+    pzState.sel = pzState.sel.filter(x => x !== n);
+    el.classList.remove('selected');
+  } else {
+    pzState.sel.push(n);
+    el.classList.add('selected');
+  }
+}
+function pzCheck() {
+  const q = puzzleData[pzState.cur];
+  const correctSet = q.answer.split('').map(Number).sort((a,b)=>a-b);
+  const userSet = [...pzState.sel].sort((a,b)=>a-b);
+  const isCorrect = JSON.stringify(correctSet) === JSON.stringify(userSet);
+  logTaskAnswer(q.fipiId, userSet.join('') || '—', isCorrect, 1);
+  document.querySelectorAll('.puzzle-num').forEach(el => {
+    el.classList.add('disabled');
+    el.classList.remove('selected');
+    el.onclick = null;
+    const n = parseInt(el.dataset.n);
+    const userPicked = userSet.includes(n);
+    const isRight = correctSet.includes(n);
+    if (userPicked && isRight) el.classList.add('correct');
+    else if (userPicked && !isRight) el.classList.add('wrong');
+    else if (!userPicked && isRight) el.classList.add('missed');
+  });
+  document.getElementById('pz-check').style.display = 'none';
+  const exp = document.getElementById('pz-exp');
+  const userAnsStr = userSet.length > 0 ? userSet.join('') : '—';
+  const answerLine = `<div style="background: var(--paper); padding: 10px 14px; border-radius: 8px; margin: 10px 0; border: 2px solid var(--bee); font-family: 'Unbounded', sans-serif; font-size: 1rem;">
+    🐝 <strong>Твой ответ:</strong> <span style="color: ${isCorrect ? 'var(--green-ok)' : 'var(--red-no)'};">${userAnsStr}</span>
+    &nbsp;·&nbsp; <strong>Правильный:</strong> <span style="color: var(--green-ok);">${q.answer}</span>
+  </div>`;
+  if (isCorrect) {
+    pzState.score++;
+    document.getElementById('pz-score').textContent = pzState.score;
+    exp.innerHTML = answerLine + `<strong>🧩 Идеально!</strong>`;
+  } else {
+    exp.innerHTML = answerLine + `<span style="font-size: 0.88rem; color: var(--ink-soft);">🟢 Зелёным — где нужны запятые. 🔴 Красным — лишние. 🟢 Пунктиром — пропущенные.</span>`;
+  }
+  exp.classList.add('show');
+  document.getElementById('pz-next').classList.add('show');
+  document.getElementById('pz-progress').style.width = ((pzState.cur + 1) / puzzleData.length * 100) + '%';
+}
+function pzNext() { pzState.cur++; renderPZ(); }
+
+// =============== GAME 5: SNIPER (Task 5 — same task, fresh items + bullseye visual) ===============
+const sniperData = [
+  {
+    fipiId: "679445",
+    text: "Дерево (1) материал недолговечный (2) а время и пожары сделали своё дело. Именно из-за них (3) до наших дней не дошли многие выдающиеся сооружения (4) о которых мы знаем только из летописей. При этом центральные районы России (5) почти не сохранили памятники деревянного зодчества. И только некоторые области Поволжья (6) Урала (7) Сибири и Севера (8) донесли до нас образцы этого высокого искусства.",
+    answer: "2467",
+    maxNum: 8
+  },
+
+  {
+    fipiId: "A860F6",
+    text: "Для изучения русской деревянной архитектуры XVI–XVI веков (1) мы располагаем немногочисленными (2) но довольно разнообразными изобразительными источниками (3) рисунками иностранных путешественников (4) планами (5) отдельных городов и селений (6) которые составлялись при строительстве новых городов-крепостей (7) или при перестройке старых (8) а также для разбора самых сложных земельных тяжб.",
+    answer: "2468",
+    maxNum: 8
+  },
+
+  {
+    fipiId: "9ECF78",
+    text: "Дом-музей Петра в Вологде (1) именуемый «Петровским домиком» (2) служил резиденцией императора во время визитов в город. На фасаде здания сохранилась старинная каменная доска (3) на которой изображена рука (4) с зажатой секирой. До сих пор в музее хранятся камзолы Петра (5) старинные стулья с голландским гербом на спинках (6) походные солдатские фляги с гравировкой. Всего (7) около 100 экспонатов (8) отражающих быт (9) и реалии того времени.",
+    answer: "123568",
+    maxNum: 9
+  },
+
+  {
+    fipiId: "4E4044",
+    text: "Заядлые путешественники (1) ищущие (2) что посмотреть в России самого необычного и даже мистического (3) непременно должны спуститься в Кунгурскую пещеру. Сегодня это место (4) самое известное уральское чудо. Температура здесь не поднимается выше +8 ºC (5) поэтому (6) отправившиеся на досуге полюбоваться сталактитами и сталагмитами (7) уральцы (8) частенько дрожат здесь от холода (9) если забыли надеть перед спуском тёплую куртку и шапку.",
+    answer: "12359",
+    maxNum: 9
+  },
+
+  {
+    fipiId: "D90352",
+    text: "Знаменитая 60-метровая «падающая» колокольня в городе Соликамске Пермского края (1) не имеет архитектурных аналогов в России (2) так как состоит из двух чётко различимых частей (3) массивного кубического здания (4) и высокой восьмигранной башни. Кроме того (5) особенность её ещё и в том (6) что она отклоняется от оси почти на два метра. Во время строительства (7) под действием грунтовых вод колокольня накренилась (8) и впоследствии её достраивали уже в таком положении.",
+    answer: "2568",
+    maxNum: 8
+  }
+];
+
+let snState = { cur: 0, score: 0, sel: [] };
+function initSN() {
+  snState = { cur: 0, score: 0, sel: [] };
+  resetAnswersLog();
+  document.getElementById('sn-score').textContent = 0;
+  document.getElementById('sn-total').textContent = sniperData.length;
+  document.getElementById('sn-progress').style.width = '0%';
+  renderSN();
+}
+function renderSN() {
+  const c = document.getElementById('sn-content');
+  if (snState.cur >= sniperData.length) {
+    showResult(c, snState.score, sniperData.length, 'Снайпер запятых', 'initSN');
+    return;
+  }
+  const q = sniperData[snState.cur];
+  snState.sel = [];
+  const renderedText = q.text.replace(/\((\d+)\)/g, (_, n) =>
+    `<span class="sniper-target" data-n="${n}" onclick="snToggle(${n}, this)">${n}</span>`
+  );
+  c.innerHTML = `
+    <div class="question">
+      <div class="question-num">МИШЕНЬ ${snState.cur + 1}</div>
+      <div class="source-tag">ФИПИ ${q.fipiId}</div>
+      <div style="margin-bottom: 12px; font-size: 0.95rem; color: var(--ink-soft);">
+        🎯 Прицелься: тапни на ВСЕ цифры, где нужны запятые. Без таймера.
+      </div>
+      <div class="sniper-text">${renderedText}</div>
+      <div style="text-align: center;">
+        <button class="check-btn" id="sn-check" onclick="snCheck()">🎯 Выстрел!</button>
+      </div>
+      <div class="explanation" id="sn-exp"></div>
+      <button class="next-btn" id="sn-next" onclick="snNext()">Дальше →</button>
+    </div>
+  `;
+}
+function snToggle(n, el) {
+  if (el.classList.contains('disabled')) return;
+  if (snState.sel.includes(n)) {
+    snState.sel = snState.sel.filter(x => x !== n);
+    el.classList.remove('hit');
+  } else {
+    snState.sel.push(n);
+    el.classList.add('hit');
+  }
+}
+function snCheck() {
+  const q = sniperData[snState.cur];
+  const correctSet = q.answer.split('').map(Number).sort((a,b)=>a-b);
+  const userSet = [...snState.sel].sort((a,b)=>a-b);
+  const isCorrect = JSON.stringify(correctSet) === JSON.stringify(userSet);
+  logTaskAnswer(q.fipiId, userSet.join('') || '—', isCorrect, 1);
+  document.querySelectorAll('.sniper-target').forEach(el => {
+    el.classList.add('disabled');
+    el.classList.remove('hit');
+    el.onclick = null;
+    const n = parseInt(el.dataset.n);
+    const userPicked = userSet.includes(n);
+    const isRight = correctSet.includes(n);
+    if (userPicked && isRight) el.classList.add('correct');
+    else if (userPicked && !isRight) el.classList.add('wrong');
+    else if (!userPicked && isRight) el.classList.add('missed');
+  });
+  document.getElementById('sn-check').style.display = 'none';
+  const exp = document.getElementById('sn-exp');
+  const userAnsStr = userSet.length > 0 ? userSet.join('') : '—';
+  const answerLine = `<div style="background: var(--paper); padding: 10px 14px; border-radius: 8px; margin: 10px 0; border: 2px solid var(--bee); font-family: 'Unbounded', sans-serif; font-size: 1rem;">
+    🐝 <strong>Твой ответ:</strong> <span style="color: ${isCorrect ? 'var(--green-ok)' : 'var(--red-no)'};">${userAnsStr}</span>
+    &nbsp;·&nbsp; <strong>Правильный:</strong> <span style="color: var(--green-ok);">${q.answer}</span>
+  </div>`;
+  if (isCorrect) {
+    snState.score++;
+    document.getElementById('sn-score').textContent = snState.score;
+    exp.innerHTML = answerLine + `<strong>🎯 В яблочко!</strong>`;
+  } else {
+    exp.innerHTML = answerLine + `<span style="font-size: 0.88rem; color: var(--ink-soft);">🟢 Зелёным — попал в цель. 🔴 Красным — промах. 🟢 Пунктиром — пропустил мишень.</span>`;
+  }
+  exp.classList.add('show');
+  document.getElementById('sn-next').classList.add('show');
+  document.getElementById('sn-progress').style.width = ((snState.cur + 1) / sniperData.length * 100) + '%';
+}
+function snNext() { snState.cur++; renderSN(); }
+
 // =============== LEADERBOARD ===============
 const GAMES = [
   { id: 'Поиск основ', short: '🔎 Основы', max: 5 },
   { id: 'Колонны характеристик', short: '🏛️ Колонны', max: 5 },
-  { id: 'Правило-сыщик', short: '🃏 Правила', max: 5 }
+  { id: 'Правило-сыщик', short: '🃏 Правила', max: 5 },
+  { id: 'Пунктуация-мозаика', short: '🧩 Мозаика', max: 5 },
+  { id: 'Снайпер запятых', short: '🎯 Снайпер', max: 5 }
 ];
 let lbCurrentGame = GAMES[0].id;
 function initLB() {
