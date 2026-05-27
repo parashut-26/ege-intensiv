@@ -27145,6 +27145,16 @@ function makeTask22Field(q){
   if(!STATE.solverMatching22[num]) STATE.solverMatching22[num] = {};
   const picks = STATE.solverMatching22[num];
 
+  /* Цвета для букв А-Д — каждая буква своим цветом, чтобы ученик видел в
+     «карте предложений» какое предложение каким типом ошибки помечено. */
+  const LETTER_COLORS = {
+    'А': { bg:'#FEE2E2', fg:'#991B1B', bd:'#F87171' }, // красный
+    'Б': { bg:'#DBEAFE', fg:'#1E3A8A', bd:'#60A5FA' }, // синий
+    'В': { bg:'#D1FAE5', fg:'#065F46', bd:'#34D399' }, // зелёный
+    'Г': { bg:'#FEF3C7', fg:'#92400E', bd:'#FBBF24' }, // янтарный
+    'Д': { bg:'#EDE9FE', fg:'#5B21B6', bd:'#A78BFA' }, // фиолетовый
+  };
+
   const wrap = el('div', { style:{ marginTop:'10px',
     padding:'10px 12px', background:'#F9FAFB',
     border:'1px solid var(--border)', borderRadius:'10px' }},
@@ -27153,6 +27163,14 @@ function makeTask22Field(q){
       '📌 Соответствие: каждой букве подбери термин'),
     el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }},
       'Выбери номер термина из списка для каждой буквы А, Б, В, Г, Д.'));
+
+  /* === Карта предложений: 1-9 со списком букв, привязанных к каждому ===
+     Под dropdown'ами рисуем сводку: для каждого предложения видно, какой(ие)
+     тип(ы) ошибок ученик к нему присвоил. Бейдж А-Д цветной. Если ученик
+     поставит одно предложение двум буквам (дубль) — увидит сразу.
+     Создаём ссылку на функцию обновления — её вызываем после каждого
+     onchange dropdown'а. */
+  let renderSentMap;
 
   letters.forEach(l => {
     const sel = el('select', {
@@ -27164,6 +27182,7 @@ function makeTask22Field(q){
         if(v === '') delete picks[l.letter];
         else picks[l.letter] = parseInt(v, 10);
         saveSolverDraft();
+        if(renderSentMap) renderSentMap();
       }
     });
     sel.append(el('option', { value: '' }, '— не выбрано'));
@@ -27177,7 +27196,9 @@ function makeTask22Field(q){
       style:{ display:'flex', flexWrap:'wrap', gap:'8px', alignItems:'flex-start',
               padding:'8px 0', borderTop:'1px dashed var(--border)' }
     },
-      el('div', { style:{ minWidth:'28px', fontWeight:'700', color:'var(--p-deep)', fontSize:'14px' }},
+      el('div', { style:{ minWidth:'28px', fontWeight:'700',
+                          color: (LETTER_COLORS[l.letter] || {}).fg || 'var(--p-deep)',
+                          fontSize:'14px' }},
         l.letter + ')'),
       el('div', { style:{ flex:'1 1 200px', minWidth:'150px', fontSize:'13px',
                           lineHeight:'1.4', color:'var(--ink)' }}, l.text),
@@ -27203,6 +27224,80 @@ function makeTask22Field(q){
     }
   }, '📝 Сформировать ответ');
   wrap.append(genBtn);
+
+  /* === Карта предложений ===
+     Под dropdown'ами и кнопкой — список ВСЕХ нумерованных предложений
+     с бейджами букв напротив. Обновляется при каждом изменении picks. */
+  const mapBox = el('div', { style:{ marginTop:'12px',
+    padding:'10px 12px', background:'#fff', border:'1px solid var(--border-2)',
+    borderRadius:'8px' }});
+  mapBox.append(el('div', {
+    style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
+            marginBottom:'6px', textTransform:'uppercase', letterSpacing:'.06em' }
+  }, '🗺 Карта предложений · что куда отметил'));
+  mapBox.append(el('div', {
+    style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'8px' }
+  }, 'Каждое предложение — цветной бейдж той ошибки, что ты ему присвоил. Если у одного предложения два бейджа — это дубль, поправь.'));
+  const mapList = el('div', { style:{ display:'flex', flexDirection:'column', gap:'6px' }});
+  mapBox.append(mapList);
+
+  renderSentMap = () => {
+    mapList.innerHTML = '';
+    /* Обратный индекс: sentNum -> [letter, letter, ...] */
+    const sentToLetters = {};
+    Object.keys(picks).forEach(letter => {
+      const sn = picks[letter];
+      if(sn == null) return;
+      if(!sentToLetters[sn]) sentToLetters[sn] = [];
+      sentToLetters[sn].push(letter);
+    });
+    terms.forEach(t => {
+      const assignedLetters = sentToLetters[t.num] || [];
+      const hasAssignment = assignedLetters.length > 0;
+      const isDuplicate = assignedLetters.length > 1;
+      const row = el('div', {
+        style:{ display:'flex', gap:'8px', alignItems:'flex-start',
+                padding:'6px 8px',
+                background: hasAssignment ? '#FFFBEB' : 'transparent',
+                borderRadius:'6px',
+                border: isDuplicate ? '1px solid #DC2626' : '1px solid transparent',
+                fontSize:'12px', lineHeight:'1.4' }
+      });
+      /* Номер предложения */
+      row.append(el('div', {
+        style:{ minWidth:'24px', fontWeight:'700',
+                color: hasAssignment ? 'var(--ink)' : 'var(--ink-3)' }
+      }, t.num + ')'));
+      /* Текст предложения */
+      row.append(el('div', {
+        style:{ flex:'1 1 200px', minWidth:'120px',
+                color: hasAssignment ? 'var(--ink)' : 'var(--ink-3)' }
+      }, t.text.length > 200 ? t.text.slice(0, 200) + '…' : t.text));
+      /* Бейджи букв */
+      const badges = el('div', { style:{ display:'flex', gap:'4px', flexWrap:'wrap',
+                                          alignItems:'center' }});
+      assignedLetters.forEach(letter => {
+        const c = LETTER_COLORS[letter] || { bg:'#E5E7EB', fg:'#374151', bd:'#9CA3AF' };
+        badges.append(el('span', {
+          style:{ display:'inline-flex', alignItems:'center', justifyContent:'center',
+                  minWidth:'26px', height:'22px', padding:'0 6px',
+                  background: c.bg, color: c.fg,
+                  border:'1px solid ' + c.bd, borderRadius:'5px',
+                  fontSize:'11px', fontWeight:'800' }
+        }, letter));
+      });
+      if(isDuplicate){
+        badges.append(el('span', {
+          style:{ fontSize:'10px', color:'#DC2626', fontWeight:'700',
+                  marginLeft:'4px' }
+        }, '⚠ дубль'));
+      }
+      row.append(badges);
+      mapList.append(row);
+    });
+  };
+  renderSentMap();
+  wrap.append(mapBox);
 
   return wrap;
 }
