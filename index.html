@@ -11159,6 +11159,17 @@ function modalTest(taskN){
       });
       /* Шкала ЕГЭ для заданий 8 и 22: 5 верных = 2 б, 3-4 = 1 б, иначе 0 */
       const egePoints = matchedCount === 5 ? 2 : (matchedCount >= 3 ? 1 : 0);
+      /* Цвета бейджей для букв А-Д — те же, что в решалке вариантов
+         (см. makeTask22Field). Жёлто-янтарный для Г, чтобы было различимо
+         с зелёным В. */
+      const LETTER_COLORS_T = {
+        'А': { bg:'#FEE2E2', fg:'#991B1B', bd:'#F87171' },
+        'Б': { bg:'#DBEAFE', fg:'#1E3A8A', bd:'#60A5FA' },
+        'В': { bg:'#D1FAE5', fg:'#065F46', bd:'#34D399' },
+        'Г': { bg:'#FEF3C7', fg:'#92400E', bd:'#FBBF24' },
+        'Д': { bg:'#EDE9FE', fg:'#5B21B6', bd:'#A78BFA' },
+      };
+      const letterByIdx = (ei) => String.fromCharCode(0x0410 + ei); // А=1040
       /* На мобиле — вертикально (ошибки сверху, предложения снизу);
          на широком экране — две колонки. Используем flex с wrap. */
       const grid = el('div', { style:{ display:'flex', flexDirection:'column', gap:'18px', alignItems:'stretch' }});
@@ -11174,6 +11185,16 @@ function modalTest(taskN){
           else { bg = 'var(--red-soft)'; border = 'var(--red)'; }
         }
         const row = el('div', { style:{ display:'flex', alignItems:'center', gap:'10px', marginBottom:'10px', padding:'8px', background:bg, border:'1px solid '+border, borderRadius:'10px' }});
+        const letterColor = LETTER_COLORS_T[letterByIdx(ei)] || {};
+        /* Цветной маркер буквы перед селектом — связь между секциями */
+        row.append(el('span', {
+          style:{ display:'inline-flex', alignItems:'center', justifyContent:'center',
+                  width:'26px', height:'26px', flexShrink:'0',
+                  background: letterColor.bg || '#F3F4F6',
+                  color: letterColor.fg || 'var(--ink-2)',
+                  border:'1px solid ' + (letterColor.bd || 'var(--border-2)'),
+                  borderRadius:'6px', fontWeight:'800', fontSize:'13px' }
+        }, letterByIdx(ei)));
         const select = el('select', {
           disabled: all || undefined,
           style:{ padding:'6px 8px', fontWeight:'700', fontSize:'14px', minWidth:'56px', borderRadius:'8px', border:'1px solid var(--border-2)' },
@@ -11181,6 +11202,9 @@ function modalTest(taskN){
             const cur = Object.assign({}, STATE.testAnswers[i] || {});
             cur[ei] = ev.target.value;
             STATE.testAnswers[i] = cur;
+            /* Перерисовываем — чтобы бейджи на предложениях обновились
+               сразу после выбора. */
+            render();
           }
         });
         select.append(el('option', { value:'' }, '—'));
@@ -11199,13 +11223,57 @@ function modalTest(taskN){
       });
       grid.append(leftCol);
 
-      /* Правая колонка: список предложений */
+      /* Правая колонка: список предложений с цветными бейджами тех букв,
+         которые ученик к ним привязал. Если предложение присвоено двум
+         буквам (дубль) — красная рамка вокруг строки. */
       const rightCol = el('div', null);
       rightCol.append(el('div', { style:{ fontSize:'11px', textTransform:'uppercase', color:'var(--ink-3)', fontWeight:'700', letterSpacing:'.08em', marginBottom:'10px' }}, q.rightLabel || 'Предложения'));
+      /* Обратный индекс: sentenceNum -> [letter, letter, ...] из текущего ans */
+      const sentToLettersT = {};
+      q.errors.forEach((_, ei) => {
+        const sn = ans[ei];
+        if(!sn || sn === '') return;
+        const key = String(sn);
+        if(!sentToLettersT[key]) sentToLettersT[key] = [];
+        sentToLettersT[key].push(letterByIdx(ei));
+      });
       q.sentences.forEach((s, si) => {
-        rightCol.append(el('div', { style:{ display:'flex', gap:'10px', padding:'8px 10px', background:'#fff', borderRadius:'8px', marginBottom:'6px', fontSize:'13px', lineHeight:'1.4' }},
-          el('b', { style:{ color:'var(--p)', minWidth:'18px' }}, (si+1) + ')'),
-          el('div', { html: renderInlineMd(s), style:{ flex:1 }})));
+        const num = String(si + 1);
+        const assignedLetters = sentToLettersT[num] || [];
+        const hasAssignment = assignedLetters.length > 0;
+        const isDuplicate = assignedLetters.length > 1;
+        const sentRow = el('div', {
+          style:{ display:'flex', gap:'10px', alignItems:'flex-start',
+                  padding:'8px 10px',
+                  background: hasAssignment ? '#FFFBEB' : '#fff',
+                  borderRadius:'8px', marginBottom:'6px', fontSize:'13px',
+                  border: isDuplicate ? '1px solid #DC2626' : '1px solid transparent',
+                  lineHeight:'1.4' }
+        });
+        sentRow.append(el('b', { style:{ color:'var(--p)', minWidth:'18px', flexShrink:'0' }},
+          num + ')'));
+        sentRow.append(el('div', { html: renderInlineMd(s), style:{ flex:1, minWidth:0 }}));
+        if(hasAssignment){
+          const badges = el('div', { style:{ display:'flex', gap:'4px', flexWrap:'wrap',
+                                              alignItems:'center', flexShrink:'0' }});
+          assignedLetters.forEach(letter => {
+            const c = LETTER_COLORS_T[letter] || { bg:'#E5E7EB', fg:'#374151', bd:'#9CA3AF' };
+            badges.append(el('span', {
+              style:{ display:'inline-flex', alignItems:'center', justifyContent:'center',
+                      minWidth:'24px', height:'22px', padding:'0 6px',
+                      background: c.bg, color: c.fg,
+                      border:'1px solid ' + c.bd, borderRadius:'5px',
+                      fontSize:'11px', fontWeight:'800' }
+            }, letter));
+          });
+          if(isDuplicate){
+            badges.append(el('span', {
+              style:{ fontSize:'10px', color:'#DC2626', fontWeight:'700' }
+            }, '⚠'));
+          }
+          sentRow.append(badges);
+        }
+        rightCol.append(sentRow);
       });
       grid.append(rightCol);
       block.append(grid);
