@@ -18520,11 +18520,28 @@ function modalEssayReview(essayId){
                     } catch(_){}
                   }
                 }
-                /* Если ученик указал проблему — добавим как подсказку для AI */
+                /* Если ученик указал проблему — добавим как подсказку для AI.
+                   ВАЖНО: для фото-сочинений (essayText пустой или короткий)
+                   НЕ оборачиваем в «(Ученик заявил проблему: ...)\n\n» — иначе
+                   essay_text становится > 50 символов, и в Edge Function не
+                   срабатывает photoOnlyMode → AI идёт стандартным путём,
+                   видит «исходный текст про армию» + почти пустое сочинение и
+                   выдаёт галлюцинацию (например, шаблон про службу в армии,
+                   25.05.2026 у Яны Шелевер). Для фото оставляем essayForAi=''
+                   и пусть photoOnlyMode на сервере отработает чисто. */
                 const problem = (essay.sourceProblem || essay.source_problem || '').trim();
-                let essayForAi = essayText;
-                if(problem){
-                  essayForAi = '(Ученик заявил проблему: ' + problem + ')\n\n' + essayText;
+                const realEssayText = (essayText || '').trim();
+                const isPhotoNoText = isPhotoEssay && realEssayText.length < 50;
+                let essayForAi = realEssayText;
+                if(problem && !isPhotoNoText){
+                  essayForAi = '(Ученик заявил проблему: ' + problem + ')\n\n' + realEssayText;
+                }
+                if(isPhotoNoText){
+                  /* Сбрасываем essayForAi в пустую строку — Edge Function на
+                     пустой essay_text + наличии teacher_marks включит
+                     photoOnlyMode с инструкцией «текста нет, оценивай только
+                     по отметкам». */
+                  essayForAi = '';
                 }
                 /* === Учительские отметки как контекст для AI ===
                    Берём актуальные комментарии (с пинами/рамками/выделениями)
