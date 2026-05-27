@@ -1827,7 +1827,12 @@ function highlightRootsInTextGlobal(htmlSafe, capsWords){
     return html.replace(/<strong>([\s\S]*?)<\/strong>/gi,
       '<mark style="' + MARK_STYLE + '">$1</mark>');
   }
-  /* 2) Fallback — подсветка по корням CAPS-слов из формулировки. */
+  /* 2) Fallback — подсветка по корням CAPS-слов из формулировки.
+     ВАЖНО: подсвечиваем ТОЛЬКО первое вхождение каждого корня (без `g` флага),
+     иначе и «простая», и «простоты», и «пространство» одновременно загораются,
+     учитель видит лишние выделения. Прецедент 27.05.2026 на варианте с
+     Паустовским. Если в задании нужно не первое — учитель размечает вручную
+     через **слово** в редакторе sourceText (приоритет см. п.1 выше). */
   if(!capsWords || !capsWords.length) return html;
   const seen = new Set();
   capsWords.forEach(w => {
@@ -1835,7 +1840,7 @@ function highlightRootsInTextGlobal(htmlSafe, capsWords){
     if(!root || root.length < 3 || seen.has(root)) return;
     seen.add(root);
     try {
-      const rgx = new RegExp('([А-Яа-яЁё]*' + root + '[А-Яа-яЁё]*)', 'gi');
+      const rgx = new RegExp('([А-Яа-яЁё]*' + root + '[А-Яа-яЁё]*)', 'i');
       html = html.replace(rgx, '<mark style="' + MARK_STYLE + '">$1</mark>');
     } catch(_){}
   });
