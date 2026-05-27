@@ -19215,8 +19215,15 @@ function commentItemRow(essay, c){
         if(!confirm('Удалить замечание?')) return;
         try {
           await deleteEssayComment(c.id);
-          essay.comments = (essay.comments || []).filter(x => x.id !== c.id);
-          recomputeErrorsFromComments(essay.comments);
+          /* UI рендера сочинения тянет список из ESSAY_COMMENTS_CACHE[essay.id]
+             (см. ~modalEssayReview), а раньше мы обновляли только essay.comments —
+             поэтому после render() замечание визуально оставалось, и нужна была
+             перезагрузка. Теперь обновляем и кэш. */
+          const filtered = (ESSAY_COMMENTS_CACHE[essay.id] || essay.comments || [])
+            .filter(x => x.id !== c.id);
+          essay.comments = filtered;
+          ESSAY_COMMENTS_CACHE[essay.id] = filtered;
+          recomputeErrorsFromComments(filtered);
           render();
         } catch(e){ alert('⚠ ' + e.message); }
       }
