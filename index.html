@@ -16281,27 +16281,132 @@ function modalStudentDetail(){
                         : '#FEE2E2';
             const qText = (q && q.text) || (q && q.q) || (q && q.question_text) || '';
             const row = el('div', {
-              style:{ padding:'6px 8px', background: rowBg,
-                      borderRadius:'6px', marginBottom:'4px',
-                      fontSize:'12px', lineHeight:'1.45',
-                      display:'flex', gap:'8px', alignItems:'flex-start' }
+              style:{ padding:'10px 12px', background: rowBg,
+                      borderRadius:'8px', marginBottom:'8px',
+                      fontSize:'13px', lineHeight:'1.5',
+                      display:'flex', gap:'10px', alignItems:'flex-start' }
             });
             row.append(el('div', {
-              style:{ minWidth:'22px', fontWeight:'700', color:'var(--ink-2)' }
+              style:{ minWidth:'24px', fontWeight:'700', color:'var(--ink-2)',
+                      fontSize:'14px', flexShrink:'0' }
             }, (i + 1) + ')'));
             const inner = el('div', { style:{ flex:1, minWidth:0 }});
+            /* Текст вопроса — полностью, с переносами, markdown-форматирование. */
             if(qText){
+              const mdHtml = (typeof renderInlineMdGlobal === 'function')
+                ? renderInlineMdGlobal(qText)
+                : String(qText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
               inner.append(el('div', {
-                style:{ color:'var(--ink-2)', marginBottom:'2px',
-                        whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }
-              }, qText.length > 100 ? qText.slice(0, 100) + '…' : qText));
+                style:{ color:'var(--ink)', marginBottom:'8px',
+                        whiteSpace:'pre-wrap', fontWeight:'600' },
+                html: mdHtml
+              }));
             }
-            inner.append(el('div', { style:{ fontSize:'12px' }},
-              el('span', { style:{ color:'var(--ink-3)' }}, 'Ответ: '),
+            /* Для multi/single — показываем все варианты с пометкой выбранных */
+            if(Array.isArray(q && q.opts) && q.opts.length){
+              const ansArr = Array.isArray(ans) ? ans : (typeof ans === 'number' ? [ans] : []);
+              const correctArr = Array.isArray(q.a) ? q.a : (typeof q.a === 'number' ? [q.a] : []);
+              const optsList = el('div', {
+                style:{ display:'flex', flexDirection:'column', gap:'4px',
+                        marginBottom:'8px' }
+              });
+              q.opts.forEach((opt, oi) => {
+                const wasPicked = ansArr.includes(oi);
+                const isRightOpt = correctArr.includes(oi);
+                let bg = '#fff', bd = 'var(--border-2)', fg = 'var(--ink)';
+                let badge = '○';
+                if(wasPicked && isRightOpt){ bg = '#D1FAE5'; bd = 'var(--green)'; fg = '#065F46'; badge = '✓'; }
+                else if(wasPicked && !isRightOpt){ bg = '#FEE2E2'; bd = 'var(--red)'; fg = '#991B1B'; badge = '✗'; }
+                else if(!wasPicked && isSubmitted && isRightOpt){ bg = '#FEF3C7'; bd = 'var(--y)'; fg = '#92400E'; badge = '?'; }
+                else if(wasPicked){ bg = '#FEF9C3'; bd = 'var(--y)'; fg = '#854D0E'; badge = '●'; }
+                optsList.append(el('div', {
+                  style:{ padding:'6px 10px', background: bg,
+                          border:'1px solid ' + bd, color: fg,
+                          borderRadius:'6px', fontSize:'12px',
+                          display:'flex', gap:'8px', alignItems:'flex-start' }
+                },
+                  el('span', { style:{ fontWeight:'700', minWidth:'18px' }}, badge),
+                  el('span', { style:{ flex:1 }}, (oi + 1) + ') ' + opt)));
+              });
+              inner.append(optsList);
+            }
+            /* Для commaPick (задание 16) или match с sentences — показываем
+               пронумерованные предложения, чтобы ты видела что именно решает. */
+            if(Array.isArray(q && q.sentences) && q.sentences.length && !q.errors){
+              const sList = el('div', {
+                style:{ display:'flex', flexDirection:'column', gap:'3px',
+                        marginBottom:'8px', paddingLeft:'2px' }
+              });
+              q.sentences.forEach((s, si) => {
+                const sMd = (typeof renderInlineMdGlobal === 'function')
+                  ? renderInlineMdGlobal(s)
+                  : String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const ansArr = Array.isArray(ans) ? ans : [];
+                const wasPicked = ansArr.includes(si);
+                sList.append(el('div', {
+                  style:{ fontSize:'12px', padding:'4px 8px',
+                          background: wasPicked ? '#FEF9C3' : 'transparent',
+                          borderRadius:'4px',
+                          color: wasPicked ? '#854D0E' : 'var(--ink-2)' }
+                },
+                  el('b', { style:{ color:'var(--p)', marginRight:'4px' }}, (si + 1) + ')'),
+                  el('span', { html: sMd })));
+              });
+              inner.append(sList);
+            }
+            /* Для задания 8/22 (q.match): пары ошибка→предложение */
+            if(q && q.match && Array.isArray(q.errors) && Array.isArray(q.sentences)){
+              const matchAns = (typeof ans === 'object' && ans !== null && !Array.isArray(ans)) ? ans : {};
+              const matchCorrect = Array.isArray(q.a) ? q.a : [];
+              const pairsList = el('div', {
+                style:{ display:'flex', flexDirection:'column', gap:'4px',
+                        marginBottom:'8px' }
+              });
+              q.errors.forEach((errText, ei) => {
+                const letter = String.fromCharCode(0x0410 + ei);
+                const picked = matchAns[ei];
+                const correctPick = matchCorrect[ei];
+                const ok = isSubmitted && String(picked || '') === String(correctPick || '');
+                const errMd = (typeof renderInlineMdGlobal === 'function')
+                  ? renderInlineMdGlobal(errText)
+                  : String(errText).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                pairsList.append(el('div', {
+                  style:{ fontSize:'12px', padding:'4px 8px',
+                          background: picked ? '#FFFBEB' : 'transparent',
+                          borderRadius:'4px',
+                          display:'flex', gap:'8px', alignItems:'flex-start' }
+                },
+                  el('b', { style:{ color:'#7C2D12', minWidth:'18px' }}, letter + ')'),
+                  el('span', { style:{ flex:1 }, html: errMd }),
+                  el('span', { style:{ fontWeight:'700', marginLeft:'auto',
+                                        color: ok ? 'var(--green)' : (picked ? 'var(--ink)' : 'var(--ink-3)') }},
+                    '→ ' + (picked || '—') + (isSubmitted ? (ok ? ' ✓' : ' · нужно ' + (correctPick || '?')) : ''))));
+              });
+              inner.append(pairsList);
+              /* И список самих предложений снизу — иначе букву не на что мапить */
+              const sList = el('div', { style:{
+                fontSize:'11px', padding:'6px 8px', background:'#F9FAFB',
+                borderRadius:'6px', display:'flex', flexDirection:'column', gap:'2px'
+              }});
+              q.sentences.forEach((s, si) => {
+                const sMd = (typeof renderInlineMdGlobal === 'function')
+                  ? renderInlineMdGlobal(s) : String(s);
+                sList.append(el('div', null,
+                  el('b', { style:{ color:'var(--p)' }}, (si + 1) + ')'), ' ',
+                  el('span', { html: sMd })));
+              });
+              inner.append(sList);
+            }
+            /* Универсальная строка-итог: ответ ученика + правильный */
+            inner.append(el('div', {
+              style:{ fontSize:'12px', marginTop:'4px', paddingTop:'6px',
+                      borderTop:'1px dashed var(--border)' }
+            },
+              el('span', { style:{ color:'var(--ink-3)' }}, 'Ответ ученика: '),
               el('b', { style:{ color: isAnswered ? 'var(--ink)' : 'var(--ink-3)' }},
                 ansLabel),
               correctLabel ? el('span', { style:{ color:'var(--ink-3)', marginLeft:'6px' }},
-                '· правильно: ' + correctLabel) : null,
+                ' · правильно: ' + correctLabel) : null,
               isSubmitted ? el('span', {
                 style:{ marginLeft:'6px', fontWeight:'700',
                         color: isCorrect ? 'var(--green)' : 'var(--red)' }
