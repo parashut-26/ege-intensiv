@@ -18377,12 +18377,24 @@ function modalEssayReview(essayId){
       color:'#166534', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'8px' }},
       '📖 Контекст задания 27 — для проверяющего'));
 
-    /* === Селектор «привязать вариант» — если ещё не привязан === */
+    /* === Селектор «привязать вариант» — если ещё не привязан ===
+       ВАЖНО: проверяем STATE.variantsListLoaded (булевый флаг), не сам массив,
+       и берём из STATE.variantsList. Раньше код смотрел на STATE.variants —
+       его loadVariantsList НЕ заполняет (пишет в variantsList с List на конце).
+       Из-за этого условие «не загружено» было всегда истинно, render()
+       по цепочке .then(render) перезапускался бесконечно — отсюда зависала
+       страница и список вариантов «вечно загружался». Прецедент Яны Шелевер
+       27.05.2026. */
     if(!variantIdForContext){
-      if(!STATE.variants && typeof loadVariantsList === 'function'){
-        loadVariantsList().then(render);
+      if(!STATE.variantsListLoaded && !STATE.variantsListLoading
+         && typeof loadVariantsList === 'function'){
+        STATE.variantsListLoading = true;
+        loadVariantsList().then(() => {
+          STATE.variantsListLoading = false;
+          render();
+        }).catch(() => { STATE.variantsListLoading = false; });
       }
-      const variants = STATE.variants || [];
+      const variants = STATE.variantsList || [];
       const sel = el('select', {
         style:{ padding:'6px 10px', borderRadius:'8px', border:'1px solid #86EFAC',
                 background:'#fff', fontSize:'13px', minWidth:'260px', maxWidth:'100%',
@@ -18390,7 +18402,7 @@ function modalEssayReview(essayId){
       });
       sel.append(el('option', { value:'' }, variants.length
         ? '— выбери вариант для контекста —'
-        : (STATE.variants ? '(нет опубликованных вариантов)' : '⏳ загружаю варианты…')));
+        : (STATE.variantsListLoaded ? '(нет опубликованных вариантов)' : '⏳ загружаю варианты…')));
       variants.forEach(v => {
         sel.append(el('option', { value: String(v.id) },
           (v.title || ('Вариант ' + v.id)) + (v.questions_count ? ' · ' + v.questions_count + ' вопр.' : '')));
