@@ -43,6 +43,25 @@ ON CONFLICT (slug) DO UPDATE SET
   description = EXCLUDED.description,
   url         = EXCLUDED.url;
 
+INSERT INTO games (slug, title, grade, topic, emoji, description, url, is_published)
+VALUES (
+  'igrioteka-ogje-3',
+  'Игротека ОГЭ · Часть 3',
+  '9 класс',
+  'Игротека ОГЭ',
+  '🕵️',
+  'Синтаксический детектив: «Поиск основ», «Колонны характеристик», «Правило-сыщик». 3 мини-игры по новым текстам, задания 2-4 из открытого банка ФИПИ.',
+  '/games/igrioteka-ogje-3/',
+  FALSE
+)
+ON CONFLICT (slug) DO UPDATE SET
+  title       = EXCLUDED.title,
+  grade       = EXCLUDED.grade,
+  topic       = EXCLUDED.topic,
+  emoji       = EXCLUDED.emoji,
+  description = EXCLUDED.description,
+  url         = EXCLUDED.url;
+
 SELECT 'ogje igrioteka synced' AS status,
   grade, topic, COUNT(*) AS games_count
 FROM games
