@@ -18251,8 +18251,14 @@ function modalEssayReview(essayId){
     return s + '/' + m;
   };
 
-  /* Текст работы: для реального DB-сочинения используем essay.text, для мока — SAMPLE */
-  const essayText = essay.text || SAMPLE_ESSAY_TEXT;
+  /* Текст работы: для реального DB-сочинения используем essay.text.
+     ВНИМАНИЕ: НЕЛЬЗЯ подставлять SAMPLE_ESSAY_TEXT как fallback! Этот шаблон
+     (про армию и Ваншенкина) раньше использовался для мок-демо, но в проде
+     утекал в AI-проверку для всех фото-сочинений без текста, и AI начинала
+     «анализировать» этот образец вместо реальной работы ученика. Прецедент
+     26.05.2026: Александра, Альветта и др. — у всех AI ставила К1=0 «ты
+     пишешь о другом авторе» именно из-за этой подмены. */
+  const essayText = essay.text || '';
   const wordCount = essay.wordCount != null ? essay.wordCount : countEssayWords(essayText);
   const isCurator = STATE.essayBy === 'curator';
 
@@ -18361,13 +18367,70 @@ function modalEssayReview(essayId){
        показываем его — приоритетнее варианта */
     const ownText  = (essay.sourceText || '').trim();
     const ownProb  = (essay.sourceProblem || '').trim();
-    if(!variantIdForContext && !ownText && !ownProb) return null;
-
+    /* Карточка показывается ВСЕГДА — даже если контекста нет, чтобы
+       учитель/куратор мог привязать вариант после сдачи. Без этого
+       работы со «Сдать с главной без выбора варианта» оставались без
+       контекста, и проверяющему приходилось искать вручную. */
     const card = el('div', { class:'card', style:{ marginBottom:'12px',
       background:'#F0FDF4', border:'1px solid #86EFAC' }});
     card.append(el('div', { style:{ fontSize:'11px', fontWeight:'700',
       color:'#166534', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'8px' }},
       '📖 Контекст задания 27 — для проверяющего'));
+
+    /* === Селектор «привязать вариант» — если ещё не привязан === */
+    if(!variantIdForContext){
+      if(!STATE.variants && typeof loadVariantsList === 'function'){
+        loadVariantsList().then(render);
+      }
+      const variants = STATE.variants || [];
+      const sel = el('select', {
+        style:{ padding:'6px 10px', borderRadius:'8px', border:'1px solid #86EFAC',
+                background:'#fff', fontSize:'13px', minWidth:'260px', maxWidth:'100%',
+                fontFamily:'inherit' }
+      });
+      sel.append(el('option', { value:'' }, variants.length
+        ? '— выбери вариант для контекста —'
+        : (STATE.variants ? '(нет опубликованных вариантов)' : '⏳ загружаю варианты…')));
+      variants.forEach(v => {
+        sel.append(el('option', { value: String(v.id) },
+          (v.title || ('Вариант ' + v.id)) + (v.questions_count ? ' · ' + v.questions_count + ' вопр.' : '')));
+      });
+      const bindBtn = el('button', { class:'btn btn-secondary btn-sm', style:{ marginLeft:'8px' },
+        onclick: async () => {
+          const vid = parseInt(sel.value, 10);
+          if(!vid){ showToast('Выбери вариант из списка'); return; }
+          bindBtn.disabled = true; bindBtn.textContent = '⏳';
+          try {
+            await restRequest('PATCH',
+              '/essays?id=eq.' + encodeURIComponent(essay.id),
+              { source_variant_id: vid },
+              { prefer: 'return=minimal' });
+            essay.sourceVariantId = vid;
+            essay.source_variant_id = vid;
+            /* Обновим в DB_ESSAYS тоже, чтобы при следующем render было видно */
+            const dbE = (typeof DB_ESSAYS !== 'undefined') ? DB_ESSAYS.find(x => x.id === essay.id) : null;
+            if(dbE) dbE.sourceVariantId = vid;
+            showToast('✓ Вариант привязан');
+            render();
+          } catch(e){
+            bindBtn.disabled = false; bindBtn.textContent = '✓ Привязать';
+            showToast('⚠ ' + e.message);
+          }
+        }
+      }, '✓ Привязать');
+      card.append(el('div', { style:{ marginBottom:'10px',
+        padding:'8px 10px', background:'#FFFBEB', border:'1px solid #FACC15',
+        borderRadius:'8px' }},
+        el('div', { style:{ fontSize:'12px', color:'#92400E', marginBottom:'6px', fontWeight:'700' }},
+          '⚠ Вариант не привязан — исходный текст и пояснение задания 27 не подгрузятся'),
+        el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap', alignItems:'center' }},
+          sel, bindBtn)));
+    }
+
+    if(!variantIdForContext && !ownText && !ownProb){
+      /* Селектор уже добавлен выше, больше показывать нечего */
+      return card;
+    }
 
     /* Источник текста: либо ученик вписал свой, либо из варианта */
     if(ownText){
@@ -18531,7 +18594,15 @@ function modalEssayReview(essayId){
                    и пусть photoOnlyMode на сервере отработает чисто. */
                 const problem = (essay.sourceProblem || essay.source_problem || '').trim();
                 const realEssayText = (essayText || '').trim();
-                const isPhotoNoText = isPhotoEssay && realEssayText.length < 50;
+                /* Для фото-сочинений ВСЕГДА передаём пустой essay_text — даже
+                   если в body_text БД остался какой-то текст (старая попытка
+                   сдачи через ввод, OCR-копия, мусор). Иначе AI получит чужой
+                   текст и сделает ложный вывод «ты пишешь о другом авторе».
+                   Прецедент 26.05.2026 у Александры: фото-сочинение по
+                   Распутину, в body_text остался текст про армию и Ваншенкина
+                   с предыдущей попытки → AI решила что она пишет о Ваншенкине,
+                   и поставила К1=0. */
+                const isPhotoNoText = isPhotoEssay;
                 let essayForAi = realEssayText;
                 if(problem && !isPhotoNoText){
                   essayForAi = '(Ученик заявил проблему: ' + problem + ')\n\n' + realEssayText;
