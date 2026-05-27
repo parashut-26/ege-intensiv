@@ -25447,9 +25447,25 @@ function viewTeacherGames(){
     (byGradeTopic[gr][tp] = byGradeTopic[gr][tp] || []).push(g);
   });
 
-  Object.keys(byGradeTopic).forEach(grade => {
+  /* Persist раскрытие/сворачивание секций классов — иначе авто-обновление страницы каждый раз снова разворачивает всё, даже если учитель свернул. */
+  const GAMES_GRADE_OPEN_KEY = 'gamesTeacherGradeOpen';
+  let openMap = {};
+  try { openMap = JSON.parse(localStorage.getItem(GAMES_GRADE_OPEN_KEY) || '{}') || {}; } catch(e){ openMap = {}; }
+  const gradeKeys = Object.keys(byGradeTopic);
+  /* Первый показ (карта пустая) — открываем все, чтобы поведение не сломалось.
+     Дальше состояние помнится по каждому grade отдельно. */
+  const firstShow = !Object.keys(openMap).length;
+  gradeKeys.forEach(grade => {
     /* Сворачиваемая секция класса */
-    const det = el('details', { class:'card', open:true, style:{ marginTop:'14px', marginBottom:'8px', padding:'14px 18px' }});
+    const isOpen = firstShow ? true : !!openMap[grade];
+    const det = el('details', { class:'card', style:{ marginTop:'14px', marginBottom:'8px', padding:'14px 18px' }});
+    if(isOpen) det.setAttribute('open', '');
+    det.addEventListener('toggle', () => {
+      let cur = {};
+      try { cur = JSON.parse(localStorage.getItem(GAMES_GRADE_OPEN_KEY) || '{}') || {}; } catch(e){ cur = {}; }
+      cur[grade] = det.open;
+      try { localStorage.setItem(GAMES_GRADE_OPEN_KEY, JSON.stringify(cur)); } catch(e){}
+    });
     det.append(el('summary', { style:{ cursor:'pointer', fontSize:'18px', fontWeight:'800', color:'var(--ink)', listStyle:'none' }},
       '🎓 ' + grade));
     /* Внутри — темы и игры */
@@ -25460,6 +25476,12 @@ function viewTeacherGames(){
     });
     wrap.append(det);
   });
+  /* Если карта была пустой — заполним дефолтами (все открыты), чтобы следующий рендер уже использовал её, а не заново всё открывал. */
+  if(firstShow){
+    const seed = {};
+    gradeKeys.forEach(g => { seed[g] = true; });
+    try { localStorage.setItem(GAMES_GRADE_OPEN_KEY, JSON.stringify(seed)); } catch(e){}
+  }
 
   return wrap;
 }
