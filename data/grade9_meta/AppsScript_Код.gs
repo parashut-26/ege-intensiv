@@ -87,3 +87,59 @@ function jsonResp(obj) {
     .createTextOutput(JSON.stringify(obj))
     .setMimeType(ContentService.MimeType.JSON);
 }
+
+// =================================================================
+// ОДНОРАЗОВЫЕ СЕТАПЫ ВКЛАДОК.
+// Запускать вручную из редактора Apps Script: выбрать функцию
+// в выпадающем списке и нажать «Run» / «Выполнить».
+// Если такая вкладка уже есть — функция её НЕ трогает (idempotent).
+// =================================================================
+
+function setupTabsForDetektiv() {
+  // 3-я игра — Синтаксический детектив. Создаёт 3 вкладки.
+  const TABS = [
+    {
+      name: 'Поиск основ',
+      ids: ['3212D2', '3C015C', '1F9CF5', 'C4D7E0', 'F0DCC0']
+    },
+    {
+      name: 'Колонны характеристик',
+      ids: ['70D356', 'DE5B28', 'DE2E98', '5CCA94', '96F6B0']
+    },
+    {
+      name: 'Правило-сыщик',
+      ids: ['06134B', '068B4E', '213749', 'F29B08', '0AA97B']
+    }
+  ];
+  return createTabsFromSpec_(TABS);
+}
+
+// Универсальная фабрика: создаёт вкладки по спецификации.
+// Спецификация: [{name: 'Имя вкладки', ids: ['ID1', 'ID2', ...]}, ...]
+function createTabsFromSpec_(spec) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const log = [];
+  spec.forEach(tab => {
+    if (ss.getSheetByName(tab.name)) {
+      log.push('SKIP (already exists): ' + tab.name);
+      return;
+    }
+    const sheet = ss.insertSheet(tab.name);
+    const headers = ['Дата', 'Имя', 'Балл', '% правильных']
+      .concat(tab.ids.map(id => '[' + id + ']'));
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+    // Шапка жирная + закреплена + узкие колонки ID
+    sheet.getRange(1, 1, 1, headers.length).setFontWeight('bold');
+    sheet.setFrozenRows(1);
+    sheet.setColumnWidth(1, 130); // Дата
+    sheet.setColumnWidth(2, 130); // Имя
+    sheet.setColumnWidth(3, 80);  // Балл
+    sheet.setColumnWidth(4, 90);  // %
+    for (let i = 0; i < tab.ids.length; i++) {
+      sheet.setColumnWidth(5 + i, 110);
+    }
+    log.push('CREATED: ' + tab.name + ' (' + tab.ids.length + ' ID-колонок)');
+  });
+  Logger.log(log.join('\n'));
+  return log;
+}
