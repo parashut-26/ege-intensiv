@@ -18478,14 +18478,22 @@ function modalEssayReview(essayId){
 
   ['Содержание', 'Речь', 'Грамотность'].forEach(sec => rightCol.append(sectionBlock(sec, lockK2K3)));
 
-  /* AI-кнопка проверки: только для текстовых сочинений (фото пока не отправляем). */
-  if(!isPhotoEssay && essayText && essayText.length > 50){
+  /* AI-кнопка проверки:
+     - Для текстовых сочинений: AI читает текст и проверяет полноценно.
+     - Для фото-сочинений: AI текст не видит, но если учитель уже отметил
+       ошибки рамками — AI напишет отчёт ученику по этим отметкам (учтёт
+       в баллах К1-К10, сформулирует общий комментарий от лица педагога). */
+  const photoHasTeacherMarks = isPhotoEssay && commentsForView && commentsForView.length > 0;
+  if((!isPhotoEssay && essayText && essayText.length > 50) || photoHasTeacherMarks){
     rightCol.append(
       el('div', { class:'card', style:{ marginTop:'14px', background:'#FFFDF7', border:'1px solid #FACC15' }},
         el('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'10px', flexWrap:'wrap' }},
           el('div', null,
             el('div', { style:{ fontWeight:'700', fontSize:'13px', color:'#92400E' }}, '🤖 AI-черновик проверки'),
-            el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginTop:'2px' }}, 'YandexGPT расставит К1-К10 и напишет комментарий — потом подправь и сохрани')),
+            el('div', { style:{ fontSize:'11px', color:'var(--ink-2)', marginTop:'2px' }},
+              photoHasTeacherMarks && (!essayText || essayText.length <= 50)
+                ? 'Фото-работа: AI напишет общий отчёт ученику по твоим отметкам (баллы К1-К10 + комментарий)'
+                : 'YandexGPT расставит К1-К10 и напишет комментарий — потом подправь и сохрани')),
           el('button', { class:'btn btn-y btn-sm',
             onclick: async (ev) => {
               const btn = ev.currentTarget;
