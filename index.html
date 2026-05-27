@@ -23640,7 +23640,53 @@ async function loadWarmupActivity(){
    ✓ показывает какие конкретно блоки этого дня ученик видел. */
 function renderWarmupActivityTable(){
   const wrap = el('div', { class:'card', style:{ marginBottom:'14px', overflowX:'auto' }});
-  wrap.append(el('h3', { style:{ marginBottom:'8px' }}, '👀 Активность учеников по дням разогрева'));
+  /* Свёрнутость хранится в localStorage — чтобы между сессиями было стабильно.
+     При первом заходе остаётся развёрнутой (учительница увидит данные). */
+  if(STATE.warmupActivityCollapsed == null){
+    try { STATE.warmupActivityCollapsed = localStorage.getItem('warmup-activity-collapsed') === '1'; }
+    catch(_){ STATE.warmupActivityCollapsed = false; }
+  }
+  const collapsed = !!STATE.warmupActivityCollapsed;
+  const header = el('div', {
+    style:{ display:'flex', alignItems:'center', gap:'8px',
+            cursor:'pointer', userSelect:'none',
+            marginBottom: collapsed ? '0' : '8px' },
+    onclick: () => {
+      STATE.warmupActivityCollapsed = !STATE.warmupActivityCollapsed;
+      try { localStorage.setItem('warmup-activity-collapsed',
+        STATE.warmupActivityCollapsed ? '1' : '0'); } catch(_){}
+      render();
+    }
+  },
+    el('span', { style:{ fontSize:'14px', color:'var(--ink-3)' }},
+      collapsed ? '▸' : '▾'),
+    el('h3', { style:{ margin:'0' }}, '👀 Активность учеников по дням разогрева'));
+  wrap.append(header);
+
+  if(collapsed){
+    /* В свёрнутом виде показываем только заголовок + краткую сводку */
+    const acts = STATE.warmupActivity || [];
+    const students = (typeof STUDENTS !== 'undefined' ? STUDENTS : []).filter(s => s && s.id);
+    const days = (STATE.warmupDays || []).filter(d => d.is_published !== false);
+    /* Сколько учеников хотя бы раз открывали хотя бы один день */
+    const activeUserIds = new Set(acts.filter(a => a.day_id).map(a => a.user_id));
+    wrap.append(el('div', {
+      style:{ fontSize:'12px', color:'var(--ink-3)', marginLeft:'22px' }
+    },
+      'Свёрнуто. ',
+      activeUserIds.size + ' из ' + students.length + ' учеников хотя бы раз заходили в разогрев · ',
+      days.length + ' дней опубликовано · ',
+      el('span', { style:{ color:'var(--p)', cursor:'pointer', textDecoration:'underline' },
+        onclick: (ev) => {
+          ev.stopPropagation();
+          STATE.warmupActivityCollapsed = false;
+          try { localStorage.setItem('warmup-activity-collapsed', '0'); } catch(_){}
+          render();
+        }
+      }, 'развернуть')));
+    return wrap;
+  }
+
   wrap.append(el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginBottom:'10px' }},
     '✓ — ученик открывал день. Кликни по ✓ — увидишь какие посты дня он просмотрел. ',
     el('br', null),
