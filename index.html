@@ -11599,6 +11599,7 @@ function modalTest(taskN){
             })(),
             '⚡ Мгновенная проверка')),
         el('button', { class:'x', style:{ flexShrink:0, marginLeft:'10px' },
+          title: 'Отложить — прогресс сохранится, можно продолжить позже',
           onclick: () => { STATE.testOpen = null; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = null; STATE.testLimit = null; STATE.shuffledBank = null; render(); }
         }, '×')),
       body,
@@ -11612,6 +11613,34 @@ function modalTest(taskN){
                     : '⚡ Отвечайте — увидите разбор сразу под каждым вопросом')
                 : (allAnswered ? '✓ Все ответы заполнены — нажмите «Проверить»' : 'Заполните все вопросы'))),
         el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' }},
+          /* Кнопка «🗑 Сбросить» — очищает прогресс в БД и localStorage и
+             закрывает модалку. Нужна когда учитель открыл тренажёр посмотреть
+             за ученика и не хочет чтобы его частичный прогресс прилетел
+             ученику обратно через test_progress; или когда ученик хочет
+             начать заново вместо продолжения. Прецедент 27.05.2026. */
+          !STATE.testChecked
+            ? el('button', { class:'btn btn-secondary btn-sm',
+                style:{ color:'var(--red)', borderColor:'var(--red)' },
+                title: 'Удалить сохранённый прогресс этого тренажёра — при следующем заходе начнёте с нуля',
+                onclick: () => {
+                  const answered = Object.keys(STATE.testAnswers || {}).length;
+                  const msg = answered
+                    ? 'Сбросить прогресс? Ответы (' + answered + ') удалятся, тренажёр закроется и при следующем заходе начнётся с нуля.'
+                    : 'Закрыть тренажёр и удалить сохранённый прогресс из базы?';
+                  if(!confirm(msg)) return;
+                  try { clearTestProgress(); } catch(_){}
+                  STATE.testOpen = null;
+                  STATE.testAnswers = {};
+                  STATE.testChecked = false;
+                  STATE.testInstantSubmitted = {};
+                  STATE.testShuffle = null;
+                  STATE.testLimit = null;
+                  STATE.shuffledBank = null;
+                  showToast('🗑 Прогресс сброшен');
+                  render();
+                }
+              }, '🗑 Сбросить и закрыть')
+            : null,
           STATE.testChecked
             ? el('button', { class:'btn btn-secondary',
                 onclick: () => {
