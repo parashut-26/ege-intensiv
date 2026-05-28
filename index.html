@@ -3307,16 +3307,24 @@ async function deleteChatMessage(messageId){
 
 function startChatPolling(){
   if(CHAT_POLL_TIMER) return;
+  /* Хелпер: render через safeRender — пропускает перерисовку если у учителя
+     открыт редактор поста/банка/теории. Иначе 7-секундный poll чата
+     раз в 7 секунд стирал contenteditable-редактор разогрева (прецедент
+     Ольги 28.05.2026). */
+  const safeR = () => {
+    if(typeof window.safeRender === 'function') window.safeRender();
+    else render();
+  };
   CHAT_POLL_TIMER = setInterval(() => {
     if(!STATE.chatOpen){ stopChatPolling(); return; }
     /* В зависимости от текущего канала тащим разное */
     if(STATE.chatChannel === 'dm' && STATE.dmRoomId){
-      loadDmMessages().then(() => render());
+      loadDmMessages().then(safeR);
     } else if(STATE.chatChannel === 'dm' && !STATE.dmRoomId){
       /* На списке диалогов — обновляем list, чтобы видеть «новые» */
-      loadDmList().then(() => render());
+      loadDmList().then(safeR);
     } else {
-      loadChatMessages().then(() => render());
+      loadChatMessages().then(safeR);
     }
   }, 7000);
 }
@@ -20941,6 +20949,10 @@ function viewContentAssembled(){
           title:'Посмотреть все вопросы сборки с правильными ответами',
           onclick: () => { STATE.assembledPreview = av; render(); }
         }, '👁 Просмотр'),
+        el('button', { class:'btn btn-secondary btn-sm',
+          title:'Кто из учеников решал эту сборку и с каким результатом',
+          onclick: () => { STATE.assembledResults = av; render(); }
+        }, '👥 Результаты'),
         el('button', { class:'btn btn-p btn-sm',
           onclick: () => {
             try {
@@ -20976,6 +20988,213 @@ function viewContentAssembled(){
   });
   wrap.append(grid);
   return wrap;
+}
+
+/* Формат ответа для отображения: number → "1) текст", array → строка с
+   именами, и т.д. Используется в разборе попыток сборки. */
+function formatAnswerForDisplay(val, q){
+  if(val == null) return '(не отвечено)';
+  if(typeof val === 'string') return val;
+  if(typeof val === 'number'){
+    if(q && Array.isArray(q.opts) && q.opts[val] != null){
+      return (val + 1) + ') ' + q.opts[val];
+    }
+    return String(val + 1);
+  }
+  if(Array.isArray(val)){
+    if(q && Array.isArray(q.opts)){
+      return val.sort((a,b) => a-b).map(i => (i+1) + ') ' +
+        (q.opts[i] != null ? q.opts[i] : '?')).join('; ');
+    }
+    return val.map(v => typeof v === 'number' ? String(v + 1) : String(v)).join(', ');
+  }
+  if(typeof val === 'object'){
+    /* match: { 0:"1", 1:"2", ... } → "12583" */
+    if(q && q.match && Array.isArray(q.errors)){
+      return q.errors.map((_, ei) => val[ei] != null ? String(val[ei]) : '_').join('');
+    }
+    return JSON.stringify(val);
+  }
+  return String(val);
+}
+
+/* Загрузка попыток по сборке (для учителя). */
+async function loadAssembledAttempts(avId){
+  if(!sb || !avId) return [];
+  try {
+    const arr = await restRequest('GET',
+      '/attempts?assembled_variant_id=eq.' + avId +
+      '&select=id,score,max_score,bee_earned,created_at,student_id,answers,' +
+      'student:profiles!attempts_student_id_fkey(id,full_name,email)' +
+      '&order=created_at.desc&limit=200');
+    return Array.isArray(arr) ? arr : [];
+  } catch(e){
+    console.warn('loadAssembledAttempts:', e.message);
+    return [];
+  }
+}
+
+/* Модал результатов сборки: список попыток учеников + кнопка открыть разбор. */
+function modalAssembledResults(){
+  const av = STATE.assembledResults;
+  if(!av) return null;
+  const close = () => { STATE.assembledResults = null; render(); };
+
+  /* Lazy-загрузка */
+  if(!STATE._assembledAttemptsCache) STATE._assembledAttemptsCache = {};
+  const cache = STATE._assembledAttemptsCache;
+  if(cache[av.id] === undefined){
+    cache[av.id] = null;
+    loadAssembledAttempts(av.id).then(arr => { cache[av.id] = arr; render(); });
+  }
+  const attempts = cache[av.id];
+
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('h2', { style:{ margin:0 }}, '👥 Результаты сборки'),
+      el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px' }},
+        av.title)),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const body = el('div', { class:'modal-body' });
+  if(attempts === null){
+    body.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px' }},
+      '⏳ Загружаю…'));
+  } else if(!attempts.length){
+    body.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px' }},
+      'Ещё никто не решал эту сборку.'));
+  } else {
+    /* Сводка: уник учеников, средний балл, лучший. */
+    const uniqueStudents = new Set(attempts.map(a => a.student_id)).size;
+    const totalMax = attempts.reduce((s, a) => s + (a.max_score || 0), 0);
+    const totalScore = attempts.reduce((s, a) => s + (a.score || 0), 0);
+    const avgPct = totalMax ? Math.round(totalScore / totalMax * 100) : 0;
+    body.append(el('div', {
+      style:{ display:'grid', gridTemplateColumns:'repeat(3, 1fr)', gap:'8px',
+              marginBottom:'14px' }
+    },
+      kpiCard('Попыток', attempts.length, '', '🎯', 'var(--p-soft)'),
+      kpiCard('Учеников', uniqueStudents, '', '👥', 'var(--y-soft)'),
+      kpiCard('Средний', avgPct + '%', '', '📊', 'var(--green-soft)')));
+
+    /* Таблица «ученики × вопросы», как в сводной по варианту.
+       Колонки: имя | дата | каждый вопрос (1..N) | сумма | %. */
+    const qcount = Array.isArray(av.questions) ? av.questions.length : 0;
+    const table = el('table', { class:'table', style:{ width:'100%', fontSize:'12px', borderCollapse:'collapse' }});
+    const headRow = el('tr', null,
+      el('th', { style:{ textAlign:'left', position:'sticky', left:'0', background:'#FFFCF2', zIndex:'2', minWidth:'140px' }}, 'Ученик'),
+      el('th', { style:{ textAlign:'center', minWidth:'70px' }}, 'Дата'));
+    for(let qi = 0; qi < qcount; qi++){
+      headRow.append(el('th', {
+        style:{ textAlign:'center', minWidth:'30px', padding:'4px',
+                fontWeight:'700', color:'var(--ink-2)' },
+        title: 'Вопрос ' + (qi + 1) + ' (задание ' + (av.questions[qi]._source_task_n || '?') + ')'
+      }, String(qi + 1)));
+    }
+    headRow.append(
+      el('th', { style:{ textAlign:'center', minWidth:'56px', background:'#FEF3C7' }}, 'Балл'),
+      el('th', { style:{ textAlign:'center', minWidth:'48px', background:'#DBEAFE' }}, '%'));
+    table.append(el('thead', null, headRow));
+    const tbody = el('tbody');
+
+    /* Состояние раскрытых строк */
+    if(!STATE._assembledExpanded) STATE._assembledExpanded = {};
+    const exp = STATE._assembledExpanded;
+
+    attempts.forEach(a => {
+      const items = (a.answers && Array.isArray(a.answers.items)) ? a.answers.items : [];
+      const pct = a.max_score ? Math.round(a.score / a.max_score * 100) : 0;
+      const pctColor = pct >= 80 ? 'var(--green)' : pct >= 60 ? 'var(--warn)' : 'var(--red)';
+      const name = (a.student && a.student.full_name) || '(нет имени)';
+      const isOpen = !!exp[a.id];
+
+      const tr = el('tr', { style:{ cursor:'pointer',
+        background: isOpen ? '#FFFCF2' : 'transparent' },
+        onclick: () => { exp[a.id] = !isOpen; render(); }});
+      tr.append(
+        el('td', { style:{ fontWeight:'600', position:'sticky', left:'0',
+                            background: isOpen ? '#FFFCF2' : '#fff', zIndex:'1' }},
+          (isOpen ? '▾ ' : '▸ ') + name),
+        el('td', { style:{ textAlign:'center', fontSize:'10px', color:'var(--ink-3)' }},
+          new Date(a.created_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' })));
+      /* Ячейки по каждому вопросу: ✓/✗ или — */
+      for(let qi = 0; qi < qcount; qi++){
+        const it = items[qi];
+        let bg = '#F3F4F6', fg = '#9CA3AF', sym = '—';
+        if(it){
+          if(it.ok){ bg = '#D1FAE5'; fg = '#065F46'; sym = '✓'; }
+          else { bg = '#FEE2E2'; fg = '#991B1B'; sym = '✗'; }
+        }
+        tr.append(el('td', {
+          style:{ textAlign:'center', background: bg, color: fg,
+                  fontWeight:'700', fontSize:'13px', padding:'4px' }
+        }, sym));
+      }
+      tr.append(
+        el('td', { style:{ textAlign:'center', fontWeight:'700', background:'#FEF3C7' }},
+          a.score + ' / ' + a.max_score),
+        el('td', { style:{ textAlign:'center', fontWeight:'700', color: pctColor, background:'#EFF6FF' }},
+          pct + '%'));
+      tbody.append(tr);
+
+      /* Раскрытая строка — детальный разбор по каждому вопросу */
+      if(isOpen){
+        const detailTd = el('td', {
+          colspan: String(qcount + 4),
+          style:{ padding:'10px 14px', background:'#FFFBEB',
+                  borderTop:'2px solid #FACC15' }
+        });
+        items.forEach((it, qi) => {
+          const q = av.questions[qi] || {};
+          const card = el('div', {
+            style:{ padding:'8px 10px', background:'#fff',
+                    border:'1px solid var(--border)', borderRadius:'8px',
+                    marginBottom:'6px', fontSize:'12px', lineHeight:'1.5' }
+          });
+          /* Шапка вопроса */
+          card.append(el('div', {
+            style:{ display:'flex', justifyContent:'space-between',
+                    alignItems:'flex-start', gap:'8px', marginBottom:'4px' }
+          },
+            el('div', { style:{ fontWeight:'700' }},
+              (qi + 1) + ') ' + (q.q || q.word || '').slice(0, 100) +
+                ((q.q || q.word || '').length > 100 ? '…' : '')),
+            el('span', {
+              style:{ flexShrink:0, padding:'2px 8px', borderRadius:'10px',
+                      background: it && it.ok ? '#D1FAE5' : '#FEE2E2',
+                      color: it && it.ok ? '#065F46' : '#991B1B',
+                      fontWeight:'700', fontSize:'11px' }
+            }, it && it.ok ? '✓ Верно' : '✗ Ошибка')));
+          /* Ответ ученика */
+          const userAns = formatAnswerForDisplay(it && it.user, q);
+          card.append(el('div', { style:{ color:'var(--ink-2)' }},
+            el('span', { style:{ color:'var(--ink-3)', marginRight:'4px' }}, 'Ответ:'),
+            el('b', null, userAns)));
+          /* Правильный ответ */
+          const expected = formatAnswerForDisplay(it && it.expected, q);
+          if(expected && expected !== userAns){
+            card.append(el('div', { style:{ color:'var(--green)', marginTop:'2px' }},
+              el('span', { style:{ color:'var(--ink-3)', marginRight:'4px' }}, 'Правильно:'),
+              el('b', null, expected)));
+          }
+          detailTd.append(card);
+        });
+        tbody.append(el('tr', null, detailTd));
+      }
+    });
+    table.append(tbody);
+    body.append(el('div', { style:{ overflowX:'auto', maxWidth:'100%' }}, table));
+  }
+
+  const foot = el('div', { class:'modal-foot' },
+    el('span', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
+      'Кликни «🔍 Разбор» чтобы увидеть ответы конкретного ученика'),
+    el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть'));
+
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+  },
+    el('div', { class:'modal', style:{ maxWidth:'820px', width:'95vw' }}, head, body, foot));
 }
 
 /* Модал просмотра сборки: для учителя — все вопросы целиком + правильный ответ. */
@@ -34262,6 +34481,7 @@ function _renderNow(){
   if(STATE.attemptDetailOpen) root.append(modalAttemptDetail());
   if(STATE.assembledBuilder) root.append(modalAssembledBuilder());
   if(STATE.assembledPreview) root.append(modalAssembledPreview());
+  if(STATE.assembledResults) root.append(modalAssembledResults());
   /* Onboarding: если у профиля имя = префикс email (то есть дефолтное автогенерённое),
      показываем форму с просьбой ввести имя. Только один раз. */
   if(MY_PROFILE && !STATE._onboardingDismissed){
