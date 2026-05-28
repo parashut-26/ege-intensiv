@@ -9756,14 +9756,50 @@ function dayBlock(d){
   const locked = dDate ? dDate.getTime() > t0.getTime() : false;
   const card = el('div', { class:'card', 'data-day-anchor': String(d.id),
     style:{ marginBottom:'16px', opacity: locked ? '.65' : '1' }});
-  card.append(
-    el('div', { style:{ marginBottom:'14px' }},
-      el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'4px' }},
-        chip(isToday ? '● Сегодня' : locked ? '🔒 Откроется ' + d.date : '✅ Открыт',
-             isToday ? 'y' : locked ? 'grey' : 'green'),
-        el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }}, d.weekday)),
-      el('h2', null, 'День ' + d.id + '. ' + d.title),
-      el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }}, d.summary)));
+
+  /* Сворачиваемость дня — persist в localStorage. По умолчанию открыт
+     только сегодняшний день; прошедшие и будущие свёрнуты, чтобы ученик
+     не листал длинную простыню. Прецедент 29.05.2026. */
+  if(!STATE.intensiveDayOpen){
+    try {
+      STATE.intensiveDayOpen = JSON.parse(localStorage.getItem('intensive-day-open') || '{}') || {};
+    } catch(_){ STATE.intensiveDayOpen = {}; }
+  }
+  const persistOpen = () => {
+    try { localStorage.setItem('intensive-day-open', JSON.stringify(STATE.intensiveDayOpen)); }
+    catch(_){}
+  };
+  /* Если запись для этого дня ещё не существует — определяем дефолт:
+     сегодняшний день открыт, остальные свёрнуты. */
+  if(STATE.intensiveDayOpen[d.id] == null){
+    STATE.intensiveDayOpen[d.id] = !!isToday;
+  }
+  const isOpen = !!STATE.intensiveDayOpen[d.id];
+
+  /* Кликабельная шапка со стрелкой */
+  const header = el('div', {
+    style:{ marginBottom: isOpen ? '14px' : '0',
+            cursor:'pointer', userSelect:'none' },
+    onclick: () => {
+      STATE.intensiveDayOpen[d.id] = !STATE.intensiveDayOpen[d.id];
+      persistOpen();
+      render();
+    }
+  });
+  header.append(
+    el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'4px' }},
+      chip(isToday ? '● Сегодня' : locked ? '🔒 Откроется ' + d.date : '✅ Открыт',
+           isToday ? 'y' : locked ? 'grey' : 'green'),
+      el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }}, d.weekday)),
+    el('div', { style:{ display:'flex', alignItems:'center', gap:'8px' }},
+      el('span', { style:{ fontSize:'16px', color:'var(--ink-3)' }}, isOpen ? '▾' : '▸'),
+      el('h2', { style:{ margin:0, flex:1 }}, 'День ' + d.id + '. ' + d.title)),
+    el('p', { style:{ color:'var(--ink-2)', marginTop:'4px',
+                       marginLeft:'24px' }}, d.summary));
+  card.append(header);
+
+  /* Если день свёрнут — больше ничего не рендерим (variant, posts, tasks). */
+  if(!isOpen) return card;
   /* Привязанный вариант-пробник (если учитель прикрепил к этому дню) */
   const attachedVariant = (STATE.availableVariants || []).find(v => v.day_id === d.id);
   if(attachedVariant){
