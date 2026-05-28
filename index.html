@@ -11064,21 +11064,53 @@ function modalTest(taskN){
     const renderSourceBefore = (taskN === 3) && q.sourceText;
     const renderSourceAfter  = (taskN !== 3 && taskN !== 22) && q.sourceText;
 
-    /* Хелпер: формирует «📖 Исходный текст» блок (одинаковый для верха и низа). */
+    /* Хелпер: формирует «📖 Исходный текст» блок (одинаковый для верха и низа).
+       Для задания 21 — особый формат: разделяем предложения по маркерам
+       (1)(2)(3)... и выводим каждое отдельной строкой/боксом, чтобы ученик
+       видел структуру как в полноценном варианте. Прецедент 29.05.2026. */
     const buildSrcBox = () => {
       const srcBox = el('details', { style:{ padding:'12px 14px', background:'#FFFCF2', borderRadius:'10px', borderLeft:'3px solid var(--y)', marginBottom:'12px', fontSize:'13px', lineHeight:'1.6', color:'var(--ink)' }});
-      let srcHtml = renderInlineMd(q.sourceText);
-      if(targetCapsWords.length){
-        srcHtml = highlightRootsInText(srcHtml, targetCapsWords);
-      } else if(taskN !== 3){
-        /* highlightCaps только для других заданий (задание 5 — паронимы);
-           для 3 не надо красить случайные CAPS-слова в тексте. */
-        srcHtml = highlightCaps(srcHtml);
-      }
       srcBox.append(
         el('summary', { style:{ cursor:'pointer', fontWeight:'700', color:'var(--ink-2)', fontSize:'12px', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'8px', listStyle:'none' }},
-          '📖 Прочитайте текст и выполните задание ▾'),
-        el('div', { html: srcHtml, style:{ marginTop:'10px', whiteSpace:'pre-wrap' }}));
+          '📖 Прочитайте текст и выполните задание ▾'));
+      if(taskN === 21 && /\(\d+\)/.test(q.sourceText || '')){
+        /* Парсим (1) предложение... (2) предложение... — каждое в свой бокс. */
+        const text = String(q.sourceText);
+        /* Делим по «(N)» оставляя номер в начале каждого куска */
+        const parts = text.split(/(?=\(\d+\))/g)
+          .map(s => s.trim()).filter(Boolean);
+        const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'8px', marginTop:'10px' }});
+        parts.forEach(part => {
+          const m = part.match(/^\((\d+)\)\s*([\s\S]*)$/);
+          if(!m){
+            /* Не подошёл шаблон — выводим как есть (например, шапка) */
+            list.append(el('div', { style:{ color:'var(--ink-2)', whiteSpace:'pre-wrap' }}, part));
+            return;
+          }
+          const num = m[1];
+          const sent = m[2].trim();
+          list.append(el('div', {
+            style:{ padding:'10px 12px', background:'#fff',
+                    border:'1px solid var(--y-2)', borderRadius:'8px',
+                    display:'flex', gap:'10px', alignItems:'flex-start',
+                    fontSize:'13px', lineHeight:'1.55' }
+          },
+            el('span', { style:{ fontWeight:'800', color:'var(--ink-2)', flexShrink:0, minWidth:'28px' }}, '(' + num + ')'),
+            el('span', { html: renderInlineMd(sent) })));
+        });
+        srcBox.append(list);
+      } else {
+        let srcHtml = renderInlineMd(q.sourceText);
+        if(targetCapsWords.length){
+          srcHtml = highlightRootsInText(srcHtml, targetCapsWords);
+        } else if(taskN !== 3){
+          /* highlightCaps только для других заданий (задание 5 — паронимы);
+             для 3 не надо красить случайные CAPS-слова в тексте. */
+          srcHtml = highlightCaps(srcHtml);
+        }
+        srcBox.append(
+          el('div', { html: srcHtml, style:{ marginTop:'10px', whiteSpace:'pre-wrap' }}));
+      }
       srcBox.setAttribute('open', '');
       return srcBox;
     };
@@ -11697,6 +11729,126 @@ function modalTest(taskN){
         }
       }
     } else if(q.text){
+      /* Для задания 21 в банке — добавляем dropdown'ы с правилами для каждого
+         предложения и кнопку «Сформировать ответ» (как в полноценном варианте
+         через makeTask21Field). Прецедент 29.05.2026 — ученикам неудобно
+         помечать вручную. */
+      if(taskN === 21 && (q.sourceText || q.context) && !all){
+        const srcForTask21 = q.sourceText || q.context;
+        const sentences = (typeof parseTask21Sentences === 'function')
+          ? parseTask21Sentences(srcForTask21) : [];
+        if(sentences.length){
+          const rulesPool = (typeof getRules21ForTask === 'function')
+            ? getRules21ForTask(q.q || '') : [];
+          if(!STATE.testT21) STATE.testT21 = {};
+          if(!STATE.testT21[i]) STATE.testT21[i] = { picks: {}, target: rulesPool[0] || '' };
+          const st = STATE.testT21[i];
+          sentences.forEach(s => {
+            if(!Array.isArray(st.picks[s.num])) st.picks[s.num] = [];
+          });
+          const t21Box = el('div', {
+            style:{ marginTop:'10px', padding:'10px 12px', background:'#F9FAFB',
+                    border:'1px solid var(--border)', borderRadius:'10px',
+                    marginBottom:'12px' }
+          });
+          t21Box.append(el('div', {
+            style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)',
+                    marginBottom:'8px', textTransform:'uppercase', letterSpacing:'.06em' }
+          }, '📌 Выбери правило для каждого предложения'));
+          sentences.forEach(sent => {
+            const arr = st.picks[sent.num];
+            const sentRow = el('div', {
+              style:{ display:'flex', flexWrap:'wrap', gap:'8px',
+                      alignItems:'flex-start', padding:'8px 0',
+                      borderTop:'1px dashed var(--border)' }
+            });
+            sentRow.append(
+              el('div', { style:{ minWidth:'24px', fontWeight:'700',
+                                  color:'var(--p-deep)', fontSize:'13px' }},
+                sent.num + ')'),
+              el('div', { style:{ flex:'1 1 200px', minWidth:'120px',
+                                  fontSize:'12px', lineHeight:'1.45',
+                                  color:'var(--ink)' }}, sent.text));
+            const dropdownsCol = el('div', { style:{ display:'flex',
+              flexDirection:'column', gap:'4px', minWidth:'200px' }});
+            const rerenderRules = () => {
+              dropdownsCol.innerHTML = '';
+              arr.forEach((rule, ridx) => {
+                const sel = el('select', {
+                  style:{ padding:'4px 8px', fontSize:'12px', borderRadius:'6px',
+                          border:'1px solid var(--border-2)', flex:1,
+                          fontFamily:'inherit', background:'#fff', cursor:'pointer' },
+                  onchange: ev => { arr[ridx] = ev.target.value; }
+                });
+                rulesPool.forEach(r => sel.append(el('option', { value: r }, r)));
+                sel.value = rule;
+                const xBtn = el('button', { type:'button',
+                  style:{ padding:'4px 8px', background:'#FEE2E2',
+                          border:'1px solid #FCA5A5', borderRadius:'4px',
+                          color:'#991B1B', fontWeight:'700', cursor:'pointer' },
+                  onclick: () => { arr.splice(ridx, 1); rerenderRules(); }
+                }, '×');
+                dropdownsCol.append(el('div', {
+                  style:{ display:'flex', gap:'4px', alignItems:'center' }
+                }, sel, xBtn));
+              });
+              const addBtn = el('button', { type:'button',
+                style:{ padding:'4px 10px', fontSize:'12px',
+                        background:'#EFF6FF', border:'1px dashed #93C5FD',
+                        borderRadius:'4px', color:'#1E40AF', fontWeight:'700',
+                        cursor:'pointer', alignSelf:'flex-start' },
+                onclick: () => {
+                  arr.push(rulesPool[1] || rulesPool[0] || '');
+                  rerenderRules();
+                }
+              }, '+ Ещё правило');
+              dropdownsCol.append(addBtn);
+            };
+            rerenderRules();
+            sentRow.append(dropdownsCol);
+            t21Box.append(sentRow);
+          });
+          /* Целевое правило + кнопка собрать ответ */
+          const targetSel = el('select', {
+            style:{ padding:'5px 10px', fontSize:'13px', borderRadius:'6px',
+                    border:'2px solid var(--p)', minWidth:'220px',
+                    fontFamily:'inherit', background:'#fff', fontWeight:'700' },
+            onchange: ev => { st.target = ev.target.value; }
+          });
+          rulesPool.forEach(r => targetSel.append(el('option', { value: r }, r)));
+          if(st.target) targetSel.value = st.target;
+          const genBtn = el('button', { type:'button',
+            class:'btn btn-p btn-sm',
+            style:{ marginLeft:'8px' },
+            onclick: () => {
+              const target = targetSel.value;
+              if(!target || /не выбрано/i.test(target) || /нет/i.test(target)){
+                showToast('Сначала выбери целевое правило');
+                return;
+              }
+              const matched = sentences
+                .filter(s => Array.isArray(st.picks[s.num]) && st.picks[s.num].includes(target))
+                .map(s => s.num).sort((a,b) => a-b).join('');
+              if(!matched){
+                showToast('Нет предложений с этим правилом');
+                return;
+              }
+              STATE.testAnswers[i] = matched;
+              showToast('✓ Ответ собран: ' + matched);
+              render();
+            }
+          }, '📝 Сформировать ответ');
+          t21Box.append(el('div', {
+            style:{ marginTop:'10px', padding:'8px 10px', background:'#fff',
+                    borderRadius:'8px', display:'flex', gap:'6px',
+                    flexWrap:'wrap', alignItems:'center' }
+          },
+            el('span', { style:{ fontSize:'11px', color:'var(--ink-3)',
+                                  fontWeight:'700' }}, 'Целевое правило:'),
+            targetSel, genBtn));
+          block.append(t21Box);
+        }
+      }
       const ans = STATE.testAnswers[i];
       const ok = all && isCorrect(q, i);
       const bad = all && !ok;
