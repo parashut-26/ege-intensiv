@@ -20981,16 +20981,53 @@ function modalAssembledBuilder(){
     border:'1px solid var(--border-2)', borderRadius:'8px', padding:'8px',
     background:'#FAFAFA'
   }});
+  /* Сохраняем scroll-позицию каждый раз когда пользователь скроллит —
+     потом при render() восстанавливаем через requestAnimationFrame, иначе
+     модал сбрасывается наверх после каждого клика по чекбоксу. */
+  candList.addEventListener('scroll', () => {
+    b._candScroll = candList.scrollTop;
+  }, { passive: true });
+  if(b._candScroll){
+    requestAnimationFrame(() => { candList.scrollTop = b._candScroll || 0; });
+  }
+  /* Хелпер: какие куски вопроса наиболее информативны для предпросмотра.
+     Формулировка q.q часто одинаковая (особенно в заданиях 4, 5, 16) —
+     поэтому для выбора важны сами слова/предложения/опции. */
+  const previewBitsOf = (q) => {
+    const bits = [];
+    /* Сама формулировка — показываем ВСЕГДА, целиком */
+    if(q.q) bits.push({ kind:'q', text: q.q });
+    /* Для letterGap (9–12, 15) — слово с пропуском */
+    if(q.letterGap && q.word) bits.push({ kind:'word', text: '✏️ ' + q.word });
+    /* Для multi/single — все варианты ответа */
+    if(Array.isArray(q.opts) && q.opts.length){
+      bits.push({ kind:'opts', text: q.opts.map((o, i) => (i+1) + ') ' + o).join('\n') });
+    }
+    /* Для commaPick (16) и match-предложений — список предложений */
+    if(Array.isArray(q.sentences) && q.sentences.length){
+      bits.push({ kind:'sentences', text: q.sentences.map((s, i) => (i+1) + ') ' + s).join('\n') });
+    }
+    /* Для match (8/22) — список ошибок А-Д */
+    if(Array.isArray(q.errors) && q.errors.length){
+      bits.push({ kind:'errors', text: q.errors.map((e, i) =>
+        String.fromCharCode(0x0410 + i) + ') ' + e).join('\n') });
+    }
+    /* Для fillNn (15) — шаблон с пропусками */
+    if(q.fillNn && q.text) bits.push({ kind:'text', text: q.text });
+    return bits;
+  };
+
   visible.forEach(c => {
     const k = keyOf(c.taskN, c.idx);
     const isPicked = picksSet.has(k);
-    const text = String(c.q.q || c.q.word || '').slice(0, 120);
     const coll = c.q.collection || c.q.src || '';
+    const bits = previewBitsOf(c.q);
     const row = el('div', {
       style:{ display:'flex', gap:'8px', alignItems:'flex-start',
-              padding:'6px 8px', background: isPicked ? '#FEF9C3' : '#fff',
+              padding:'10px 12px', background: isPicked ? '#FEF9C3' : '#fff',
               border:'1px solid ' + (isPicked ? '#FACC15' : 'var(--border)'),
-              borderRadius:'6px', cursor:'pointer', fontSize:'12px' },
+              borderRadius:'8px', cursor:'pointer', fontSize:'13px',
+              lineHeight:'1.45' },
       onclick: () => {
         if(isPicked){
           b.picks = b.picks.filter(p => keyOf(p.taskN, p.idx) !== k);
@@ -20999,12 +21036,25 @@ function modalAssembledBuilder(){
         }
         render();
       }
-    },
-      el('span', { style:{ fontSize:'15px', flexShrink:0 }}, isPicked ? '☑' : '☐'),
-      el('div', { style:{ flex:1, minWidth:0 }},
-        el('div', { style:{ color:'var(--ink)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}, text),
-        el('div', { style:{ color:'var(--ink-3)', fontSize:'10px', marginTop:'2px' }},
-          'Задание ' + c.taskN + (coll ? ' · ' + coll : ''))));
+    });
+    row.append(el('span', { style:{ fontSize:'17px', flexShrink:0, lineHeight:'1' }},
+      isPicked ? '☑' : '☐'));
+    const inner = el('div', { style:{ flex:1, minWidth:0 }});
+    /* Шапка — номер задания и коллекция */
+    inner.append(el('div', {
+      style:{ color:'var(--ink-3)', fontSize:'10px', marginBottom:'4px',
+              textTransform:'uppercase', letterSpacing:'.06em', fontWeight:'700' }
+    }, 'Задание ' + c.taskN + (coll ? ' · ' + coll : '')));
+    /* Контент: каждый bit на своей строке, с переносами слов */
+    bits.forEach((bit, bi) => {
+      inner.append(el('div', {
+        style:{ color: bit.kind === 'q' ? 'var(--ink)' : 'var(--ink-2)',
+                fontWeight: bit.kind === 'q' ? '600' : '400',
+                marginTop: bi === 0 ? '0' : '4px',
+                whiteSpace:'pre-wrap', wordBreak:'break-word' }
+      }, bit.text));
+    });
+    row.append(inner);
     candList.append(row);
   });
   if(candidates.length > showLimit){
@@ -21046,19 +21096,38 @@ function modalAssembledBuilder(){
       'Здесь будут выбранные вопросы. Кликай по ним слева.'));
   } else {
     b.picks.forEach((p, idx) => {
-      const text = String(p.q.q || p.q.word || '').slice(0, 100);
-      picksList.append(el('div', {
-        style:{ display:'flex', gap:'6px', alignItems:'center', padding:'5px 8px',
-                background:'#fff', border:'1px solid var(--y-2)', borderRadius:'6px', fontSize:'12px' }
-      },
-        el('span', { style:{ minWidth:'18px', fontWeight:'700', color:'var(--ink-2)' }}, (idx + 1) + '.'),
-        el('div', { style:{ flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}, text),
-        el('button', { style:{ background:'transparent', border:'none', color:'var(--red)', cursor:'pointer', fontSize:'14px' },
-          onclick: () => {
-            b.picks.splice(idx, 1);
-            render();
-          }
-        }, '✕')));
+      const bits = previewBitsOf(p.q);
+      const row = el('div', {
+        style:{ display:'flex', gap:'6px', alignItems:'flex-start', padding:'8px 10px',
+                background:'#fff', border:'1px solid var(--y-2)', borderRadius:'6px',
+                fontSize:'12px', lineHeight:'1.4' }
+      });
+      row.append(el('span', { style:{ minWidth:'22px', fontWeight:'700', color:'var(--ink-2)', flexShrink:0 }},
+        (idx + 1) + '.'));
+      const inner = el('div', { style:{ flex:1, minWidth:0 }});
+      inner.append(el('div', {
+        style:{ color:'var(--ink-3)', fontSize:'10px', marginBottom:'3px',
+                textTransform:'uppercase', letterSpacing:'.06em', fontWeight:'700' }
+      }, 'Задание ' + p.taskN));
+      bits.forEach((bit, bi) => {
+        inner.append(el('div', {
+          style:{ color: bit.kind === 'q' ? 'var(--ink)' : 'var(--ink-2)',
+                  fontWeight: bit.kind === 'q' ? '600' : '400',
+                  marginTop: bi === 0 ? '0' : '3px',
+                  whiteSpace:'pre-wrap', wordBreak:'break-word' }
+        }, bit.text));
+      });
+      row.append(inner);
+      row.append(el('button', {
+        style:{ background:'transparent', border:'none', color:'var(--red)',
+                cursor:'pointer', fontSize:'16px', flexShrink:0, padding:'0 4px' },
+        title: 'Убрать из сборки',
+        onclick: () => {
+          b.picks.splice(idx, 1);
+          render();
+        }
+      }, '✕'));
+      picksList.append(row);
     });
   }
 
