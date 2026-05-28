@@ -1,0 +1,859 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Скоро в отпуск! · 6 класс · ЗебРус</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Unbounded:wght@400;600;800&family=Onest:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --sun: #FFC107;
+    --sun-deep: #FF9800;
+    --pink: #F06292;
+    --pink-light: #FFCDD2;
+    --teal: #4DD0E1;
+    --teal-deep: #00ACC1;
+    --cream: #FFF8E7;
+    --paper: #FFFCF5;
+    --ink: #4A3520;
+    --ink-soft: #7C5F3F;
+    --green: #4A8A3E;
+    --red: #C24545;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Onest', sans-serif;
+    background: var(--cream);
+    color: var(--ink);
+    line-height: 1.5;
+    min-height: 100vh;
+    overflow-x: hidden;
+    background-image:
+      radial-gradient(circle at 8% 6%, rgba(255,193,7,0.15) 0%, transparent 32%),
+      radial-gradient(circle at 92% 90%, rgba(240,98,146,0.12) 0%, transparent 38%),
+      radial-gradient(circle at 50% 50%, rgba(77,208,225,0.08) 0%, transparent 40%);
+  }
+  header {
+    position: relative;
+    text-align: center;
+    padding: 60px 24px 30px;
+    background: linear-gradient(180deg, var(--sun) 0%, transparent 100%);
+  }
+  .hero-emoji { font-size: 80px; line-height: 1; display: inline-block; animation: bob 4s ease-in-out infinite; }
+  @keyframes bob { 0%,100% { transform: translateY(0) rotate(-3deg); } 50% { transform: translateY(-10px) rotate(5deg); } }
+  h1 {
+    font-family: 'Unbounded', sans-serif;
+    font-size: clamp(2rem, 5vw, 3.2rem);
+    font-weight: 800;
+    color: var(--pink);
+    margin: 12px 0 8px;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    text-shadow: 3px 3px 0 var(--sun);
+  }
+  .subtitle {
+    font-family: 'Caveat', cursive;
+    font-size: clamp(1.4rem, 3vw, 2rem);
+    color: var(--teal-deep);
+    font-weight: 700;
+  }
+  .greeting {
+    font-size: 1rem;
+    color: var(--ink-soft);
+    margin-top: 14px;
+    max-width: 600px;
+    margin-left: auto; margin-right: auto;
+  }
+  .menu {
+    max-width: 980px;
+    margin: 36px auto;
+    padding: 0 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .menu-card {
+    background: var(--paper);
+    border: 3px solid var(--ink);
+    border-radius: 22px;
+    padding: 20px 18px;
+    cursor: pointer;
+    color: var(--ink);
+    transition: all 0.2s;
+    box-shadow: 6px 6px 0 var(--teal);
+  }
+  .menu-card:nth-child(3n+1) { box-shadow: 6px 6px 0 var(--teal); }
+  .menu-card:nth-child(3n+2) { box-shadow: 6px 6px 0 var(--pink); }
+  .menu-card:nth-child(3n) { box-shadow: 6px 6px 0 var(--sun); }
+  .menu-card:hover { transform: translate(-3px, -3px); }
+  .menu-card .num { font-family: 'Unbounded', sans-serif; font-weight: 800; color: var(--pink); font-size: 0.85rem; letter-spacing: 0.1em; }
+  .menu-card h2 { font-family: 'Unbounded', sans-serif; font-size: 1.2rem; font-weight: 700; margin: 6px 0; color: var(--ink); }
+  .menu-card p { font-size: 0.92rem; color: var(--ink-soft); }
+  .menu-card .badge { display: inline-block; background: var(--sun); color: var(--ink); padding: 2px 10px; border-radius: 12px; font-size: 0.75rem; font-weight: 700; margin-top: 10px; }
+  .menu-card.done { background: linear-gradient(135deg, #d4f5b8, var(--paper)); }
+  .menu-card.done::before { content: '✓ ' attr(data-done); color: var(--green); font-weight: 700; font-size: 0.85rem; display: block; margin-bottom: 4px; }
+
+  .game-section { display: none; max-width: 900px; margin: 0 auto; padding: 30px 20px 80px; animation: slideIn 0.4s ease; }
+  .game-section.active { display: block; }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .top-bar { display: flex; gap: 10px; align-items: center; margin-bottom: 22px; flex-wrap: wrap; }
+  .back-btn, .skip-btn { background: var(--ink); color: var(--cream); border: none; padding: 10px 18px; border-radius: 24px; cursor: pointer; font-family: 'Onest', sans-serif; font-weight: 500; font-size: 0.92rem; transition: transform 0.2s; }
+  .skip-btn { background: var(--paper); color: var(--ink); border: 2px solid var(--ink); margin-left: auto; }
+  .back-btn:hover { transform: translateX(-4px); }
+  .skip-btn:hover { background: var(--pink-light); }
+  .game-title { font-family: 'Unbounded', sans-serif; font-size: 1.8rem; font-weight: 800; color: var(--pink); margin-bottom: 8px; line-height: 1.15; }
+  .game-intro { font-family: 'Caveat', cursive; font-size: 1.3rem; color: var(--teal-deep); font-weight: 700; margin-bottom: 22px; }
+  .score-bar { background: var(--paper); border: 2px solid var(--ink); border-radius: 14px; padding: 10px 16px; margin-bottom: 18px; display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  .score-label { font-family: 'Caveat', cursive; font-size: 1.2rem; font-weight: 700; }
+  .score-value { font-family: 'Unbounded', sans-serif; font-weight: 800; font-size: 1.2rem; color: var(--sun-deep); }
+  .round-label { font-family: 'Unbounded', sans-serif; font-weight: 700; color: var(--pink); font-size: 1rem; background: var(--sun); padding: 6px 14px; border-radius: 14px; display: inline-block; margin-bottom: 14px; }
+  .card { background: var(--paper); border: 3px solid var(--ink); border-radius: 18px; padding: 18px 22px; margin-bottom: 14px; }
+  .task { font-size: 1rem; color: var(--ink); margin-bottom: 12px; }
+  .input-row { display: flex; gap: 10px; align-items: center; margin-top: 12px; flex-wrap: wrap; }
+  .open-input { flex: 1; min-width: 200px; padding: 12px 16px; border: 2px solid var(--ink); border-radius: 12px; font-family: 'Onest', sans-serif; font-size: 1rem; background: var(--paper); }
+  .open-input:focus { outline: none; border-color: var(--pink); box-shadow: 0 0 0 3px var(--pink-light); }
+  .open-input.correct { border-color: var(--green); background: #f4faef; }
+  .open-input.wrong { border-color: var(--red); background: #fff0f0; }
+  .open-input:disabled { cursor: not-allowed; }
+  .check-btn { background: var(--ink); color: var(--cream); border: none; padding: 12px 22px; border-radius: 24px; cursor: pointer; font-family: 'Onest', sans-serif; font-weight: 600; font-size: 1rem; }
+  .check-btn:hover:not(:disabled) { background: var(--pink); }
+  .check-btn:disabled { background: #ccc; cursor: not-allowed; }
+  .next-btn { background: var(--sun); color: var(--ink); border: 2px solid var(--ink); padding: 11px 22px; border-radius: 24px; cursor: pointer; font-family: 'Unbounded', sans-serif; font-weight: 700; display: none; }
+  .next-btn.show { display: inline-block; }
+  .feedback { margin-top: 10px; padding: 10px 14px; border-radius: 10px; background: var(--cream); border-left: 4px solid var(--teal); display: none; font-size: 0.95rem; }
+  .feedback.show { display: block; }
+  .feedback .yours { font-weight: 700; }
+  .feedback .yours.correct { color: var(--green); }
+  .feedback .yours.wrong { color: var(--red); }
+  .answer-correct { color: var(--green); font-weight: 700; }
+
+  /* Орфограммы: пары кнопок-букв */
+  .ortho-list { display: flex; flex-direction: column; gap: 8px; }
+  .ortho-item { display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center; padding: 10px 12px; background: var(--paper); border: 2px solid var(--ink); border-radius: 10px; }
+  .ortho-word { font-family: 'Unbounded', sans-serif; font-size: 0.95rem; color: var(--ink); }
+  .ortho-blank { color: var(--pink); font-weight: 800; }
+  .ortho-buttons { display: flex; gap: 6px; }
+  .ortho-btn { width: 40px; height: 40px; background: var(--cream); border: 2px solid var(--ink); border-radius: 10px; cursor: pointer; font-family: 'Unbounded', sans-serif; font-weight: 800; font-size: 1rem; color: var(--ink); }
+  .ortho-btn:hover:not(.disabled) { background: var(--sun); }
+  .ortho-btn.picked { background: var(--sun); }
+  .ortho-btn.correct { background: var(--green); color: white; border-color: var(--green); }
+  .ortho-btn.wrong { background: var(--red); color: white; border-color: var(--red); }
+  .ortho-btn.disabled { cursor: not-allowed; }
+
+  /* Кроссворд — выделение клеток */
+  .kros-img { max-width: 100%; border: 2px solid var(--ink); border-radius: 12px; margin: 0 auto 18px; display: block; }
+  .find-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+  @media (max-width: 600px) { .find-list { grid-template-columns: 1fr; } }
+  .find-input-wrap { display: flex; gap: 6px; align-items: center; background: var(--paper); padding: 8px 10px; border: 2px solid var(--ink); border-radius: 10px; }
+  .find-num { font-family: 'Unbounded', sans-serif; font-weight: 800; color: var(--pink); }
+  .find-input { flex: 1; border: none; background: transparent; font-family: 'Onest', sans-serif; font-size: 0.95rem; outline: none; }
+
+  /* Картинки фразеологизмов */
+  .ph-image-wrap { text-align: center; margin: 10px 0; }
+  .ph-image { max-width: 320px; max-height: 280px; border-radius: 12px; border: 3px solid var(--ink); }
+
+  /* Алфавитная таблица для упр. 2 (Разведчики) */
+  .alpha-table { width: 100%; max-width: 600px; border-collapse: collapse; margin: 12px auto; font-family: 'Unbounded', sans-serif; }
+  .alpha-table td { border: 2px solid var(--ink); padding: 4px; text-align: center; font-weight: 700; background: var(--paper); }
+  .alpha-table td.num { color: var(--teal-deep); font-weight: 500; font-size: 0.85rem; background: var(--cream); }
+
+  /* Финал */
+  .result-screen { text-align: center; padding: 40px 20px; background: var(--paper); border: 3px solid var(--ink); border-radius: 22px; box-shadow: 8px 8px 0 var(--sun); margin-top: 24px; }
+  .result-emoji { font-size: 4.5rem; margin-bottom: 14px; animation: bob 2s ease-in-out infinite; }
+  .result-title { font-family: 'Unbounded', sans-serif; font-size: 1.8rem; font-weight: 800; color: var(--pink); margin-bottom: 10px; }
+  .result-score { font-family: 'Caveat', cursive; font-size: 2.3rem; color: var(--sun-deep); font-weight: 700; margin: 12px 0; }
+  .result-msg { font-size: 1rem; color: var(--ink-soft); margin: 14px auto; max-width: 500px; }
+
+  footer { text-align: center; padding: 28px 20px; color: var(--ink-soft); font-family: 'Caveat', cursive; font-size: 1.15rem; border-top: 3px dashed var(--pink); margin-top: 40px; }
+
+  @media (max-width: 600px) {
+    .game-title { font-size: 1.5rem; }
+    .ortho-item { grid-template-columns: 1fr; gap: 8px; }
+    .ortho-buttons { justify-content: center; }
+    .alpha-table td { padding: 3px 1px; font-size: 0.78rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hero-emoji">🏖️</div>
+  <h1>Скоро в отпуск!</h1>
+  <div class="subtitle">Заключительный урок по русскому языку · 6 класс</div>
+  <div class="greeting">9 летних разминок: орфограммы, фонетика, словарные игры и фразеологизмы. Любое упражнение можно пропустить и идти дальше 🍦</div>
+</header>
+
+<div id="menu" class="menu"></div>
+
+<!-- ===== СЕКЦИИ ИГР ===== -->
+<div id="orphograms" class="game-section">
+  <div class="top-bar"><button class="back-btn" onclick="backToMenu()">← К меню</button><button class="skip-btn" onclick="skipGame()">Пропустить →</button></div>
+  <div class="game-title">✏️ Орфограммы</div>
+  <div class="game-intro">Вставь пропущенную букву в каждом слове. Тапни на нужный вариант справа.</div>
+  <div class="score-bar"><div><span class="score-label">Правильно:</span> <span class="score-value" id="or-score">0</span> / <span id="or-total">16</span></div></div>
+  <div class="ortho-list" id="or-list"></div>
+  <div style="text-align:center; margin-top:16px;"><button class="check-btn" id="or-finish" onclick="finishOrtho()" style="display:none;">К меню →</button></div>
+</div>
+
+<div id="razvedchiki" class="game-section">
+  <div class="top-bar"><button class="back-btn" onclick="backToMenu()">← К меню</button><button class="skip-btn" onclick="skipGame()">Пропустить →</button></div>
+  <div class="game-title">🕵️ Разведчики</div>
+  <div class="game-intro">С помощью алфавита расшифруй фразу.</div>
+  <div class="card">
+    <div class="task" style="font-family:'Unbounded',sans-serif; font-size:1.05rem; letter-spacing:0.05em;">
+      25-6-19-20-30 &nbsp; 5-16-18-16-8-6 &nbsp; 8-10-9-15-10
+    </div>
+    <table class="alpha-table" id="alpha-table"></table>
+    <div class="input-row">
+      <input type="text" class="open-input" id="rv-input" placeholder="расшифруй фразу" autocomplete="off"/>
+      <button class="check-btn" id="rv-check" onclick="checkRazvedchiki()">🐝 Проверить</button>
+    </div>
+    <div class="feedback" id="rv-fb"></div>
+    <button class="next-btn" id="rv-next" onclick="backToMenu()">К меню →</button>
+  </div>
+</div>
+
+<div id="slovo" class="game-section">
+  <div class="top-bar"><button class="back-btn" onclick="backToMenu()">← К меню</button><button class="skip-btn" onclick="skipGame()">Пропустить →</button></div>
+  <div class="game-title">🔍 Слово в слове</div>
+  <div class="game-intro">Какое слово «спряталось» внутри другого? Напиши его.</div>
+  <div class="score-bar"><div><span class="score-label">Правильно:</span> <span class="score-value" id="sl-score">0</span> / <span id="sl-total">4</span></div></div>
+  <div id="sl-content"></div>
+</div>
+
+<div id="findwords" class="game-section">
+  <div class="top-bar"><button class="back-btn" onclick="backToMenu()">← К меню</button><button class="skip-btn" onclick="skipGame()">Пропустить →</button></div>
+  <div class="game-title">🔤 Слова спрятались</div>
+  <div class="game-intro">Посмотри на таблицу и впиши 7 слов, которые начинаются на букву «А».</div>
+  <img class="kros-img" src="img/krossvord.jpg" alt="Кроссворд"/>
+  <div class="find-list" id="fw-list"></div>
+  <div style="text-align:center; margin-top:16px;"><button class="check-btn" id="fw-check" onclick="checkFindWords()">🐝 Проверить</button></div>
+  <div class="feedback" id="fw-fb"></div>
+  <button class="next-btn" id="fw-next" onclick="backToMenu()" style="display:block; margin:14px auto;">К меню →</button>
+</div>
+
+<div id="zagadki" class="game-section">
+  <div class="top-bar"><button class="back-btn" onclick="backToMenu()">← К меню</button><button class="skip-btn" onclick="skipGame()">Пропустить →</button></div>
+  <div class="game-title">❓ Загадки-шутки</div>
+  <div class="game-intro">9 загадок. Если не знаешь — нажми «Пропустить раунд».</div>
+  <div class="score-bar"><div><span class="score-label">Правильно:</span> <span class="score-value" id="zg-score">0</span> / <span id="zg-total">9</span></div></div>
+  <div id="zg-content"></div>
+</div>
+
+<div id="zvuki" class="game-section">
+  <div class="top-bar"><button class="back-btn" onclick="backToMenu()">← К меню</button><button class="skip-btn" onclick="skipGame()">Пропустить →</button></div>
+  <div class="game-title">🐭 Звуки [ш]</div>
+  <div class="game-intro">Сколько звуков [ш] встречается в стихотворении? Напиши число.</div>
+  <div class="card">
+    <div class="task" style="font-family:'Caveat',cursive; font-size:1.4rem; line-height:1.5;">
+      Пешком шагали мышки по узенькой дорожке<br>
+      От деревушки Пешки до деревушки Ложки.
+    </div>
+    <div class="input-row">
+      <input type="number" class="open-input" id="zv-input" placeholder="число" style="max-width:140px;" min="0" max="99"/>
+      <button class="check-btn" id="zv-check" onclick="checkZvuki()">🐝 Проверить</button>
+    </div>
+    <div class="feedback" id="zv-fb"></div>
+    <button class="next-btn" id="zv-next" onclick="backToMenu()">К меню →</button>
+  </div>
+</div>
+
+<div id="slogi" class="game-section">
+  <div class="top-bar"><button class="back-btn" onclick="backToMenu()">← К меню</button><button class="skip-btn" onclick="skipGame()">Пропустить →</button></div>
+  <div class="game-title">🌴 Из слогов</div>
+  <div class="game-intro">Из каждого слова возьми только второй слог и составь новое слово.</div>
+  <div class="score-bar"><div><span class="score-label">Правильно:</span> <span class="score-value" id="sg-score">0</span> / <span id="sg-total">3</span></div></div>
+  <div id="sg-content"></div>
+</div>
+
+<div id="sharadi" class="game-section">
+  <div class="top-bar"><button class="back-btn" onclick="backToMenu()">← К меню</button><button class="skip-btn" onclick="skipGame()">Пропустить →</button></div>
+  <div class="game-title">💯 Сто-шарады</div>
+  <div class="game-intro">«100» — это число «сто». Какое слово зашифровано?</div>
+  <div class="score-bar"><div><span class="score-label">Правильно:</span> <span class="score-value" id="sh-score">0</span> / <span id="sh-total">6</span></div></div>
+  <div id="sh-content"></div>
+</div>
+
+<div id="phraseo" class="game-section">
+  <div class="top-bar"><button class="back-btn" onclick="backToMenu()">← К меню</button><button class="skip-btn" onclick="skipGame()">Пропустить →</button></div>
+  <div class="game-title">🎨 Фразеологизмы по картинкам</div>
+  <div class="game-intro">Какой фразеологизм изображён? Напиши его.</div>
+  <div class="score-bar"><div><span class="score-label">Правильно:</span> <span class="score-value" id="ph-score">0</span> / <span id="ph-total">8</span></div></div>
+  <div id="ph-content"></div>
+</div>
+
+<div id="finalresult" class="game-section">
+  <div class="result-screen">
+    <div class="result-emoji">🏖️</div>
+    <div class="result-title">Каникулы заслужены!</div>
+    <div class="result-score" id="fr-score">0 / 56</div>
+    <div class="result-msg" id="fr-msg">Ты молодец — прошёл(ла) заключительный урок.</div>
+    <button class="check-btn" onclick="restartAll()">🔄 Пройти ещё раз</button>
+  </div>
+</div>
+
+<footer>Скоро в отпуск 🍦 6 класс · ЗебРус 2026</footer>
+
+<script>
+// ===================== ХЕЛПЕРЫ =====================
+function norm(s) { return String(s || '').toLowerCase().replace(/ё/g,'е').replace(/\s+/g,' ').trim(); }
+function escHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+const GAMES_META = [
+  { id:'orphograms', num:'1', emoji:'✏️', title:'Орфограммы', desc:'Вставь пропущенную букву в 16 слов: приставки пре-/при-, -з/-с, ы/и.', badge:'16 слов' },
+  { id:'razvedchiki', num:'2', emoji:'🕵️', title:'Разведчики', desc:'С помощью алфавита расшифруй фразу.', badge:'1 фраза' },
+  { id:'slovo', num:'3', emoji:'🔍', title:'Слово в слове', desc:'Какое слово спряталось внутри другого?', badge:'4 раунда' },
+  { id:'findwords', num:'4', emoji:'🔤', title:'Слова спрятались', desc:'Найди в таблице 7 слов, которые начинаются на «А».', badge:'7 слов' },
+  { id:'zagadki', num:'5', emoji:'❓', title:'Загадки-шутки', desc:'9 загадок и смешных вопросов.', badge:'9 раундов' },
+  { id:'zvuki', num:'6', emoji:'🐭', title:'Звуки [ш]', desc:'Сколько звуков [ш] в стихотворении про мышек?', badge:'1 вопрос' },
+  { id:'slogi', num:'7', emoji:'🌴', title:'Из слогов', desc:'Возьми только второй слог и составь новое слово.', badge:'3 раунда' },
+  { id:'sharadi', num:'8', emoji:'💯', title:'Сто-шарады', desc:'100л = ?  Расшифруй слова с числом 100.', badge:'6 шарад' },
+  { id:'phraseo', num:'9', emoji:'🎨', title:'Фразеологизмы', desc:'Угадай фразеологизм по картинке.', badge:'8 картинок' }
+];
+
+// Прогресс по упражнениям (сколько баллов в каждом)
+const gameMaxScore = { orphograms:16, razvedchiki:1, slovo:4, findwords:7, zagadki:9, zvuki:1, slogi:3, sharadi:6, phraseo:8 };
+const gameScores = {};
+const gameDone = {};
+GAMES_META.forEach(g => { gameScores[g.id] = 0; gameDone[g.id] = false; });
+
+let currentGameId = null;
+
+function renderMenu() {
+  const menu = document.getElementById('menu');
+  menu.innerHTML = '';
+  GAMES_META.forEach(g => {
+    const done = gameDone[g.id];
+    const card = document.createElement('a');
+    card.className = 'menu-card' + (done ? ' done' : '');
+    if (done) card.setAttribute('data-done', gameScores[g.id] + ' / ' + gameMaxScore[g.id]);
+    card.innerHTML = `
+      <div class="num">УПР. ${g.num}</div>
+      <h2>${g.emoji} ${g.title}</h2>
+      <p>${g.desc}</p>
+      <span class="badge">${g.badge}</span>`;
+    card.onclick = () => openGame(g.id);
+    menu.appendChild(card);
+  });
+}
+
+function openGame(id) {
+  currentGameId = id;
+  document.getElementById('menu').style.display = 'none';
+  document.querySelector('header').style.display = 'none';
+  document.querySelectorAll('.game-section').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  window.scrollTo(0, 0);
+  if (id === 'orphograms') initOrtho();
+  if (id === 'razvedchiki') initRazvedchiki();
+  if (id === 'slovo') initSlovo();
+  if (id === 'findwords') initFindWords();
+  if (id === 'zagadki') initZagadki();
+  if (id === 'zvuki') initZvuki();
+  if (id === 'slogi') initSlogi();
+  if (id === 'sharadi') initSharadi();
+  if (id === 'phraseo') initPhraseo();
+}
+function backToMenu() {
+  if (currentGameId) gameDone[currentGameId] = true; // помечаем как пройденное (даже если пропустил)
+  document.querySelectorAll('.game-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('menu').style.display = '';
+  document.querySelector('header').style.display = '';
+  renderMenu();
+  window.scrollTo(0, 0);
+  // Все 9 пройдены — показать финал
+  if (GAMES_META.every(g => gameDone[g.id])) {
+    setTimeout(showFinal, 350);
+  }
+}
+function skipGame() { backToMenu(); }
+function restartAll() {
+  GAMES_META.forEach(g => { gameScores[g.id] = 0; gameDone[g.id] = false; });
+  document.querySelectorAll('.game-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('menu').style.display = '';
+  document.querySelector('header').style.display = '';
+  renderMenu();
+  window.scrollTo(0, 0);
+}
+function showFinal() {
+  document.getElementById('menu').style.display = 'none';
+  document.querySelector('header').style.display = 'none';
+  document.getElementById('finalresult').classList.add('active');
+  const total = Object.values(gameScores).reduce((a,b)=>a+b, 0);
+  const max = Object.values(gameMaxScore).reduce((a,b)=>a+b, 0);
+  document.getElementById('fr-score').textContent = total + ' / ' + max;
+  const pct = Math.round((total / max) * 100);
+  let msg = 'Ты прошёл(ла) урок до конца! Хорошего отпуска! 🍦';
+  if (pct >= 80) msg = 'Великолепно! Ты блестяще справился(ась). Хорошего отпуска! 🌴';
+  else if (pct >= 60) msg = 'Молодец! Большая часть правильно. Лето впереди! ⭐';
+  else if (pct >= 30) msg = 'Уже неплохо! Летом отдохнёшь — и в новый учебный год во всеоружии. 🌞';
+  document.getElementById('fr-msg').textContent = msg;
+}
+
+// ===================== УПР. 1. ОРФОГРАММЫ =====================
+// 16 слов из презентации, дословно
+const ORTHO_DATA = [
+  { word:'Раз_скивать',     correct:'ы', options:['ы','и'] },
+  { word:'пр_бежать',       correct:'и', options:['и','е'] },
+  { word:'пр_добрый',       correct:'е', options:['и','е'] },
+  { word:'пр_злой',         correct:'е', options:['и','е'] },
+  { word:'пр_открыть дверь',correct:'и', options:['и','е'] },
+  { word:'ра_строиться',    correct:'с', options:['с','з'] },
+  { word:'_делать',         correct:'с', options:['с','з'] },
+  { word:'бе_покоиться',    correct:'с', options:['с','з'] },
+  { word:'сверх_нтересный', correct:'и', options:['и','ы'] },
+  { word:'пр_школьный',     correct:'и', options:['и','е'] },
+  { word:'пр_морский',      correct:'и', options:['и','е'] },
+  { word:'с_щик',           correct:'ы', options:['ы','и'] },
+  { word:'без_нициативный', correct:'ы', options:['ы','и'] },
+  { word:'пр_шить',         correct:'и', options:['и','е'] },
+  { word:'пр_умный',        correct:'е', options:['и','е'] },
+  { word:'бе_конечный',     correct:'с', options:['с','з'] }
+];
+
+function initOrtho() {
+  gameScores.orphograms = 0;
+  document.getElementById('or-score').textContent = '0';
+  const list = document.getElementById('or-list');
+  list.innerHTML = '';
+  ORTHO_DATA.forEach((it, i) => {
+    const row = document.createElement('div');
+    row.className = 'ortho-item';
+    row.dataset.idx = i;
+    const wordSpan = document.createElement('div');
+    wordSpan.className = 'ortho-word';
+    wordSpan.innerHTML = it.word.replace('_', '<span class="ortho-blank">_</span>');
+    const btnBox = document.createElement('div');
+    btnBox.className = 'ortho-buttons';
+    it.options.forEach(letter => {
+      const b = document.createElement('button');
+      b.className = 'ortho-btn';
+      b.textContent = letter;
+      b.onclick = () => orthoPick(i, letter, b, row);
+      btnBox.appendChild(b);
+    });
+    row.appendChild(wordSpan);
+    row.appendChild(btnBox);
+    list.appendChild(row);
+  });
+  document.getElementById('or-finish').style.display = 'none';
+}
+function orthoPick(idx, letter, btn, row) {
+  const it = ORTHO_DATA[idx];
+  // Если уже отвечено — игнор
+  if (row.dataset.answered) return;
+  row.dataset.answered = '1';
+  // Все кнопки этой строки — disabled
+  Array.from(row.querySelectorAll('.ortho-btn')).forEach(b => {
+    b.classList.add('disabled');
+    if (b.textContent === it.correct) b.classList.add(letter === it.correct ? 'correct' : 'correct');
+    if (b.textContent === letter && letter !== it.correct) b.classList.add('wrong');
+  });
+  if (letter === it.correct) {
+    gameScores.orphograms++;
+    document.getElementById('or-score').textContent = gameScores.orphograms;
+    // Подставим правильную букву в слово красивым цветом
+    row.querySelector('.ortho-word').innerHTML = it.word.replace('_', '<span style="color:var(--green); font-weight:800;">' + it.correct.toUpperCase() + '</span>');
+  } else {
+    row.querySelector('.ortho-word').innerHTML = it.word.replace('_', '<span style="color:var(--red); text-decoration:line-through;">' + letter.toUpperCase() + '</span><span style="color:var(--green); font-weight:800;"> → ' + it.correct.toUpperCase() + '</span>');
+  }
+  // Если все ответили — показать кнопку «К меню»
+  const allAnswered = Array.from(document.querySelectorAll('#or-list .ortho-item')).every(r => r.dataset.answered);
+  if (allAnswered) document.getElementById('or-finish').style.display = 'inline-block';
+}
+function finishOrtho() { backToMenu(); }
+
+// ===================== УПР. 2. РАЗВЕДЧИКИ =====================
+const ALPHABET = ['А','Б','В','Г','Д','Е','Ё','Ж','З','И','Й','К','Л','М','Н','О','П','Р','С','Т','У','Ф','Х','Ц','Ч','Ш','Щ','Ъ','Ы','Ь','Э','Ю','Я'];
+const RAZV_ANSWER = 'честь дороже жизни';
+function initRazvedchiki() {
+  const tbl = document.getElementById('alpha-table');
+  tbl.innerHTML = '';
+  // Сетка 3 строки × 11 столбцов (33 буквы алфавита) → 2 ряда букв и 2 ряда номеров
+  const rows = 3;
+  const cols = 11;
+  for (let r = 0; r < rows; r++) {
+    const letterRow = document.createElement('tr');
+    const numRow = document.createElement('tr');
+    for (let c = 0; c < cols; c++) {
+      const idx = r * cols + c;
+      if (idx >= ALPHABET.length) {
+        letterRow.appendChild(document.createElement('td'));
+        numRow.appendChild(document.createElement('td'));
+        continue;
+      }
+      const lt = document.createElement('td');
+      lt.textContent = ALPHABET[idx];
+      letterRow.appendChild(lt);
+      const nt = document.createElement('td');
+      nt.className = 'num';
+      nt.textContent = idx + 1;
+      numRow.appendChild(nt);
+    }
+    tbl.appendChild(letterRow);
+    tbl.appendChild(numRow);
+  }
+  const inp = document.getElementById('rv-input');
+  inp.value = '';
+  inp.disabled = false;
+  inp.classList.remove('correct','wrong');
+  document.getElementById('rv-check').style.display = 'inline-block';
+  document.getElementById('rv-fb').classList.remove('show');
+  document.getElementById('rv-next').classList.remove('show');
+}
+function checkRazvedchiki() {
+  const inp = document.getElementById('rv-input');
+  const user = inp.value;
+  const ok = norm(user) === norm(RAZV_ANSWER);
+  inp.disabled = true;
+  inp.classList.add(ok ? 'correct' : 'wrong');
+  if (ok) gameScores.razvedchiki = 1;
+  const fb = document.getElementById('rv-fb');
+  fb.innerHTML = `Твой ответ: <span class="yours ${ok?'correct':'wrong'}">${escHtml(user || '—')}</span> &nbsp;·&nbsp; Правильный: <span class="answer-correct">Честь дороже жизни.</span>`;
+  fb.classList.add('show');
+  document.getElementById('rv-check').style.display = 'none';
+  document.getElementById('rv-next').classList.add('show');
+}
+
+// ===================== УПР. 3. СЛОВО В СЛОВЕ =====================
+const SLOVO_DATA = [
+  { src:'Дудочка',  answers:['дочка'] },
+  { src:'Любочка',  answers:['бочка'] },
+  { src:'Булочки',  answers:['улочки'] },
+  { src:'Карточки', answers:['точки'] }
+];
+const slState = { cur:0 };
+function initSlovo() {
+  gameScores.slovo = 0; slState.cur = 0;
+  document.getElementById('sl-score').textContent = '0';
+  renderSlovo();
+}
+function renderSlovo() {
+  if (slState.cur >= SLOVO_DATA.length) {
+    document.getElementById('sl-content').innerHTML = '<div class="result-screen"><div class="result-emoji">🌴</div><div class="result-title">Готово!</div><div class="result-score">' + gameScores.slovo + ' / ' + SLOVO_DATA.length + '</div><button class="check-btn" onclick="backToMenu()">К меню →</button></div>';
+    return;
+  }
+  const r = SLOVO_DATA[slState.cur];
+  document.getElementById('sl-content').innerHTML = `
+    <div class="round-label">Раунд ${slState.cur+1} из ${SLOVO_DATA.length}</div>
+    <div class="card">
+      <div class="task" style="font-size:1.2rem;">Слово: <strong style="color:var(--pink); font-family:'Unbounded',sans-serif;">${r.src}</strong></div>
+      <div style="color:var(--ink-soft); font-size:0.92rem;">Какое слово спряталось внутри?</div>
+      <div class="input-row">
+        <input type="text" class="open-input" id="sl-input" placeholder="напиши спрятанное слово" autocomplete="off"/>
+        <button class="check-btn" onclick="checkSlovo()">🐝 Проверить</button>
+        <button class="skip-btn" onclick="slovoSkip()">Пропустить →</button>
+      </div>
+      <div class="feedback" id="sl-fb"></div>
+      <button class="next-btn" id="sl-next" onclick="slovoNext()">Дальше →</button>
+    </div>`;
+  const inp = document.getElementById('sl-input');
+  inp.onkeydown = e => { if (e.key === 'Enter' && inp.value.trim()) checkSlovo(); };
+  setTimeout(() => inp.focus(), 200);
+}
+function checkSlovo() {
+  const r = SLOVO_DATA[slState.cur];
+  const inp = document.getElementById('sl-input');
+  const user = inp.value;
+  const ok = r.answers.some(a => norm(a) === norm(user));
+  inp.disabled = true;
+  inp.classList.add(ok ? 'correct' : 'wrong');
+  if (ok) { gameScores.slovo++; document.getElementById('sl-score').textContent = gameScores.slovo; }
+  const fb = document.getElementById('sl-fb');
+  fb.innerHTML = `Твой ответ: <span class="yours ${ok?'correct':'wrong'}">${escHtml(user || '—')}</span> &nbsp;·&nbsp; Правильно: <span class="answer-correct">${r.answers[0]}</span>`;
+  fb.classList.add('show');
+  document.getElementById('sl-next').classList.add('show');
+}
+function slovoSkip() { slState.cur++; renderSlovo(); }
+function slovoNext() { slState.cur++; renderSlovo(); }
+
+// ===================== УПР. 4. НАЙДИ СЛОВА =====================
+// Принимаем 7 уникальных слов на букву А (отвечают на букву начала)
+function initFindWords() {
+  gameScores.findwords = 0;
+  const list = document.getElementById('fw-list');
+  list.innerHTML = '';
+  for (let i = 0; i < 7; i++) {
+    const wrap = document.createElement('div');
+    wrap.className = 'find-input-wrap';
+    wrap.innerHTML = `<span class="find-num">${i+1}.</span><input type="text" class="find-input" id="fw-${i}" placeholder="слово на «а»…" autocomplete="off"/>`;
+    list.appendChild(wrap);
+  }
+  document.getElementById('fw-fb').classList.remove('show');
+  document.getElementById('fw-next').style.display = 'none';
+  document.getElementById('fw-check').style.display = 'inline-block';
+}
+function checkFindWords() {
+  const inputs = Array.from(document.querySelectorAll('#fw-list .find-input'));
+  const used = new Set();
+  let score = 0;
+  inputs.forEach(inp => {
+    const v = norm(inp.value);
+    if (v && v.startsWith('а') && v.length >= 3 && !used.has(v)) {
+      used.add(v);
+      score++;
+      inp.classList.add('correct');
+      inp.style.borderColor = 'var(--green)';
+    } else if (v) {
+      inp.style.borderColor = 'var(--red)';
+    }
+    inp.disabled = true;
+  });
+  gameScores.findwords = score;
+  const fb = document.getElementById('fw-fb');
+  fb.innerHTML = `Засчитано: <span class="yours correct">${score} / 7</span>. Принимаются разные слова на букву «а» (минимум 3 буквы).`;
+  fb.classList.add('show');
+  document.getElementById('fw-check').style.display = 'none';
+  document.getElementById('fw-next').style.display = 'inline-block';
+}
+
+// ===================== УПР. 5. ЗАГАДКИ-ШУТКИ =====================
+const ZAGADKI_DATA = [
+  { q:'1. Что в человеке есть одно, а у вороны вдвое, в лисе не встретится оно, а в огороде втрое?', answers:['буква о','о','буква «о»'] },
+  { q:'2. Что находится в центре слова «земля»?', answers:['буква м','м','буква «м»'] },
+  { q:'3. Какой месяц в названии короче всех?', answers:['май'] },
+  { q:'4. У семерых братьев по одной сестричке. Сколько их?', answers:['8','восемь'] },
+  { q:'5. Чем кончается как день, так и ночь?', answers:['мягким знаком','ь','мягкий знак'] },
+  { q:'6. Две матери, две дочери и бабушка с внучкой. Сколько всех?', answers:['трое','3','три'] },
+  { q:'7. Что в руку не схватишь?', answers:['дым'] },
+  { q:'8. Что и лентяю не лень?', answers:['дышать','дышит'] },
+  { q:'9. Когда человек стоит на часах?', answers:['когда он часовой','часовой','когда часовой'] }
+];
+const zgState = { cur:0 };
+function initZagadki() {
+  gameScores.zagadki = 0; zgState.cur = 0;
+  document.getElementById('zg-score').textContent = '0';
+  renderZagadka();
+}
+function renderZagadka() {
+  if (zgState.cur >= ZAGADKI_DATA.length) {
+    document.getElementById('zg-content').innerHTML = '<div class="result-screen"><div class="result-emoji">❓</div><div class="result-title">Готово!</div><div class="result-score">' + gameScores.zagadki + ' / ' + ZAGADKI_DATA.length + '</div><button class="check-btn" onclick="backToMenu()">К меню →</button></div>';
+    return;
+  }
+  const r = ZAGADKI_DATA[zgState.cur];
+  document.getElementById('zg-content').innerHTML = `
+    <div class="round-label">Загадка ${zgState.cur+1} из ${ZAGADKI_DATA.length}</div>
+    <div class="card">
+      <div class="task" style="font-size:1.05rem;">${escHtml(r.q)}</div>
+      <div class="input-row">
+        <input type="text" class="open-input" id="zg-input" placeholder="ответ" autocomplete="off"/>
+        <button class="check-btn" onclick="checkZagadka()">🐝 Проверить</button>
+        <button class="skip-btn" onclick="zagadkaSkip()">Пропустить →</button>
+      </div>
+      <div class="feedback" id="zg-fb"></div>
+      <button class="next-btn" id="zg-next" onclick="zagadkaNext()">Дальше →</button>
+    </div>`;
+  const inp = document.getElementById('zg-input');
+  inp.onkeydown = e => { if (e.key === 'Enter' && inp.value.trim()) checkZagadka(); };
+  setTimeout(() => inp.focus(), 200);
+}
+function checkZagadka() {
+  const r = ZAGADKI_DATA[zgState.cur];
+  const inp = document.getElementById('zg-input');
+  const user = inp.value;
+  const ok = r.answers.some(a => norm(a) === norm(user));
+  inp.disabled = true;
+  inp.classList.add(ok ? 'correct' : 'wrong');
+  if (ok) { gameScores.zagadki++; document.getElementById('zg-score').textContent = gameScores.zagadki; }
+  const fb = document.getElementById('zg-fb');
+  fb.innerHTML = `Твой ответ: <span class="yours ${ok?'correct':'wrong'}">${escHtml(user || '—')}</span> &nbsp;·&nbsp; Ответ: <span class="answer-correct">${r.answers[0]}</span>`;
+  fb.classList.add('show');
+  document.getElementById('zg-next').classList.add('show');
+}
+function zagadkaSkip() { zgState.cur++; renderZagadka(); }
+function zagadkaNext() { zgState.cur++; renderZagadka(); }
+
+// ===================== УПР. 6. ЗВУКИ Ш =====================
+function initZvuki() {
+  gameScores.zvuki = 0;
+  const inp = document.getElementById('zv-input');
+  inp.value = '';
+  inp.disabled = false;
+  inp.classList.remove('correct','wrong');
+  document.getElementById('zv-check').style.display = 'inline-block';
+  document.getElementById('zv-next').classList.remove('show');
+  document.getElementById('zv-fb').classList.remove('show');
+}
+function checkZvuki() {
+  const inp = document.getElementById('zv-input');
+  const v = parseInt(inp.value, 10);
+  const ok = v === 8;
+  inp.disabled = true;
+  inp.classList.add(ok ? 'correct' : 'wrong');
+  if (ok) gameScores.zvuki = 1;
+  const fb = document.getElementById('zv-fb');
+  fb.innerHTML = `Твой ответ: <span class="yours ${ok?'correct':'wrong'}">${escHtml(String(inp.value || '—'))}</span> &nbsp;·&nbsp; Правильно: <span class="answer-correct">8 звуков [ш]</span>`;
+  fb.classList.add('show');
+  document.getElementById('zv-check').style.display = 'none';
+  document.getElementById('zv-next').classList.add('show');
+}
+
+// ===================== УПР. 7. ИЗ СЛОГОВ =====================
+const SLOGI_DATA = [
+  { words:['соловей','мотоцикл'],         answers:['лото'] },
+  { words:['пуговица','молоток','лава'],  answers:['голова'] },
+  { words:['поворот','пороша','канава'],  answers:['ворона'] }
+];
+const sgState = { cur:0 };
+function initSlogi() {
+  gameScores.slogi = 0; sgState.cur = 0;
+  document.getElementById('sg-score').textContent = '0';
+  renderSlogi();
+}
+function renderSlogi() {
+  if (sgState.cur >= SLOGI_DATA.length) {
+    document.getElementById('sg-content').innerHTML = '<div class="result-screen"><div class="result-emoji">🌴</div><div class="result-title">Готово!</div><div class="result-score">' + gameScores.slogi + ' / ' + SLOGI_DATA.length + '</div><button class="check-btn" onclick="backToMenu()">К меню →</button></div>';
+    return;
+  }
+  const r = SLOGI_DATA[sgState.cur];
+  document.getElementById('sg-content').innerHTML = `
+    <div class="round-label">Раунд ${sgState.cur+1} из ${SLOGI_DATA.length}</div>
+    <div class="card">
+      <div class="task">Слова: <strong style="color:var(--pink); font-family:'Unbounded',sans-serif;">${r.words.join(', ')}</strong></div>
+      <div style="color:var(--ink-soft); font-size:0.92rem;">Возьми из каждого только второй слог и составь новое слово.</div>
+      <div class="input-row">
+        <input type="text" class="open-input" id="sg-input" placeholder="новое слово" autocomplete="off"/>
+        <button class="check-btn" onclick="checkSlogi()">🐝 Проверить</button>
+        <button class="skip-btn" onclick="slogiSkip()">Пропустить →</button>
+      </div>
+      <div class="feedback" id="sg-fb"></div>
+      <button class="next-btn" id="sg-next" onclick="slogiNext()">Дальше →</button>
+    </div>`;
+  const inp = document.getElementById('sg-input');
+  inp.onkeydown = e => { if (e.key === 'Enter' && inp.value.trim()) checkSlogi(); };
+  setTimeout(() => inp.focus(), 200);
+}
+function checkSlogi() {
+  const r = SLOGI_DATA[sgState.cur];
+  const inp = document.getElementById('sg-input');
+  const user = inp.value;
+  const ok = r.answers.some(a => norm(a) === norm(user));
+  inp.disabled = true;
+  inp.classList.add(ok ? 'correct' : 'wrong');
+  if (ok) { gameScores.slogi++; document.getElementById('sg-score').textContent = gameScores.slogi; }
+  const fb = document.getElementById('sg-fb');
+  fb.innerHTML = `Твой ответ: <span class="yours ${ok?'correct':'wrong'}">${escHtml(user || '—')}</span> &nbsp;·&nbsp; Правильно: <span class="answer-correct">${r.answers[0]}</span>`;
+  fb.classList.add('show');
+  document.getElementById('sg-next').classList.add('show');
+}
+function slogiSkip() { sgState.cur++; renderSlogi(); }
+function slogiNext() { sgState.cur++; renderSlogi(); }
+
+// ===================== УПР. 8. СТО-ШАРАДЫ =====================
+const SHARADI_DATA = [
+  { src:'100л',     answers:['стол'] },
+  { src:'100лб',    answers:['столб'] },
+  { src:'100ляр',   answers:['столяр'] },
+  { src:'100лица',  answers:['столица'] },
+  { src:'100рожка', answers:['сторожка'] },
+  { src:'100летник',answers:['столетник'] }
+];
+const shState = { cur:0 };
+function initSharadi() {
+  gameScores.sharadi = 0; shState.cur = 0;
+  document.getElementById('sh-score').textContent = '0';
+  renderSharadi();
+}
+function renderSharadi() {
+  if (shState.cur >= SHARADI_DATA.length) {
+    document.getElementById('sh-content').innerHTML = '<div class="result-screen"><div class="result-emoji">💯</div><div class="result-title">Готово!</div><div class="result-score">' + gameScores.sharadi + ' / ' + SHARADI_DATA.length + '</div><button class="check-btn" onclick="backToMenu()">К меню →</button></div>';
+    return;
+  }
+  const r = SHARADI_DATA[shState.cur];
+  document.getElementById('sh-content').innerHTML = `
+    <div class="round-label">Шарада ${shState.cur+1} из ${SHARADI_DATA.length}</div>
+    <div class="card">
+      <div class="task" style="font-size:1.4rem;">Расшифруй: <strong style="color:var(--pink); font-family:'Unbounded',sans-serif; font-size:1.6rem;">${r.src}</strong></div>
+      <div class="input-row">
+        <input type="text" class="open-input" id="sh-input" placeholder="слово" autocomplete="off"/>
+        <button class="check-btn" onclick="checkSharadi()">🐝 Проверить</button>
+        <button class="skip-btn" onclick="sharadiSkip()">Пропустить →</button>
+      </div>
+      <div class="feedback" id="sh-fb"></div>
+      <button class="next-btn" id="sh-next" onclick="sharadiNext()">Дальше →</button>
+    </div>`;
+  const inp = document.getElementById('sh-input');
+  inp.onkeydown = e => { if (e.key === 'Enter' && inp.value.trim()) checkSharadi(); };
+  setTimeout(() => inp.focus(), 200);
+}
+function checkSharadi() {
+  const r = SHARADI_DATA[shState.cur];
+  const inp = document.getElementById('sh-input');
+  const user = inp.value;
+  const ok = r.answers.some(a => norm(a) === norm(user));
+  inp.disabled = true;
+  inp.classList.add(ok ? 'correct' : 'wrong');
+  if (ok) { gameScores.sharadi++; document.getElementById('sh-score').textContent = gameScores.sharadi; }
+  const fb = document.getElementById('sh-fb');
+  fb.innerHTML = `Твой ответ: <span class="yours ${ok?'correct':'wrong'}">${escHtml(user || '—')}</span> &nbsp;·&nbsp; Правильно: <span class="answer-correct">${r.answers[0]}</span>`;
+  fb.classList.add('show');
+  document.getElementById('sh-next').classList.add('show');
+}
+function sharadiSkip() { shState.cur++; renderSharadi(); }
+function sharadiNext() { shState.cur++; renderSharadi(); }
+
+// ===================== УПР. 9. ФРАЗЕОЛОГИЗМЫ =====================
+const PHRASEO_DATA = [
+  { img:'ezhu.jpg',      answers:['ежу понятно'] },
+  { img:'moloko.jpg',    answers:['молоко убежало'] },
+  { img:'khleb.jpg',     answers:['хлеб всему голова','хлеб - всему голова'] },
+  { img:'martyshka.jpg', answers:['мартышкин труд'] },
+  { img:'purga.jpg',     answers:['нести пургу'] },
+  { img:'dengi.jpg',     answers:['деньги пришли'] },
+  { img:'zhaba.jpg',     answers:['жаба душит'] },
+  { img:'tishe.jpg',     answers:['тише едешь дальше будешь','тише едешь - дальше будешь'] }
+];
+const phState = { cur:0 };
+function initPhraseo() {
+  gameScores.phraseo = 0; phState.cur = 0;
+  document.getElementById('ph-score').textContent = '0';
+  renderPhraseo();
+}
+function renderPhraseo() {
+  if (phState.cur >= PHRASEO_DATA.length) {
+    document.getElementById('ph-content').innerHTML = '<div class="result-screen"><div class="result-emoji">🎨</div><div class="result-title">Готово!</div><div class="result-score">' + gameScores.phraseo + ' / ' + PHRASEO_DATA.length + '</div><button class="check-btn" onclick="backToMenu()">К меню →</button></div>';
+    return;
+  }
+  const r = PHRASEO_DATA[phState.cur];
+  document.getElementById('ph-content').innerHTML = `
+    <div class="round-label">Картинка ${phState.cur+1} из ${PHRASEO_DATA.length}</div>
+    <div class="card">
+      <div class="ph-image-wrap"><img class="ph-image" src="img/${r.img}" alt="фразеологизм"/></div>
+      <div class="task" style="text-align:center;">Какой фразеологизм изображён?</div>
+      <div class="input-row">
+        <input type="text" class="open-input" id="ph-input" placeholder="напиши фразеологизм" autocomplete="off"/>
+        <button class="check-btn" onclick="checkPhraseo()">🐝 Проверить</button>
+        <button class="skip-btn" onclick="phraseoSkip()">Пропустить →</button>
+      </div>
+      <div class="feedback" id="ph-fb"></div>
+      <button class="next-btn" id="ph-next" onclick="phraseoNext()">Дальше →</button>
+    </div>`;
+  const inp = document.getElementById('ph-input');
+  inp.onkeydown = e => { if (e.key === 'Enter' && inp.value.trim()) checkPhraseo(); };
+  setTimeout(() => inp.focus(), 200);
+}
+function checkPhraseo() {
+  const r = PHRASEO_DATA[phState.cur];
+  const inp = document.getElementById('ph-input');
+  const user = inp.value;
+  const ok = r.answers.some(a => norm(a) === norm(user));
+  inp.disabled = true;
+  inp.classList.add(ok ? 'correct' : 'wrong');
+  if (ok) { gameScores.phraseo++; document.getElementById('ph-score').textContent = gameScores.phraseo; }
+  const fb = document.getElementById('ph-fb');
+  fb.innerHTML = `Твой ответ: <span class="yours ${ok?'correct':'wrong'}">${escHtml(user || '—')}</span> &nbsp;·&nbsp; Правильно: <span class="answer-correct">${r.answers[0]}</span>`;
+  fb.classList.add('show');
+  document.getElementById('ph-next').classList.add('show');
+}
+function phraseoSkip() { phState.cur++; renderPhraseo(); }
+function phraseoNext() { phState.cur++; renderPhraseo(); }
+
+// ===================== INIT =====================
+renderMenu();
+</script>
+
+</body>
+</html>
