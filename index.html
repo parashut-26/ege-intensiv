@@ -21079,12 +21079,60 @@ function questionPreview(q, idx, taskN){
         }
       }, '🗑'))));
 
-  /* Текст вопроса — для заданий 2/3 разносим варианты 1)-5) по строкам
-     и подсвечиваем CAPS-слова жёлтым, чтобы учитель видел тот же формат,
-     что и ученик в тренажёре. */
-  const isTask23Numbered = (taskN === 2 || taskN === 3) && /\d+\)\s+[А-ЯЁ]{3,}/.test(q.q || '');
-  const previewCapsWords = isTask23Numbered ? extractTargetCapsWordsGlobal(q.q) : [];
-  if(isTask23Numbered){
+  /* Текст вопроса — для заданий 2/3 разносим варианты 1)-5) по строкам.
+     Для задания 2 — строгий критерий (3+ CAPS-букв), для задания 3 —
+     мягкий (любая буква после «1)»). Прецедент 28.05.2026. */
+  const isTask2NumberedP = taskN === 2 && /\d+\)\s+[А-ЯЁ]{3,}/.test(q.q || '');
+  const isTask3NumberedP = taskN === 3 && /\d+\)\s+/.test(q.q || '');
+  const previewCapsWords = isTask2NumberedP ? extractTargetCapsWordsGlobal(q.q) : [];
+
+  /* Хелпер: блок «📖 Исходный текст» */
+  const buildSrcBoxP = () => {
+    let srcHtml = renderInlineMdGlobal(q.sourceText);
+    if(previewCapsWords.length){
+      srcHtml = highlightRootsInTextGlobal(srcHtml, previewCapsWords);
+    } else if(taskN !== 3){
+      srcHtml = highlightCapsGlobal(srcHtml);
+    }
+    return el('div', { style:{ padding:'12px 14px', background:'#FFFCF2', borderRadius:'10px', borderLeft:'3px solid var(--y)', marginBottom:'10px', fontSize:'12px', lineHeight:'1.6', whiteSpace:'pre-wrap' }},
+      el('div', { style:{ fontWeight:'700', color:'var(--ink-2)', fontSize:'10px', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'6px' }}, '📖 Исходный текст'),
+      el('div', { html: srcHtml }));
+  };
+
+  /* Для задания 3 источник идёт ПЕРЕД формулировкой */
+  if(taskN === 3 && q.sourceText) block.append(buildSrcBoxP());
+
+  if(isTask3NumberedP){
+    /* Задание 3: разрезаем формулировку на «вступление + 5 пунктов»,
+       каждый пункт — карточка-бокс на бледно-жёлтом фоне. */
+    const safe = String(q.q || '')
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+    const parts = safe.split(/\s+(?=\d+\)\s+)/);
+    if(parts.length >= 2){
+      const head = parts[0];
+      const items = parts.slice(1);
+      block.append(el('div', {
+        style:{ fontWeight:'700', marginBottom:'10px', lineHeight:'1.55' },
+        html: head
+      }));
+      const itemsBox = el('div', { style:{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'10px' }});
+      items.forEach(part => {
+        const m = part.match(/^(\d+)\)\s*([\s\S]*)$/);
+        if(!m) return;
+        itemsBox.append(el('div', {
+          style:{ padding:'12px 14px', background:'#FEF9C3', border:'1px solid #FACC15',
+                  borderRadius:'10px', fontSize:'14px', lineHeight:'1.55',
+                  display:'flex', gap:'10px', alignItems:'flex-start' }
+        },
+          el('span', { style:{ fontWeight:'800', color:'#92400E', flexShrink:0, minWidth:'22px' }}, m[1] + ')'),
+          el('span', { html: m[2].trim() })));
+      });
+      block.append(itemsBox);
+    } else {
+      block.append(el('div', { style:{ fontWeight:'700', marginBottom:'10px' }}, q.q));
+    }
+  } else if(isTask2NumberedP){
     block.append(el('div', {
       style:{ fontWeight:'700', marginBottom:'10px', lineHeight:'1.55' },
       html: formatNumberedOptionsGlobal(q.q)
@@ -21093,19 +21141,9 @@ function questionPreview(q, idx, taskN){
     block.append(el('div', { style:{ fontWeight:'700', marginBottom:'10px' }}, q.q));
   }
 
-  /* Исходный текст (для заданий 1-3, 22-26).
-     Для задания 22 он формально есть в данных, но не нужен в работе — прячем (как и у ученика). */
-  if(q.sourceText && taskN !== 22){
-    /* Подсвечиваем корни целевых слов в тексте — точно так же, как у ученика. */
-    let srcHtml = renderInlineMdGlobal(q.sourceText);
-    if(previewCapsWords.length){
-      srcHtml = highlightRootsInTextGlobal(srcHtml, previewCapsWords);
-    } else {
-      srcHtml = highlightCapsGlobal(srcHtml);
-    }
-    block.append(el('div', { style:{ padding:'12px 14px', background:'#FFFCF2', borderRadius:'10px', borderLeft:'3px solid var(--y)', marginBottom:'10px', fontSize:'12px', lineHeight:'1.6', whiteSpace:'pre-wrap' }},
-      el('div', { style:{ fontWeight:'700', color:'var(--ink-2)', fontSize:'10px', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'6px' }}, '📖 Исходный текст'),
-      el('div', { html: srcHtml })));
+  /* Исходный текст ПОСЛЕ формулировки — для всех кроме задания 3 и 22 */
+  if(q.sourceText && taskN !== 22 && taskN !== 3){
+    block.append(buildSrcBoxP());
   }
 
   /* Контекст (предложение или пронумерованный текст) */
