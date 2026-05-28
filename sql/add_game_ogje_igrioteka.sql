@@ -81,6 +81,25 @@ ON CONFLICT (slug) DO UPDATE SET
   description = EXCLUDED.description,
   url         = EXCLUDED.url;
 
+INSERT INTO games (slug, title, grade, topic, emoji, description, url, is_published)
+VALUES (
+  'igrioteka-ogje-5',
+  'Игротека ОГЭ · Часть 5',
+  '9 класс',
+  'Игротека ОГЭ',
+  '🛡️',
+  'Крепость грамотности: «Рыцари правды и лжи», «Снайпер букв», «Перевёртыш», «Форма-мастер» и «Финал-микс». Орфография и нормы — задания 6, 7, 8, 9 из ОБЗ ФИПИ.',
+  '/games/igrioteka-ogje-5/',
+  FALSE
+)
+ON CONFLICT (slug) DO UPDATE SET
+  title       = EXCLUDED.title,
+  grade       = EXCLUDED.grade,
+  topic       = EXCLUDED.topic,
+  emoji       = EXCLUDED.emoji,
+  description = EXCLUDED.description,
+  url         = EXCLUDED.url;
+
 SELECT 'ogje igrioteka synced' AS status,
   grade, topic, COUNT(*) AS games_count
 FROM games
