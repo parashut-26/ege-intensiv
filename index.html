@@ -10851,9 +10851,17 @@ function modalTest(taskN){
 
     /* Задания 2 и 3 (лексический/стилистический анализ): варианты «1) СЛОВО. …»
        идут сплошным текстом — разносим по строкам, CAPS-слово выделяем жёлтым.
-       Также извлекаем целевые CAPS-слова, чтобы потом подсветить их корни в sourceText. */
-    const isNumberedListQ = (taskN === 2 || taskN === 3) && /\d+\)\s+[А-ЯЁ]{3,}/.test(q.q || '');
-    const targetCapsWords = isNumberedListQ ? extractTargetCapsWords(q.q) : [];
+       Для задания 3 (анализ фрагмента текста) варианты начинаются с обычного
+       предложения «1) В тексте присутствуют…» — одна заглавная буква. Поэтому
+       детект для 3 мягче (любая заглавная после «1) »), для 2 — старый строгий
+       критерий (3+ CAPS-букв подряд). Прецедент 28.05.2026. */
+    const isTask2Format = taskN === 2 && /\d+\)\s+[А-ЯЁ]{3,}/.test(q.q || '');
+    const isTask3Format = taskN === 3 && /\d+\)\s+[А-ЯЁ]/.test(q.q || '');
+    const isNumberedListQ = isTask2Format || isTask3Format;
+    /* CAPS-слова из формулировки нужны только заданию 2 (для подсветки
+       корней в sourceText). Для задания 3 это не имеет смысла — текст
+       обсуждается комплексно, без выделенных корней. */
+    const targetCapsWords = isTask2Format ? extractTargetCapsWords(q.q) : [];
     if(isNumberedListQ){
       const numberedHtml = formatNumberedOptions(q.q);
       block.append(el('div', {
@@ -16375,6 +16383,22 @@ function modalStudentDetail(){
                 style:{ color:'var(--ink)', marginBottom:'8px',
                         whiteSpace:'pre-wrap', fontWeight:'600' },
                 html: mdHtml
+              }));
+            }
+            /* Для letterGap (задания 9-12, 15) — само слово с пропуском.
+               q.word = "разг..дать", q.correct = "а". Без него учитель видел
+               только формулировку «Вставь пропущенную букву» и не понимал
+               что подсказать. */
+            if(q && q.letterGap && q.word){
+              const wordHtml = (typeof renderInlineMdGlobal === 'function')
+                ? renderInlineMdGlobal(q.word)
+                : String(q.word).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+              inner.append(el('div', {
+                style:{ padding:'8px 12px', background:'#FFFBEB',
+                        border:'1px solid #FACC15', borderRadius:'6px',
+                        marginBottom:'8px', fontSize:'18px', fontWeight:'700',
+                        letterSpacing:'.02em', color:'var(--ink)' },
+                html: '✏️ ' + wordHtml
               }));
             }
             /* Для multi/single — показываем все варианты с пометкой выбранных */
