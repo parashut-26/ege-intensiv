@@ -2190,7 +2190,12 @@ function setupStudentLivePoll(sid){
          render на каждый tick забивает CPU и стирает фокус/скролл. */
       const beforeKey = before ? before.updated_at + ':' + JSON.stringify((before.payload||{}).testAnswers||{}) : 'null';
       const afterKey  = rec    ? rec.updated_at    + ':' + JSON.stringify((rec.payload||{}).testAnswers||{})    : 'null';
-      if(beforeKey !== afterKey) render();
+      if(beforeKey !== afterKey){
+        /* safeRender — если открыт редактор постов разогрева/банка вопросов,
+           пропускаем перерисовку, чтобы не стереть несохранённый текст. */
+        if(typeof window.safeRender === 'function') window.safeRender();
+        else render();
+      }
     });
   }, 10 * 1000);
 }
@@ -3553,12 +3558,23 @@ let CHAT_BG_POLL_TIMER = null;
 function startUnreadBgPoll(){
   if(CHAT_BG_POLL_TIMER) return;
   /* Первый раз после логина — рендерим всегда (чтобы появился бейдж).
-     Дальше — только если число непрочитанных реально изменилось. */
-  pollUnreadCounts().then(() => render());
+     Дальше — только если число непрочитанных реально изменилось.
+     ВАЖНО: и в первом, и в дальнейших вызовах используем safeRender —
+     иначе если 45-секундный poll сработает пока учитель редактирует пост
+     разогрева, contenteditable пересоздастся и весь несохранённый текст
+     слетит. Прецедент 28.05.2026 (Ольга жаловалась что приходится постоянно
+     сохраняться). */
+  pollUnreadCounts().then(() => {
+    if(typeof window.safeRender === 'function') window.safeRender();
+    else render();
+  });
   CHAT_BG_POLL_TIMER = setInterval(() => {
-    /* Не дёргать если страница скрыта (на телефоне — другая вкладка/локскрин). */
     if(typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
-    pollUnreadCounts().then(changed => { if(changed) render(); });
+    pollUnreadCounts().then(changed => {
+      if(!changed) return;
+      if(typeof window.safeRender === 'function') window.safeRender();
+      else render();
+    });
   }, 45000);
 }
 function stopUnreadBgPoll(){
