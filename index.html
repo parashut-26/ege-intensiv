@@ -16320,7 +16320,9 @@ function modalStudentDetail(){
                 }
               }
             }
-            const correctVal = q && q.a;
+            /* Для letterGap правильный ответ лежит в q.correct (одна буква).
+               Для остальных типов — в q.a. */
+            const correctVal = (q && q.letterGap) ? (q && q.correct) : (q && q.a);
             let correctLabel = '';
             if(correctVal != null){
               if(typeof correctVal === 'string') correctLabel = correctVal;
@@ -16337,8 +16339,13 @@ function modalStudentDetail(){
               }
               else if(typeof correctVal === 'number') correctLabel = String(correctVal + 1);
             }
+            /* Сравнение: для letterGap — case-insensitive + ё→е (как в
+               normalizeAnswer на бэкенде), потому что учитель ввёл «Ю», а
+               ученик — «ю» — это один и тот же ответ. */
+            const normForCmp = (x) => String(x || '').toLowerCase()
+              .replace(/ё/g, 'е').replace(/[\s,]/g, '');
             const isCorrect = isSubmitted && correctLabel &&
-              ansLabel.replace(/[\s,]/g, '') === correctLabel.replace(/[\s,]/g, '');
+              normForCmp(ansLabel) === normForCmp(correctLabel);
             const rowBg = !isAnswered ? '#F9FAFB'
                         : !isSubmitted ? '#FEF9C3'
                         : isCorrect ? '#D1FAE5'
