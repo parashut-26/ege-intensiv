@@ -20644,6 +20644,7 @@ function viewTeacherContent(){
   const subs = [
     { key:'theory', label:'Теория', ic:'📖' },
     { key:'tests', label:'Банк тестов', ic:'🎯' },
+    { key:'assembled', label:'Сборки', ic:'🧩' },
     { key:'materials', label:'Материалы', ic:'📎' },
     { key:'samples', label:'Образцы сочинений', ic:'✍️' },
   ];
@@ -20663,6 +20664,7 @@ function viewTeacherContent(){
   const map = {
     theory: viewContentTheory,
     tests: viewContentTests,
+    assembled: viewContentAssembled,
     materials: viewContentMaterials,
     samples: viewContentSamples,
   };
@@ -20744,6 +20746,387 @@ function viewContentTheory(){
   });
   wrap.append(grid);
   return wrap;
+}
+
+/* =======================================================================
+   СБОРКИ ВАРИАНТОВ (assembled_variants) — учительский UI
+   ======================================================================= */
+/* Транслит русского в латиницу для slug. */
+function _slugTranslit(s){
+  const map = {'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ё':'yo','ж':'zh',
+    'з':'z','и':'i','й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p',
+    'р':'r','с':'s','т':'t','у':'u','ф':'f','х':'h','ц':'c','ч':'ch','ш':'sh',
+    'щ':'sch','ъ':'','ы':'y','ь':'','э':'e','ю':'yu','я':'ya'};
+  return String(s || '').toLowerCase().replace(/[Ѐ-ӿ]/g, c => map[c] || '')
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+}
+/* Случайный 6-символьный хвост — чтобы слаги не коллидировали. */
+function _randomSlugTail(){
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for(let i = 0; i < 6; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
+async function loadAssembledVariants(){
+  if(!sb) return [];
+  try {
+    const arr = await restRequest('GET',
+      '/assembled_variants?select=id,slug,title,description,questions,created_by,is_active,created_at,updated_at&order=created_at.desc');
+    return Array.isArray(arr) ? arr : [];
+  } catch(e){
+    console.warn('loadAssembledVariants:', e.message);
+    return [];
+  }
+}
+async function deleteAssembledVariant(id){
+  if(!sb) return false;
+  try {
+    await restRequest('DELETE', '/assembled_variants?id=eq.' + id, null,
+      { prefer: 'return=minimal' });
+    return true;
+  } catch(e){
+    showToast('⚠ Не удалить: ' + e.message);
+    return false;
+  }
+}
+async function toggleAssembledActive(id, isActive){
+  if(!sb) return false;
+  try {
+    await restRequest('PATCH', '/assembled_variants?id=eq.' + id,
+      { is_active: !!isActive }, { prefer: 'return=minimal' });
+    return true;
+  } catch(e){
+    showToast('⚠ ' + e.message);
+    return false;
+  }
+}
+
+/* Главная страница сборок — список + кнопка «создать» */
+function viewContentAssembled(){
+  const wrap = el('div', null);
+
+  /* Загрузка списка (ленивая) */
+  if(STATE.assembledVariants === undefined && sb){
+    STATE.assembledVariants = null;
+    loadAssembledVariants().then(arr => {
+      STATE.assembledVariants = arr;
+      render();
+    });
+  }
+  const list = STATE.assembledVariants;
+
+  wrap.append(
+    el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:'14px', flexWrap:'wrap', gap:'10px' }},
+      el('div', null,
+        el('h3', null, '🧩 Сборки вариантов'),
+        el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginTop:'4px', maxWidth:'620px' }},
+          'Собирайте варианты из конкретных вопросов банка и давайте ученикам прямую ссылку. ' +
+          'Каждый ответ ученика сохраняется в его истории с привязкой к сборке.')),
+      el('button', { class:'btn btn-y',
+        onclick: () => { STATE.assembledBuilder = { title:'', description:'', picks:[] }; render(); }
+      }, '＋ Создать сборку')));
+
+  if(list === null || list === undefined){
+    wrap.append(el('div', { class:'card', style:{ color:'var(--ink-3)', textAlign:'center' }}, '⏳ Загружаю…'));
+    return wrap;
+  }
+  if(!list.length){
+    wrap.append(el('div', { class:'card', style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px' }},
+      'Пока нет сборок. Нажми «Создать сборку», чтобы собрать первую.'));
+    return wrap;
+  }
+
+  const grid = el('div', { style:{ display:'flex', flexDirection:'column', gap:'10px' }});
+  list.forEach(av => {
+    const qcount = Array.isArray(av.questions) ? av.questions.length : 0;
+    const link = location.origin + location.pathname + '?aid=' + encodeURIComponent(av.slug);
+    const card = el('div', { class:'card', style:{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', gap:'12px', flexWrap:'wrap', background: av.is_active ? '#fff' : '#F9FAFB' }});
+    card.append(
+      el('div', { style:{ flex:'1 1 280px', minWidth:0 }},
+        el('div', { style:{ fontWeight:'700', fontSize:'15px', marginBottom:'4px' }},
+          av.title,
+          av.is_active
+            ? null
+            : el('span', { style:{ marginLeft:'8px', fontSize:'11px', padding:'2px 6px', background:'#E5E7EB', borderRadius:'5px', color:'var(--ink-3)' }}, 'выключено')),
+        av.description
+          ? el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'6px' }}, av.description)
+          : null,
+        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }},
+          qcount + ' вопр. · ' + new Date(av.created_at).toLocaleDateString('ru-RU')),
+        el('div', { style:{ fontSize:'11px', color:'var(--p-deep)', marginTop:'4px', fontFamily:'monospace', wordBreak:'break-all' }},
+          link)),
+      el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap', alignItems:'flex-start' }},
+        el('button', { class:'btn btn-p btn-sm',
+          onclick: () => {
+            try {
+              navigator.clipboard.writeText(link);
+              showToast('🔗 Ссылка скопирована');
+            } catch(_){ showToast('Не удалось скопировать'); }
+          }
+        }, '🔗 Копировать'),
+        el('button', { class:'btn btn-secondary btn-sm',
+          onclick: async () => {
+            const ok = await toggleAssembledActive(av.id, !av.is_active);
+            if(ok){
+              av.is_active = !av.is_active;
+              showToast(av.is_active ? '✓ Включено' : '⏸ Выключено');
+              render();
+            }
+          }
+        }, av.is_active ? '⏸ Выкл.' : '▶ Вкл.'),
+        el('button', { class:'btn-icon',
+          style:{ color:'var(--red)' },
+          title:'Удалить сборку (попытки учеников сохранятся, но ссылка перестанет работать)',
+          onclick: async () => {
+            if(!confirm('Удалить сборку «' + av.title + '»? Это нельзя отменить.')) return;
+            const ok = await deleteAssembledVariant(av.id);
+            if(ok){
+              STATE.assembledVariants = list.filter(x => x.id !== av.id);
+              showToast('✓ Удалено');
+              render();
+            }
+          }
+        }, '🗑')));
+    grid.append(card);
+  });
+  wrap.append(grid);
+  return wrap;
+}
+
+/* Модальное окно сборки: выбор задания → коллекция → вопросы → название → сохранить. */
+function modalAssembledBuilder(){
+  const close = () => { STATE.assembledBuilder = null; render(); };
+  const b = STATE.assembledBuilder;
+  if(!b.filterTaskN) b.filterTaskN = null;
+  if(!b.filterCollection) b.filterCollection = null;
+
+  /* Левая колонка: фильтры + список вопросов */
+  const tasksWithQs = [];
+  for(let n = 1; n <= 27; n++){
+    const arr = (QUIZ_BANK[n] || []).filter(q => q && (q.q || q.word));
+    if(arr.length) tasksWithQs.push({ n, count: arr.length });
+  }
+  const taskSelect = el('select', {
+    style:{ padding:'6px 10px', borderRadius:'8px', border:'1px solid var(--border-2)',
+            fontSize:'13px', minWidth:'160px', background:'#fff' },
+    onchange: ev => {
+      b.filterTaskN = ev.target.value ? parseInt(ev.target.value, 10) : null;
+      b.filterCollection = null;
+      render();
+    }
+  });
+  taskSelect.append(el('option', { value:'' }, '— Все задания —'));
+  tasksWithQs.forEach(t => {
+    taskSelect.append(el('option', { value: String(t.n) },
+      'Задание ' + t.n + ' (' + t.count + ')'));
+  });
+  if(b.filterTaskN) taskSelect.value = String(b.filterTaskN);
+
+  /* Коллекции внутри выбранного задания */
+  const collSelect = el('select', {
+    style:{ padding:'6px 10px', borderRadius:'8px', border:'1px solid var(--border-2)',
+            fontSize:'13px', minWidth:'200px', background:'#fff' },
+    onchange: ev => { b.filterCollection = ev.target.value || null; render(); }
+  });
+  collSelect.append(el('option', { value:'' }, '— Все коллекции —'));
+  if(b.filterTaskN){
+    const collMap = {};
+    (QUIZ_BANK[b.filterTaskN] || []).forEach(q => {
+      const c = q.collection || q.src || 'Без коллекции';
+      collMap[c] = (collMap[c] || 0) + 1;
+    });
+    Object.keys(collMap).sort().forEach(c => {
+      collSelect.append(el('option', { value: c }, c + ' (' + collMap[c] + ')'));
+    });
+  }
+  if(b.filterCollection) collSelect.value = b.filterCollection;
+
+  /* Фильтр-поиск по тексту вопроса */
+  const searchInput = el('input', {
+    type:'text', placeholder:'🔍 Поиск по тексту вопроса…',
+    value: b.search || '',
+    style:{ flex:'1', padding:'6px 10px', borderRadius:'8px',
+            border:'1px solid var(--border-2)', fontSize:'13px', minWidth:'150px' },
+    oninput: ev => { b.search = ev.target.value; render(); }
+  });
+
+  /* Сбор вопросов с учётом фильтров */
+  const candidates = [];
+  const tasks = b.filterTaskN ? [b.filterTaskN] : tasksWithQs.map(t => t.n);
+  const searchLower = (b.search || '').toLowerCase().trim();
+  tasks.forEach(n => {
+    (QUIZ_BANK[n] || []).forEach((q, i) => {
+      if(!q) return;
+      if(b.filterCollection){
+        const c = q.collection || q.src || 'Без коллекции';
+        if(c !== b.filterCollection) return;
+      }
+      if(searchLower){
+        const text = String(q.q || q.word || '').toLowerCase();
+        if(!text.includes(searchLower)) return;
+      }
+      candidates.push({ taskN: n, idx: i, q });
+    });
+  });
+  const showLimit = 100;
+  const visible = candidates.slice(0, showLimit);
+
+  /* Уникальный ключ для picks: taskN + индекс */
+  const keyOf = (taskN, idx) => taskN + ':' + idx;
+  const picksSet = new Set(b.picks.map(p => keyOf(p.taskN, p.idx)));
+
+  const candList = el('div', { style:{
+    display:'flex', flexDirection:'column', gap:'4px',
+    maxHeight:'420px', overflowY:'auto',
+    border:'1px solid var(--border-2)', borderRadius:'8px', padding:'8px',
+    background:'#FAFAFA'
+  }});
+  visible.forEach(c => {
+    const k = keyOf(c.taskN, c.idx);
+    const isPicked = picksSet.has(k);
+    const text = String(c.q.q || c.q.word || '').slice(0, 120);
+    const coll = c.q.collection || c.q.src || '';
+    const row = el('div', {
+      style:{ display:'flex', gap:'8px', alignItems:'flex-start',
+              padding:'6px 8px', background: isPicked ? '#FEF9C3' : '#fff',
+              border:'1px solid ' + (isPicked ? '#FACC15' : 'var(--border)'),
+              borderRadius:'6px', cursor:'pointer', fontSize:'12px' },
+      onclick: () => {
+        if(isPicked){
+          b.picks = b.picks.filter(p => keyOf(p.taskN, p.idx) !== k);
+        } else {
+          b.picks.push({ taskN: c.taskN, idx: c.idx, q: c.q });
+        }
+        render();
+      }
+    },
+      el('span', { style:{ fontSize:'15px', flexShrink:0 }}, isPicked ? '☑' : '☐'),
+      el('div', { style:{ flex:1, minWidth:0 }},
+        el('div', { style:{ color:'var(--ink)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}, text),
+        el('div', { style:{ color:'var(--ink-3)', fontSize:'10px', marginTop:'2px' }},
+          'Задание ' + c.taskN + (coll ? ' · ' + coll : ''))));
+    candList.append(row);
+  });
+  if(candidates.length > showLimit){
+    candList.append(el('div', { style:{ textAlign:'center', fontSize:'11px', color:'var(--ink-3)', padding:'8px' }},
+      '…показано ' + showLimit + ' из ' + candidates.length + '. Уточни фильтры.'));
+  }
+  if(!candidates.length){
+    candList.append(el('div', { style:{ textAlign:'center', color:'var(--ink-3)', padding:'20px' }},
+      'Нет подходящих вопросов'));
+  }
+
+  /* Правая колонка: выбранные + название */
+  const titleInput = el('input', {
+    type:'text', placeholder:'Название сборки (например, «Контрольная по орфоэпии»)',
+    value: b.title || '',
+    style:{ width:'100%', padding:'8px 10px', borderRadius:'8px',
+            border:'1.5px solid var(--y)', fontSize:'14px', fontWeight:'700',
+            boxSizing:'border-box', marginBottom:'8px' },
+    oninput: ev => { b.title = ev.target.value; }
+  });
+  const descInput = el('textarea', {
+    placeholder:'Описание для учеников (необязательно)',
+    rows:2,
+    style:{ width:'100%', padding:'8px 10px', borderRadius:'8px',
+            border:'1px solid var(--border-2)', fontSize:'13px', resize:'vertical',
+            boxSizing:'border-box', fontFamily:'inherit', marginBottom:'10px' }
+  });
+  descInput.value = b.description || '';
+  descInput.oninput = ev => { b.description = ev.target.value; };
+
+  const picksList = el('div', { style:{
+    display:'flex', flexDirection:'column', gap:'4px',
+    maxHeight:'320px', overflowY:'auto',
+    border:'1px solid var(--border-2)', borderRadius:'8px', padding:'8px',
+    background:'#FFFCF2', marginBottom:'10px'
+  }});
+  if(!b.picks.length){
+    picksList.append(el('div', { style:{ textAlign:'center', color:'var(--ink-3)', padding:'20px', fontSize:'12px' }},
+      'Здесь будут выбранные вопросы. Кликай по ним слева.'));
+  } else {
+    b.picks.forEach((p, idx) => {
+      const text = String(p.q.q || p.q.word || '').slice(0, 100);
+      picksList.append(el('div', {
+        style:{ display:'flex', gap:'6px', alignItems:'center', padding:'5px 8px',
+                background:'#fff', border:'1px solid var(--y-2)', borderRadius:'6px', fontSize:'12px' }
+      },
+        el('span', { style:{ minWidth:'18px', fontWeight:'700', color:'var(--ink-2)' }}, (idx + 1) + '.'),
+        el('div', { style:{ flex:1, minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}, text),
+        el('button', { style:{ background:'transparent', border:'none', color:'var(--red)', cursor:'pointer', fontSize:'14px' },
+          onclick: () => {
+            b.picks.splice(idx, 1);
+            render();
+          }
+        }, '✕')));
+    });
+  }
+
+  const saveBtn = el('button', { class:'btn btn-y',
+    disabled: !b.title.trim() || !b.picks.length,
+    style: (!b.title.trim() || !b.picks.length) ? { opacity:'.5', cursor:'not-allowed' } : null,
+    onclick: async () => {
+      const title = b.title.trim();
+      if(!title){ showToast('Введи название'); return; }
+      if(!b.picks.length){ showToast('Выбери хотя бы 1 вопрос'); return; }
+      saveBtn.disabled = true; saveBtn.textContent = '⏳ Сохраняю…';
+      try {
+        /* Готовим snapshot вопросов: копируем как есть + помечаем источник. */
+        const questions = b.picks.map((p, i) => Object.assign({}, p.q, {
+          _source_task_n: p.taskN, _source_idx: p.idx, _ord: i
+        }));
+        const slug = _slugTranslit(title) + '-' + _randomSlugTail();
+        const payload = {
+          slug,
+          title,
+          description: b.description ? b.description.trim() : null,
+          questions,
+          created_by: MY_PROFILE && MY_PROFILE.id,
+          is_active: true
+        };
+        await restRequest('POST', '/assembled_variants', [payload],
+          { prefer: 'return=minimal' });
+        showToast('✓ Сборка создана');
+        STATE.assembledBuilder = null;
+        STATE.assembledVariants = undefined;   /* force reload */
+        render();
+      } catch(e){
+        saveBtn.disabled = false; saveBtn.textContent = '💾 Сохранить сборку';
+        showToast('⚠ ' + e.message);
+      }
+    }
+  }, '💾 Сохранить сборку');
+
+  const head = el('div', { class:'modal-head' },
+    el('h2', { style:{ margin:0 }}, '🧩 Новая сборка вариантов'),
+    el('button', { class:'x', onclick: close }, '×'));
+
+  const body = el('div', { class:'modal-body' },
+    titleInput,
+    descInput,
+    el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap', marginBottom:'10px' }},
+      taskSelect, collSelect, searchInput),
+    el('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'14px' }},
+      el('div', null,
+        el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }},
+          'Кандидаты (' + candidates.length + ')'),
+        candList),
+      el('div', null,
+        el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--ink-2)', marginBottom:'4px', textTransform:'uppercase', letterSpacing:'.06em' }},
+          '✓ Выбрано (' + b.picks.length + ')'),
+        picksList)));
+
+  const foot = el('div', { class:'modal-foot' },
+    el('span', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
+      'После сохранения получишь ссылку для учеников'),
+    el('div', { style:{ display:'flex', gap:'6px' }},
+      el('button', { class:'btn btn-secondary', onclick: close }, 'Отмена'),
+      saveBtn));
+
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+  },
+    el('div', { class:'modal', style:{ maxWidth:'1000px', width:'95vw' }}, head, body, foot));
 }
 
 function viewContentTests(){
@@ -33523,6 +33906,7 @@ function _renderNow(){
   if(STATE.studentDetailOpen) root.append(modalStudentDetail());
   if(STATE.gamePreview) root.append(modalGamePreview());
   if(STATE.attemptDetailOpen) root.append(modalAttemptDetail());
+  if(STATE.assembledBuilder) root.append(modalAssembledBuilder());
   /* Onboarding: если у профиля имя = префикс email (то есть дефолтное автогенерённое),
      показываем форму с просьбой ввести имя. Только один раз. */
   if(MY_PROFILE && !STATE._onboardingDismissed){
