@@ -20856,6 +20856,10 @@ function viewContentAssembled(){
         el('div', { style:{ fontSize:'11px', color:'var(--p-deep)', marginTop:'4px', fontFamily:'monospace', wordBreak:'break-all' }},
           link)),
       el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap', alignItems:'flex-start' }},
+        el('button', { class:'btn btn-secondary btn-sm',
+          title:'Посмотреть все вопросы сборки с правильными ответами',
+          onclick: () => { STATE.assembledPreview = av; render(); }
+        }, '👁 Просмотр'),
         el('button', { class:'btn btn-p btn-sm',
           onclick: () => {
             try {
@@ -20891,6 +20895,158 @@ function viewContentAssembled(){
   });
   wrap.append(grid);
   return wrap;
+}
+
+/* Модал просмотра сборки: для учителя — все вопросы целиком + правильный ответ. */
+function modalAssembledPreview(){
+  const av = STATE.assembledPreview;
+  if(!av) return null;
+  const close = () => { STATE.assembledPreview = null; render(); };
+  const questions = Array.isArray(av.questions) ? av.questions : [];
+
+  /* Форматирование правильного ответа в человеческий вид. */
+  const formatCorrect = (q) => {
+    if(q == null) return '—';
+    /* letterGap */
+    if(q.letterGap && q.correct != null) return String(q.correct);
+    /* fillNn — массив правильных букв на ряд */
+    if(q.fillNn && Array.isArray(q.correct)){
+      return q.correct.map((c, i) => (i+1) + ') ' + c).join(', ');
+    }
+    /* match (8/22) — строка цифр */
+    if(q.match) return String(q.a || '');
+    /* commaPick (16) — массив индексов предложений → номера */
+    if(q.commaPick && Array.isArray(q.a)){
+      return q.a.map(i => i + 1).sort((a,b) => a-b).join('');
+    }
+    /* multi с opts — индексы → текст вариантов */
+    if(q.multi && Array.isArray(q.a)){
+      return q.a.sort((a,b) => a-b)
+                .map(i => (i+1) + (q.opts && q.opts[i] ? ') ' + q.opts[i] : ''))
+                .join('; ');
+    }
+    /* single + opts — один индекс */
+    if(typeof q.a === 'number' && Array.isArray(q.opts)){
+      return (q.a + 1) + (q.opts[q.a] ? ') ' + q.opts[q.a] : '');
+    }
+    /* text вопрос — q.a строка или массив строк (с альтернативами через /) */
+    if(q.text && q.a != null){
+      return Array.isArray(q.a) ? q.a.join(' / ') : String(q.a);
+    }
+    return q.a != null ? String(q.a) : '—';
+  };
+
+  /* Используем тот же previewBitsOf что и в билдере — он определён выше в
+     viewContentAssembled. Дублируем минимальную логику здесь, чтобы быть
+     независимыми (вдруг в будущем что-то поменяется). */
+  const previewBitsOf = (q) => {
+    const bits = [];
+    if(q.sourceText){
+      const st = String(q.sourceText);
+      bits.push({ kind:'source', text: '📖 Исходный текст:\n' + st });
+    }
+    if(q.context && typeof q.context === 'string' && !q.sourceText){
+      bits.push({ kind:'context', text: '📌 ' + q.context });
+    }
+    if(q.q) bits.push({ kind:'q', text: q.q });
+    if(q.letterGap && q.word) bits.push({ kind:'word', text: '✏️ ' + q.word });
+    const numbered = (arr) => arr.map((item, i) => {
+      const s = String(item).trim();
+      return /^\d+\)/.test(s) ? s : ((i+1) + ') ' + s);
+    }).join('\n');
+    const lettered = (arr) => arr.map((item, i) => {
+      const s = String(item).trim();
+      const letter = String.fromCharCode(0x0410 + i);
+      return new RegExp('^' + letter + '\\)').test(s) ? s : (letter + ') ' + s);
+    }).join('\n');
+    if(Array.isArray(q.opts) && q.opts.length) bits.push({ kind:'opts', text: numbered(q.opts) });
+    if(Array.isArray(q.sentences) && q.sentences.length) bits.push({ kind:'sentences', text: numbered(q.sentences) });
+    if(Array.isArray(q.errors) && q.errors.length) bits.push({ kind:'errors', text: lettered(q.errors) });
+    if(q.fillNn && q.text) bits.push({ kind:'text', text: q.text });
+    return bits;
+  };
+
+  const fsPreview = !!STATE.assembledPreviewFullscreen;
+  const head = el('div', { class:'modal-head' },
+    el('div', null,
+      el('h2', { style:{ margin:0 }}, '👁 ' + av.title),
+      el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginTop:'4px' }},
+        questions.length + ' вопр. · ' + (av.description || ''))),
+    el('div', { style:{ display:'flex', gap:'4px', alignItems:'center' }},
+      el('button', { class:'btn-icon',
+        title: fsPreview ? 'Свернуть в окно' : 'Развернуть на весь экран',
+        style:{ padding:'4px 8px', fontSize:'16px', background:'transparent', border:'none', cursor:'pointer' },
+        onclick: () => { STATE.assembledPreviewFullscreen = !fsPreview; render(); }
+      }, fsPreview ? '🗗' : '⛶'),
+      el('button', { class:'x', onclick: close }, '×')));
+
+  const body = el('div', { class:'modal-body' });
+  if(!questions.length){
+    body.append(el('div', { style:{ color:'var(--ink-3)', textAlign:'center', padding:'30px' }},
+      'В сборке нет вопросов.'));
+  }
+  questions.forEach((q, i) => {
+    const bits = previewBitsOf(q);
+    const correct = formatCorrect(q);
+    const card = el('div', {
+      style:{ marginBottom:'14px', padding:'14px 16px',
+              background:'#FFFDF7', border:'1px solid var(--y-2)',
+              borderRadius:'12px' }
+    });
+    card.append(el('div', {
+      style:{ fontSize:'11px', fontWeight:'700', color:'#92400E',
+              textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'8px' }
+    }, '№' + (i+1) + ' · задание ' + (q._source_task_n || '?') +
+       (q.collection ? ' · ' + q.collection : '')));
+    bits.forEach((bit, bi) => {
+      card.append(el('div', {
+        style:{ color: bit.kind === 'q' ? 'var(--ink)' : 'var(--ink-2)',
+                fontWeight: bit.kind === 'q' ? '700' : '400',
+                fontSize: bit.kind === 'source' ? '12px' : '13px',
+                lineHeight:'1.55',
+                background: bit.kind === 'source' ? '#FFFCF2' : 'transparent',
+                padding: bit.kind === 'source' ? '8px 10px' : '0',
+                borderLeft: bit.kind === 'source' ? '3px solid var(--y)' : 'none',
+                borderRadius: bit.kind === 'source' ? '6px' : '0',
+                marginTop: bi === 0 ? '0' : '6px',
+                whiteSpace:'pre-wrap', wordBreak:'break-word' }
+      }, bit.text));
+    });
+    /* Правильный ответ — снизу зелёным */
+    card.append(el('div', {
+      style:{ marginTop:'10px', padding:'8px 12px',
+              background:'#D1FAE5', borderRadius:'8px',
+              fontSize:'13px', lineHeight:'1.5',
+              color:'#065F46', whiteSpace:'pre-wrap' }
+    },
+      el('span', { style:{ fontWeight:'700', marginRight:'6px' }}, '✓ Ответ:'),
+      el('span', null, correct)));
+    /* Пояснение, если есть */
+    if(q.expl){
+      card.append(el('div', {
+        style:{ marginTop:'6px', padding:'8px 12px',
+                background:'#FFFBEB', border:'1px solid #FACC15',
+                borderRadius:'8px', fontSize:'12px', lineHeight:'1.5',
+                color:'#92400E', whiteSpace:'pre-wrap' }
+      },
+        el('span', { style:{ fontWeight:'700', marginRight:'6px' }}, '💡 Пояснение:'),
+        el('span', null, q.expl)));
+    }
+    body.append(card);
+  });
+
+  const foot = el('div', { class:'modal-foot' },
+    el('span', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
+      'Это превью только для тебя. У ученика по ссылке откроется тренажёр без подсказок.'),
+    el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть'));
+
+  const previewModalStyle = fsPreview
+    ? { maxWidth:'100vw', width:'100vw', height:'100vh', maxHeight:'100vh', borderRadius:'0' }
+    : { maxWidth:'900px', width:'95vw' };
+  return el('div', { class:'modal-bg',
+    onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
+  },
+    el('div', { class:'modal', style: previewModalStyle }, head, body, foot));
 }
 
 /* Модальное окно сборки: выбор задания → коллекция → вопросы → название → сохранить. */
@@ -21204,9 +21360,16 @@ function modalAssembledBuilder(){
   titleInput.oninput = ev => { b.title = ev.target.value; refreshSaveBtn(); };
   refreshSaveBtn();
 
+  const fullscreen = !!STATE.assembledBuilderFullscreen;
   const head = el('div', { class:'modal-head' },
     el('h2', { style:{ margin:0 }}, '🧩 Новая сборка вариантов'),
-    el('button', { class:'x', onclick: close }, '×'));
+    el('div', { style:{ display:'flex', gap:'4px', alignItems:'center' }},
+      el('button', { class:'btn-icon',
+        title: fullscreen ? 'Свернуть в окно' : 'Развернуть на весь экран',
+        style:{ padding:'4px 8px', fontSize:'16px', background:'transparent', border:'none', cursor:'pointer' },
+        onclick: () => { STATE.assembledBuilderFullscreen = !fullscreen; render(); }
+      }, fullscreen ? '🗗' : '⛶'),
+      el('button', { class:'x', onclick: close }, '×')));
 
   const body = el('div', { class:'modal-body' },
     titleInput,
@@ -21230,10 +21393,13 @@ function modalAssembledBuilder(){
       el('button', { class:'btn btn-secondary', onclick: close }, 'Отмена'),
       saveBtn));
 
+  const modalStyle = fullscreen
+    ? { maxWidth:'100vw', width:'100vw', height:'100vh', maxHeight:'100vh', borderRadius:'0' }
+    : { maxWidth:'1000px', width:'95vw' };
   return el('div', { class:'modal-bg',
     onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
   },
-    el('div', { class:'modal', style:{ maxWidth:'1000px', width:'95vw' }}, head, body, foot));
+    el('div', { class:'modal', style: modalStyle }, head, body, foot));
 }
 
 function viewContentTests(){
@@ -34014,6 +34180,7 @@ function _renderNow(){
   if(STATE.gamePreview) root.append(modalGamePreview());
   if(STATE.attemptDetailOpen) root.append(modalAttemptDetail());
   if(STATE.assembledBuilder) root.append(modalAssembledBuilder());
+  if(STATE.assembledPreview) root.append(modalAssembledPreview());
   /* Onboarding: если у профиля имя = префикс email (то есть дефолтное автогенерённое),
      показываем форму с просьбой ввести имя. Только один раз. */
   if(MY_PROFILE && !STATE._onboardingDismissed){
