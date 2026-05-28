@@ -4756,7 +4756,15 @@ async function refreshStudentsPresence(){
       const ls = map[s.id] || null;
       if(s.lastSeenAt !== ls){ s.lastSeenAt = ls; changed = true; }
     });
-    if(changed) render();
+    if(changed){
+      /* safeRender — иначе фоновое обновление presence (учитель видит «онлайн»
+         у учеников) каждые 30 сек дёргает render() и стирает открытый
+         редактор поста разогрева/интенсива. Прецедент 28.05.2026 — это была
+         реальная причина по которой Ольга жаловалась даже после фиксов
+         unread-poll и chat-poll: presence обновляется чаще остальных. */
+      if(typeof window.safeRender === 'function') window.safeRender();
+      else render();
+    }
   } catch(e){ /* молча */ }
 }
 function startPresenceRefreshLoop(){
