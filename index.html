@@ -2616,7 +2616,11 @@ const DAYS = [
   { id: 1, kind: 'work', ord: '01', date: '29 мая', weekday: 'пятница', title: 'Орфография + задания 4–6 + сочинение',
     summary: 'Утренняя разминка готова к старту',
     tasks: [
-      { id: 't1-1', kind: 'morning', title: 'Орфоэпическая разминка', est: '15 мин', maxBee: 10, time: 'утро' },
+      /* assembledSlug — slug сборки из Контент → Сборки. Если задан, кнопка
+         «Пройти» откроет именно её, а не полный тренажёр задания 4. Slug
+         можно скопировать из «🔗 Копировать» — часть URL после «?aid=». */
+      { id: 't1-1', kind: 'morning', title: 'Орфоэпическая разминка', est: '15 мин', maxBee: 10, time: 'утро',
+        assembledSlug: 'orfoepiya-intensiv-BXXEJL' },
       { id: 't1-2', kind: 'webinar', title: 'Вебинар: орфография + задания 4–6', est: '2–2.5 ч', maxBee: 5, time: '13:00' },
       { id: 't1-3', kind: 'review',  title: 'Разбор варианта ЕГЭ', est: '1.5 ч', maxBee: 10, time: '18:00' },
       { id: 't1-4', kind: 'essay',   title: 'Сочинение по тексту (задание 27)', est: 'до конца дня', maxBee: 22, time: 'вечер' },
@@ -9836,11 +9840,56 @@ function taskRow(d, t, locked){
   return head;
 }
 
+/* Запуск сборки по slug — для кнопок «Пройти» утренних разминок в DAYS.
+   Тянет assembled_variants и подсовывает в модал тренажёра как сборку
+   (как при заходе по ссылке ?aid=…). */
+async function openAssembledBySlugForTask(slug){
+  if(!sb || !slug){ showToast('Сборка ещё не привязана'); return; }
+  try {
+    const arr = await restRequest('GET',
+      '/assembled_variants?slug=eq.' + encodeURIComponent(slug) +
+      '&is_active=eq.true&limit=1&select=id,slug,title,description,questions');
+    if(!Array.isArray(arr) || !arr.length){
+      showToast('⚠ Сборка не найдена или выключена');
+      return;
+    }
+    const av = arr[0];
+    if(!Array.isArray(av.questions) || !av.questions.length){
+      showToast('⚠ В сборке нет вопросов');
+      return;
+    }
+    STATE.assembledRunning = av;
+    STATE.testOpen = (av.questions[0] && av.questions[0]._source_task_n) || 0;
+    STATE.testAnswers = {};
+    STATE.testChecked = false;
+    STATE.testInstantSubmitted = {};
+    STATE.testShuffle = null;
+    STATE.testLimit = null;
+    STATE.shuffledBank = av.questions;
+    STATE.testCollection = null;
+    STATE.testInstant = true;
+    render();
+  } catch(e){
+    showToast('⚠ ' + e.message);
+  }
+}
+
 function taskAction(t, locked){
   if(locked) return chip('🔒 закрыто', 'grey');
   if(t.kind === 'morning')
     return el('button', { class:'btn btn-y btn-sm',
-      onclick: () => { STATE.testOpen = 4; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; render(); }
+      onclick: () => {
+        /* Если у задачи привязана сборка — открываем именно её. */
+        if(t.assembledSlug){
+          openAssembledBySlugForTask(t.assembledSlug);
+          return;
+        }
+        STATE.testOpen = 4;
+        STATE.testAnswers = {};
+        STATE.testChecked = false;
+        STATE.testInstantSubmitted = {};
+        render();
+      }
     }, '⚡ Пройти');
   if(t.kind === 'essay'){
     const myId = MY_PROFILE && MY_PROFILE.id;
@@ -14204,18 +14253,29 @@ if(!window.__zebrusGameListener){
       const p = d.payload || {};
       const gameId = STATE.openGameId;
       if(!gameId || !MY_PROFILE || !MY_PROFILE.id) return;
+      const pendingId = STATE.openGameAttemptId;
+      const body = {
+        score: p.score | 0,
+        max_score: p.max_score | 0,
+        time_seconds: p.time_seconds | 0,
+        payload: { wrong_tasks: p.wrong_tasks || [] },
+        finished_at: new Date().toISOString()
+      };
       try {
-        await restRequest('POST', '/game_attempts', {
-          game_id: gameId,
-          student_id: MY_PROFILE.id,
-          score: p.score | 0,
-          max_score: p.max_score | 0,
-          time_seconds: p.time_seconds | 0,
-          payload: { wrong_tasks: p.wrong_tasks || [] }
-        }, { prefer: 'return=minimal' });
+        if(pendingId){
+          /* Обновляем pending-запись (созданную при открытии игры) */
+          await restRequest('PATCH', '/game_attempts?id=eq.' + pendingId, body,
+            { prefer: 'return=minimal' });
+        } else {
+          /* Fallback: pending не успел создаться — вставляем как раньше */
+          await restRequest('POST', '/game_attempts', Object.assign({
+            game_id: gameId,
+            student_id: MY_PROFILE.id
+          }, body), { prefer: 'return=minimal' });
+        }
         showToast('🐝 Результат сохранён');
       } catch(e){
-        console.error('game_attempts insert', e);
+        console.error('game_attempts save', e);
         showToast('Не получилось сохранить результат');
       }
     }
@@ -14224,6 +14284,29 @@ if(!window.__zebrusGameListener){
 
 function openGameModal(game){
   STATE.openGameId = game.id;
+  STATE.openGameAttemptId = null;
+  /* Сразу создаём «pending»-запись: учитель будет видеть что ученик начал
+     играть, даже если результат не дойдёт (закрытие вкладки, упавший iframe,
+     pull-to-refresh). При получении postMessage zebrus_game_result UPDATE-им
+     эту запись финальными данными и finished_at. Прецедент 29.05.2026 —
+     жалобы что игры вылетают и попытки не фиксируются. */
+  if(sb && MY_PROFILE && MY_PROFILE.id){
+    restRequest('POST', '/game_attempts', {
+      game_id: game.id,
+      student_id: MY_PROFILE.id,
+      score: 0,
+      max_score: 0,
+      time_seconds: 0,
+      payload: { status: 'started' },
+      finished_at: null
+    }, { prefer: 'return=representation' })
+      .then(arr => {
+        if(Array.isArray(arr) && arr.length){
+          STATE.openGameAttemptId = arr[0].id;
+        }
+      })
+      .catch(e => console.warn('game_attempts pending insert:', e && e.message));
+  }
   const name = (MY_PROFILE && MY_PROFILE.full_name) ? MY_PROFILE.full_name.split(' ')[0] : 'Ученик';
   const url = (game.url || ('/games/' + game.slug + '/')) +
     '?mode=embed&name=' + encodeURIComponent(name);
@@ -24472,7 +24555,7 @@ async function loadGameAttempts(gameId){
   try {
     STATE.gameAttempts = await restRequest('GET',
       '/game_attempts?game_id=eq.' + gameId +
-      '&select=id,student_id,score,max_score,percent,time_seconds,created_at,payload,' +
+      '&select=id,student_id,score,max_score,percent,time_seconds,created_at,finished_at,payload,' +
       'student:profiles!game_attempts_student_id_fkey(id,full_name)' +
       '&order=created_at.desc');
   } catch(e){
@@ -26896,22 +26979,67 @@ function viewGameResults(){
   }
 
   const attempts = STATE.gameAttempts;
-  if(!attempts.length){
-    wrap.append(el('div', { class:'card', style:{ textAlign:'center', padding:'30px', color:'var(--ink-2)' }},
-      'Пока никто не играл. Когда ученики начнут проходить — здесь появятся их результаты.'));
+  /* Разделяем на завершённые и pending (запустил, но не дошёл).
+     Pending — finished_at IS NULL. Показываются отдельно сверху. */
+  const finished = attempts.filter(a => a.finished_at != null);
+  const pending = attempts.filter(a => a.finished_at == null);
+
+  /* Плашка незавершённых попыток (если есть) */
+  if(pending.length){
+    /* Группируем pending по student, берём самую свежую */
+    const pendingByStud = {};
+    pending.forEach(a => {
+      const sid = a.student_id;
+      const cur = pendingByStud[sid];
+      const at = Date.parse(a.created_at || 0) || 0;
+      const curAt = cur ? (Date.parse(cur.created_at || 0) || 0) : 0;
+      if(!cur || at > curAt) pendingByStud[sid] = a;
+    });
+    const pendingArr = Object.values(pendingByStud);
+    const pendingCard = el('div', { class:'card', style:{
+      background:'#FFFBEB', border:'1px solid #FACC15', marginBottom:'12px'
+    }});
+    pendingCard.append(
+      el('div', { style:{ fontWeight:'700', color:'#92400E', marginBottom:'6px' }},
+        '🟡 Начали, но не закончили: ' + pendingArr.length +
+        (pendingArr.length === 1 ? ' ученик' : ' ученика')),
+      el('div', { style:{ fontSize:'12px', color:'var(--ink-2)', marginBottom:'8px' }},
+        'Игра упала, ученик закрыл вкладку или не дошёл до конца. Можешь напомнить, чтобы прошёл ещё раз.'));
+    pendingArr.forEach(a => {
+      const name = (a.student && a.student.full_name) || 'без имени';
+      const when = a.created_at
+        ? new Date(a.created_at).toLocaleString('ru-RU',
+            { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' })
+        : '—';
+      pendingCard.append(el('div', {
+        style:{ display:'flex', justifyContent:'space-between', alignItems:'center',
+                padding:'6px 10px', background:'#fff', borderRadius:'6px',
+                marginBottom:'4px', fontSize:'13px' }
+      },
+        el('span', { style:{ fontWeight:'600' }}, name),
+        el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, '⏱ ' + when)));
+    });
+    wrap.append(pendingCard);
+  }
+
+  if(!finished.length){
+    if(!pending.length){
+      wrap.append(el('div', { class:'card', style:{ textAlign:'center', padding:'30px', color:'var(--ink-2)' }},
+        'Пока никто не играл. Когда ученики начнут проходить — здесь появятся их результаты.'));
+    }
     return wrap;
   }
 
-  /* Группируем по ученику — берём лучшую попытку */
+  /* Группируем по ученику — берём лучшую попытку (только из завершённых) */
   const byStudent = {};
-  attempts.forEach(a => {
+  finished.forEach(a => {
     const sid = a.student_id;
     const cur = byStudent[sid];
     if(!cur || (a.percent || 0) > (cur.best.percent || 0)){
       byStudent[sid] = { student: a.student, best: a, all: [] };
     }
   });
-  attempts.forEach(a => { if(byStudent[a.student_id]) byStudent[a.student_id].all.push(a); });
+  finished.forEach(a => { if(byStudent[a.student_id]) byStudent[a.student_id].all.push(a); });
 
   const rows = Object.values(byStudent).sort((x,y) => (y.best.percent || 0) - (x.best.percent || 0));
 
