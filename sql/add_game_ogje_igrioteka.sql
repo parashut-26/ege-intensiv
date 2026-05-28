@@ -50,8 +50,27 @@ VALUES (
   '9 класс',
   'Игротека ОГЭ',
   '🕵️',
-  'Синтаксический детектив: «Поиск основ», «Колонны характеристик», «Правило-сыщик». 3 мини-игры по новым текстам, задания 2-4 из открытого банка ФИПИ.',
+  'Синтаксический детектив: «Поиск основ», «Колонны характеристик», «Правило-сыщик», «Пунктуация-мозаика», «Снайпер запятых». 5 мини-игр по новым текстам, задания 2-5 из открытого банка ФИПИ.',
   '/games/igrioteka-ogje-3/',
+  FALSE
+)
+ON CONFLICT (slug) DO UPDATE SET
+  title       = EXCLUDED.title,
+  grade       = EXCLUDED.grade,
+  topic       = EXCLUDED.topic,
+  emoji       = EXCLUDED.emoji,
+  description = EXCLUDED.description,
+  url         = EXCLUDED.url;
+
+INSERT INTO games (slug, title, grade, topic, emoji, description, url, is_published)
+VALUES (
+  'igrioteka-ogje-4',
+  'Игротека ОГЭ · Часть 4',
+  '9 класс',
+  'Игротека ОГЭ',
+  '🎨',
+  'Палитра выразительности: «Палитра художника», «Радуга средств», «Словарь-открытие», «Синонимы-близнецы», «Театр контекстов». 5 мини-игр по заданиям 11 и 12 из открытого банка ФИПИ — изобразительные средства и лексический анализ.',
+  '/games/igrioteka-ogje-4/',
   FALSE
 )
 ON CONFLICT (slug) DO UPDATE SET

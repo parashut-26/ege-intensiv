@@ -1,0 +1,1753 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Палитра выразительности · Игротека ОГЭ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@400;700&family=Unbounded:wght@400;600;800&family=Onest:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --honey: #F5B82E;
+    --honey-deep: #D89F1A;
+    --amber: #FFE38A;
+    --cream: #FFF8E7;
+    --ink: #2A1810;
+    --ink-soft: #5C3D29;
+    --bee: #3D2817;
+    --paper: #FFFCF5;
+    --green-ok: #4A8A3E;
+    --red-no: #C24545;
+    --artist: #E91E63;        /* ярко-розовый */
+    --artist-deep: #AD1457;
+    --artist-light: #F8BBD0;
+    --artist-2: #00ACC1;      /* бирюзовый */
+    --artist-2-deep: #00838F;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: 'Onest', sans-serif;
+    background: var(--cream);
+    color: var(--ink);
+    line-height: 1.5;
+    min-height: 100vh;
+    overflow-x: hidden;
+    background-image:
+      radial-gradient(circle at 10% 5%, rgba(233,30,99,0.10) 0%, transparent 30%),
+      radial-gradient(circle at 90% 80%, rgba(0,172,193,0.10) 0%, transparent 40%);
+  }
+  header {
+    position: relative;
+    text-align: center;
+    padding: 60px 24px 40px;
+    background: linear-gradient(180deg, var(--artist-light) 0%, transparent 100%);
+  }
+  .bee-icon { font-size: 64px; display: inline-block; animation: float 4s ease-in-out infinite; }
+  @keyframes float {
+    0%, 100% { transform: translate(0, 0) rotate(-5deg); }
+    50% { transform: translate(10px, -8px) rotate(5deg); }
+  }
+  h1 {
+    font-family: 'Unbounded', sans-serif;
+    font-size: clamp(2rem, 5vw, 3rem);
+    font-weight: 800;
+    color: var(--bee);
+    margin: 16px 0 8px;
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+  }
+  .subtitle {
+    font-family: 'Caveat', cursive;
+    font-size: clamp(1.4rem, 3vw, 2rem);
+    color: var(--artist-deep);
+    font-weight: 700;
+  }
+  .greeting {
+    font-size: 1rem;
+    color: var(--ink-soft);
+    margin-top: 16px;
+    max-width: 600px;
+    margin-left: auto; margin-right: auto;
+  }
+  .source-note {
+    margin-top: 14px;
+    display: inline-block;
+    background: var(--bee);
+    color: var(--cream);
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 0.78rem;
+    font-weight: 500;
+  }
+  .user-bar {
+    position: absolute; top: 16px; right: 16px;
+    background: var(--paper); border: 2px solid var(--bee);
+    border-radius: 20px; padding: 6px 14px;
+    font-size: 0.85rem; cursor: pointer;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .user-bar:hover { background: var(--amber); }
+  .menu {
+    max-width: 900px;
+    margin: 40px auto;
+    padding: 0 20px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+  }
+  .menu-card {
+    background: var(--paper);
+    border: 3px solid var(--bee);
+    border-radius: 18px;
+    padding: 22px 20px;
+    cursor: pointer;
+    text-decoration: none;
+    color: var(--ink);
+    transition: all 0.2s;
+    box-shadow: 6px 6px 0 var(--artist);
+  }
+  .menu-card:hover { transform: translate(-3px, -3px); box-shadow: 9px 9px 0 var(--artist); }
+  .menu-card:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--artist); }
+  .menu-card .num {
+    font-family: 'Unbounded', sans-serif;
+    font-weight: 800; color: var(--artist-deep);
+    font-size: 0.85rem; letter-spacing: 0.1em;
+  }
+  .menu-card h2 {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 1.3rem; font-weight: 600;
+    margin: 6px 0; color: var(--bee);
+  }
+  .menu-card p { font-size: 0.92rem; color: var(--ink-soft); }
+  .menu-card .badge {
+    display: inline-block; background: var(--artist-2); color: white;
+    padding: 2px 10px; border-radius: 12px;
+    font-size: 0.75rem; font-weight: 600; margin-top: 12px;
+  }
+  .menu-card.leaderboard { background: var(--bee); color: var(--cream); border-color: var(--honey); }
+  .menu-card.leaderboard h2 { color: var(--honey); }
+  .menu-card.leaderboard p { color: var(--amber); }
+  .menu-card.leaderboard .num { color: var(--amber); }
+  .menu-card.leaderboard .badge { background: var(--honey); color: var(--bee); }
+  .menu-card.coming-soon { opacity: 0.6; cursor: not-allowed; box-shadow: 4px 4px 0 #aaa; }
+  .menu-card.coming-soon:hover { transform: none; box-shadow: 4px 4px 0 #aaa; }
+  .menu-card.coming-soon .badge { background: #ccc; color: #555; }
+
+  .game-section {
+    display: none; max-width: 900px; margin: 0 auto;
+    padding: 40px 20px 80px; animation: slideIn 0.4s ease;
+  }
+  .game-section.active { display: block; }
+  @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+  .back-btn {
+    background: var(--bee); color: var(--cream); border: none;
+    padding: 10px 20px; border-radius: 30px; cursor: pointer;
+    font-family: 'Onest', sans-serif; font-weight: 500; font-size: 0.95rem;
+    margin-bottom: 24px; transition: transform 0.2s;
+  }
+  .back-btn:hover { transform: translateX(-4px); }
+  .game-title {
+    font-family: 'Unbounded', sans-serif; font-size: 2rem; font-weight: 800;
+    color: var(--bee); margin-bottom: 8px; line-height: 1.1;
+  }
+  .game-intro {
+    font-family: 'Caveat', cursive; font-size: 1.4rem;
+    color: var(--artist-deep); font-weight: 700; margin-bottom: 28px;
+  }
+  .score-bar {
+    background: var(--paper); border: 2px solid var(--bee);
+    border-radius: 14px; padding: 14px 20px; margin-bottom: 24px;
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 10px;
+  }
+  .score-label { font-family: 'Caveat', cursive; font-size: 1.3rem; color: var(--bee); font-weight: 700; }
+  .score-value { font-family: 'Unbounded', sans-serif; font-weight: 800; font-size: 1.4rem; color: var(--artist-deep); }
+
+  .instruction-row {
+    display: flex; gap: 8px; align-items: center;
+    background: var(--amber); padding: 12px 16px;
+    border-radius: 10px; margin-bottom: 16px;
+    font-size: 0.95rem; color: var(--ink);
+  }
+
+  /* PALETTE GAME (canvases + deck of sentences) */
+  .canvases {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+    margin: 20px 0 22px;
+  }
+  .canvas {
+    background: var(--paper);
+    border: 3px solid var(--artist);
+    border-radius: 16px;
+    padding: 14px 12px;
+    min-height: 160px;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    flex-direction: column;
+  }
+  .canvas:hover { border-color: var(--artist-deep); background: #fff5f9; }
+  .canvas.target-ready {
+    border-color: var(--honey-deep);
+    background: #fff8e7;
+    box-shadow: 0 0 0 3px var(--honey);
+  }
+  .canvas-title {
+    font-family: 'Unbounded', sans-serif;
+    font-weight: 700;
+    color: var(--artist-deep);
+    text-align: center;
+    margin-bottom: 6px;
+    font-size: 0.95rem;
+    letter-spacing: 0.03em;
+  }
+  .canvas-count {
+    text-align: center;
+    font-family: 'Caveat', cursive;
+    font-size: 1.1rem;
+    color: var(--ink-soft);
+    margin-bottom: 8px;
+  }
+  .canvas-drop {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 80px;
+  }
+  .canvas-drop:empty::before {
+    content: "Перетащи сюда…";
+    color: #bbb;
+    font-style: italic;
+    text-align: center;
+    padding: 16px 8px;
+    border: 2px dashed #ddd;
+    border-radius: 10px;
+    font-size: 0.85rem;
+  }
+  .deck-label {
+    font-family: 'Caveat', cursive;
+    font-size: 1.4rem;
+    color: var(--ink-soft);
+    margin: 18px 0 8px;
+    font-weight: 700;
+  }
+  .deck {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 20px;
+  }
+  .card {
+    background: var(--paper);
+    border: 2px solid var(--bee);
+    border-radius: 12px;
+    padding: 12px 14px;
+    cursor: pointer;
+    font-size: 0.92rem;
+    line-height: 1.5;
+    transition: all 0.15s;
+    position: relative;
+  }
+  .card:hover:not(.disabled) { background: var(--amber); }
+  .card.selected {
+    background: var(--honey);
+    border-color: var(--honey-deep);
+    box-shadow: 0 0 0 3px var(--artist-2);
+  }
+  .card-num {
+    display: inline-block;
+    background: var(--artist);
+    color: white;
+    border-radius: 50%;
+    width: 24px; height: 24px;
+    line-height: 24px;
+    text-align: center;
+    font-family: 'Unbounded', sans-serif;
+    font-weight: 700;
+    font-size: 0.78rem;
+    margin-right: 8px;
+    vertical-align: middle;
+  }
+  .card-source {
+    font-size: 0.68rem;
+    color: var(--ink-soft);
+    margin-top: 6px;
+    font-family: 'Onest', sans-serif;
+    opacity: 0.7;
+  }
+  .card.placed { font-size: 0.85rem; padding: 9px 11px; }
+  .card.correct { background: #e6f4dc; border-color: var(--green-ok); }
+  .card.correct .card-num { background: var(--green-ok); }
+  .card.wrong { background: #ffe0e0; border-color: var(--red-no); }
+  .card.wrong .card-num { background: var(--red-no); }
+  .card.unplaced { opacity: 0.55; border-style: dashed; }
+  .card.disabled { cursor: not-allowed; }
+  .card-feedback {
+    font-size: 0.78rem;
+    margin-top: 6px;
+    padding: 4px 8px;
+    border-radius: 6px;
+    display: none;
+  }
+  .card.wrong .card-feedback {
+    display: block;
+    background: white;
+    color: var(--red-no);
+    border-left: 3px solid var(--red-no);
+  }
+  .card.unplaced .card-feedback {
+    display: block;
+    background: white;
+    color: var(--artist-deep);
+    border-left: 3px dashed var(--artist-deep);
+  }
+
+  .check-btn {
+    background: var(--bee); color: var(--cream); border: none;
+    padding: 14px 28px; border-radius: 30px; cursor: pointer;
+    font-family: 'Onest', sans-serif; font-weight: 600; font-size: 1.05rem;
+    margin-top: 12px;
+    transition: all 0.2s;
+  }
+  .check-btn:hover:not(:disabled) { background: var(--ink); transform: translateY(-2px); }
+  .check-btn:disabled { background: #999; cursor: not-allowed; opacity: 0.6; }
+
+  /* Result screen */
+  .result-screen {
+    text-align: center; padding: 40px 20px;
+    background: var(--paper);
+    border: 3px solid var(--bee);
+    border-radius: 24px;
+    box-shadow: 8px 8px 0 var(--artist);
+    margin-top: 24px;
+  }
+  .result-bees { font-size: 4rem; margin-bottom: 16px; animation: float 2s ease-in-out infinite; }
+  .result-title {
+    font-family: 'Unbounded', sans-serif;
+    font-size: 2rem; font-weight: 800;
+    color: var(--bee); margin-bottom: 12px;
+  }
+  .result-score {
+    font-family: 'Caveat', cursive;
+    font-size: 2.5rem; color: var(--honey-deep);
+    font-weight: 700; margin: 16px 0;
+  }
+  .result-message {
+    font-size: 1.05rem; color: var(--ink-soft);
+    margin: 20px auto; max-width: 500px;
+  }
+  .restart-btn {
+    margin-top: 24px; background: var(--bee); color: var(--cream);
+    border: none; padding: 14px 32px; border-radius: 30px;
+    cursor: pointer; font-family: 'Onest', sans-serif;
+    font-weight: 500; font-size: 1rem; margin-right: 10px;
+  }
+  .saving-note {
+    margin-top: 14px; padding: 10px;
+    background: var(--cream); border-radius: 10px;
+    font-size: 0.85rem; color: var(--ink-soft);
+    font-style: italic;
+  }
+
+  /* Modal: name input */
+  .modal-bg {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(42,24,16,0.7); display: none;
+    justify-content: center; align-items: center;
+    z-index: 100; padding: 20px;
+  }
+  .modal-bg.show { display: flex; }
+  .modal {
+    background: var(--paper); border: 3px solid var(--bee);
+    border-radius: 18px; padding: 28px 24px;
+    max-width: 480px; width: 100%;
+    box-shadow: 8px 8px 0 var(--artist);
+  }
+  .modal h3 {
+    font-family: 'Unbounded', sans-serif;
+    color: var(--bee); margin-bottom: 12px;
+  }
+  .modal-input {
+    width: 100%; padding: 12px 14px;
+    border: 2px solid var(--bee); border-radius: 10px;
+    font-family: 'Onest', sans-serif; font-size: 1.1rem;
+    margin: 12px 0;
+  }
+  .modal-btn {
+    background: var(--honey); color: var(--bee);
+    border: 2px solid var(--bee);
+    padding: 10px 24px; border-radius: 20px;
+    cursor: pointer; font-family: 'Onest', sans-serif;
+    font-weight: 600; font-size: 1rem;
+  }
+  .modal-btn:hover { background: var(--honey-deep); color: var(--cream); }
+
+  /* Leaderboard */
+  .lb-tabs {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    margin-bottom: 16px;
+    background: var(--paper);
+    border: 2px solid var(--bee);
+    border-radius: 14px;
+    padding: 8px;
+  }
+  .lb-tab {
+    flex: 1; min-width: 110px;
+    padding: 8px 12px;
+    background: transparent;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: 'Onest', sans-serif;
+    font-size: 0.85rem; font-weight: 500;
+    color: var(--ink-soft);
+    transition: all 0.15s;
+  }
+  .lb-tab:hover { background: var(--amber); }
+  .lb-tab.active { background: var(--honey); color: var(--bee); font-weight: 700; }
+  .lb-list { margin-top: 16px; }
+  .lb-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 12px 16px;
+    background: var(--paper);
+    border: 2px solid var(--bee);
+    border-radius: 12px;
+    margin-bottom: 8px;
+  }
+  .lb-row.top-1 { background: linear-gradient(90deg, #FFD700 0%, var(--paper) 60%); }
+  .lb-row.top-2 { background: linear-gradient(90deg, #C0C0C0 0%, var(--paper) 60%); }
+  .lb-row.top-3 { background: linear-gradient(90deg, #CD7F32 0%, var(--paper) 60%); }
+  .lb-rank {
+    font-family: 'Unbounded', sans-serif; font-weight: 800;
+    font-size: 1.2rem; color: var(--honey-deep);
+    min-width: 40px;
+  }
+  .lb-name { flex: 1; font-weight: 600; color: var(--ink); margin: 0 12px; }
+  .lb-score {
+    font-family: 'Unbounded', sans-serif; font-weight: 800;
+    font-size: 1.2rem; color: var(--bee);
+  }
+  .lb-empty {
+    text-align: center; padding: 40px 20px;
+    color: var(--ink-soft); font-style: italic;
+  }
+  .lb-loading {
+    text-align: center; padding: 30px;
+    color: var(--ink-soft);
+  }
+  .lb-loading .dot {
+    display: inline-block;
+    animation: lbpulse 1.4s infinite;
+    font-size: 1.5rem;
+  }
+  .lb-loading .dot:nth-child(2) { animation-delay: 0.2s; }
+  .lb-loading .dot:nth-child(3) { animation-delay: 0.4s; }
+  @keyframes lbpulse {
+    0%, 60%, 100% { opacity: 0.3; }
+    30% { opacity: 1; }
+  }
+
+  footer {
+    text-align: center; padding: 30px 20px;
+    color: var(--ink-soft); font-family: 'Caveat', cursive;
+    font-size: 1.2rem; border-top: 3px dashed var(--bee);
+    margin-top: 40px;
+  }
+
+  /* RAINBOW GAME (find sentences with given expressive means) */
+  .text-box {
+    background: var(--paper);
+    border: 2px dashed var(--bee);
+    border-radius: 12px;
+    padding: 16px 18px;
+    margin-bottom: 16px;
+    font-size: 0.98rem;
+    line-height: 1.7;
+  }
+  .text-box .num-mark {
+    display: inline-block;
+    background: var(--artist);
+    color: white;
+    border-radius: 50%;
+    width: 22px; height: 22px;
+    font-size: 0.7rem; font-weight: 700;
+    line-height: 22px; text-align: center;
+    font-family: 'Unbounded', sans-serif;
+    vertical-align: middle;
+    margin: 0 2px;
+  }
+  .rb-sentence-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 8px 0;
+    border-bottom: 1px dashed #e8d9a3;
+  }
+  .rb-sentence-row:last-child { border-bottom: none; }
+  .rb-sentence-row .num-mark { flex-shrink: 0; margin-top: 2px; }
+  .rainbow-task {
+    background: var(--amber);
+    border-left: 4px solid var(--artist);
+    padding: 10px 16px;
+    margin-bottom: 14px;
+    border-radius: 0 10px 10px 0;
+    font-size: 0.95rem;
+  }
+  .rainbow-task strong { color: var(--artist-deep); font-family: 'Unbounded', sans-serif; }
+  .rainbow-options {
+    display: flex; flex-wrap: wrap; gap: 8px;
+    margin: 14px 0;
+  }
+  .rainbow-num {
+    background: var(--paper); border: 2px solid var(--bee);
+    width: 56px; height: 56px; border-radius: 12px;
+    cursor: pointer;
+    font-family: 'Unbounded', sans-serif;
+    font-weight: 800; font-size: 1.4rem;
+    color: var(--bee);
+    transition: all 0.15s;
+  }
+  .rainbow-num:hover:not(.disabled) { background: var(--amber); transform: scale(1.05); }
+  .rainbow-num.picked { background: var(--honey); border-color: var(--honey-deep); }
+  .rainbow-num.correct { background: var(--green-ok); color: white; border-color: var(--green-ok); }
+  .rainbow-num.wrong { background: var(--red-no); color: white; border-color: var(--red-no); }
+  .rainbow-num.missed {
+    background: var(--paper);
+    color: var(--green-ok);
+    border: 3px dashed var(--green-ok);
+    font-weight: 800;
+  }
+  .rainbow-num.disabled { cursor: not-allowed; opacity: 0.8; }
+  .feedback-line {
+    margin-top: 12px;
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: var(--cream);
+    font-size: 0.95rem;
+    color: var(--ink);
+    border-left: 4px solid var(--artist-2);
+    display: none;
+  }
+  .feedback-line.show { display: block; }
+  .feedback-line .yours { font-weight: 700; }
+  .feedback-line .yours.correct { color: var(--green-ok); }
+  .feedback-line .yours.wrong { color: var(--red-no); }
+
+  /* SLOVAR GAME (click a word in text) */
+  .slovar-task {
+    background: var(--artist-light);
+    border: 2px solid var(--artist);
+    border-radius: 12px;
+    padding: 14px 18px;
+    margin-bottom: 14px;
+    font-size: 1rem;
+  }
+  .slovar-task strong { color: var(--artist-deep); }
+  .slovar-text {
+    background: var(--paper);
+    border: 2px dashed var(--bee);
+    border-radius: 12px;
+    padding: 18px 22px;
+    margin: 14px 0;
+    font-size: 1rem;
+    line-height: 2;
+  }
+  .slovar-text .num-mark {
+    display: inline-block;
+    background: var(--artist);
+    color: white;
+    border-radius: 50%;
+    width: 22px; height: 22px;
+    font-size: 0.7rem; font-weight: 700;
+    line-height: 22px; text-align: center;
+    font-family: 'Unbounded', sans-serif;
+    vertical-align: middle;
+    margin: 0 3px 0 0;
+  }
+  .slovar-word {
+    cursor: pointer;
+    padding: 1px 3px;
+    border-radius: 4px;
+    transition: all 0.15s;
+  }
+  .slovar-word:hover:not(.disabled) { background: var(--amber); }
+  .slovar-word.picked { background: var(--honey); font-weight: 700; }
+  .slovar-word.correct { background: var(--green-ok); color: white; font-weight: 700; padding: 2px 6px; }
+  .slovar-word.wrong { background: var(--red-no); color: white; font-weight: 700; padding: 2px 6px; }
+  .slovar-word.missed { background: transparent; color: var(--green-ok); border: 2px dashed var(--green-ok); padding: 0 4px; font-weight: 700; }
+  .slovar-word.disabled { cursor: not-allowed; }
+
+  /* SYNONIMY / TEATR (multiple choice with 5 options) */
+  .mc-task {
+    background: var(--paper); border: 3px solid var(--bee);
+    border-radius: 16px; padding: 20px 22px; margin-bottom: 16px;
+    position: relative;
+    box-shadow: 5px 5px 0 var(--artist-2);
+  }
+  .mc-task .source-tag {
+    position: absolute; top: -14px; right: 16px;
+    background: var(--bee); color: var(--cream);
+    padding: 3px 10px; border-radius: 14px;
+    font-family: 'Onest', sans-serif; font-size: 0.7rem;
+    font-weight: 500;
+  }
+  .mc-target {
+    display: inline-block; background: var(--artist); color: white;
+    padding: 4px 12px; border-radius: 14px;
+    font-family: 'Unbounded', sans-serif; font-weight: 700;
+    font-size: 1.1rem; margin-bottom: 8px;
+  }
+  .mc-prompt {
+    font-size: 1rem; color: var(--ink); margin-bottom: 10px;
+  }
+  .mc-context {
+    background: var(--cream); border-left: 3px solid var(--artist-2);
+    padding: 10px 14px; margin: 10px 0 14px;
+    font-size: 0.92rem; color: var(--ink-soft);
+    border-radius: 0 8px 8px 0;
+  }
+  .mc-options { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  .mc-option {
+    background: var(--paper); border: 2px solid var(--bee);
+    padding: 12px 16px; border-radius: 10px;
+    cursor: pointer; text-align: left;
+    font-family: 'Onest', sans-serif; font-size: 0.98rem;
+    transition: all 0.15s;
+  }
+  .mc-option:hover:not(.disabled) { background: var(--amber); transform: translateX(3px); }
+  .mc-option.picked { background: var(--honey); border-color: var(--honey-deep); }
+  .mc-option.correct { background: var(--green-ok); color: white; border-color: var(--green-ok); }
+  .mc-option.wrong { background: var(--red-no); color: white; border-color: var(--red-no); }
+  .mc-option.missed {
+    background: var(--paper); color: var(--green-ok);
+    border: 3px dashed var(--green-ok); font-weight: 700;
+  }
+  .mc-option.missed::before { content: "↳ верный ответ · "; font-style: italic; font-weight: 500; opacity: 0.85; }
+  .mc-option.disabled { cursor: not-allowed; }
+
+  .next-btn {
+    margin-top: 16px; background: var(--honey); color: var(--bee);
+    border: 2px solid var(--bee); padding: 12px 28px; border-radius: 30px;
+    cursor: pointer; font-family: 'Unbounded', sans-serif;
+    font-weight: 600; font-size: 1rem; display: none;
+  }
+  .next-btn.show { display: inline-block; }
+
+  @media (max-width: 600px) {
+    .menu-card { padding: 18px 16px; }
+    .game-title { font-size: 1.6rem; }
+    .canvases { grid-template-columns: 1fr; }
+    .lb-tab { font-size: 0.78rem; padding: 6px 8px; }
+    .rainbow-num { width: 48px; height: 48px; font-size: 1.2rem; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="bee-icon">🎨</div>
+  <h1>Палитра выразительности</h1>
+  <div class="subtitle">5 игр о словах-красках · задания 11, 12</div>
+  <div class="greeting">Художник смешивает краски, чтобы получить новый цвет — а писатель смешивает слова, чтобы получить эмоцию. Найди эпитеты, метафоры, сравнения и олицетворения в текстах ФИПИ 🐝</div>
+  <div class="source-note">ОБЗ ФИПИ · ОГЭ-2026</div>
+  <div class="user-bar" onclick="changeUserName()">🐝 <span id="user-name">…</span></div>
+</header>
+
+<div id="menu" class="menu">
+  <a class="menu-card" onclick="openGame('palette')">
+    <div class="num">ИГРА 01 · ЗАДАНИЕ 11</div>
+    <h2>🎨 Палитра художника</h2>
+    <p>Разложи 12 предложений по четырём холстам: Метафора, Эпитет, Олицетворение, Сравнение.</p>
+    <span class="badge">12 предложений</span>
+  </a>
+  <a class="menu-card" onclick="openGame('rainbow')">
+    <div class="num">ИГРА 02 · ЗАДАНИЕ 11</div>
+    <h2>🌈 Радуга средств</h2>
+    <p>5 раундов на разные средства выразительности: сравнение, эпитет, метафора, олицетворение, фразеологизм.</p>
+    <span class="badge">5 раундов</span>
+  </a>
+  <a class="menu-card" onclick="openGame('slovar')">
+    <div class="num">ИГРА 03 · ЗАДАНИЕ 12</div>
+    <h2>📖 Словарь-открытие</h2>
+    <p>5 текстов из ОБЗ ФИПИ. Найди в тексте слово, у которого названо лексическое значение.</p>
+    <span class="badge">5 раундов</span>
+  </a>
+  <a class="menu-card" onclick="openGame('synonimy')">
+    <div class="num">ИГРА 04 · ЗАДАНИЕ 12</div>
+    <h2>🔠 Синонимы-близнецы</h2>
+    <p>5 раундов: подбери стилистически нейтральный синоним к разговорному или книжному слову.</p>
+    <span class="badge">5 раундов</span>
+  </a>
+  <a class="menu-card" onclick="openGame('teatr')">
+    <div class="num">ИГРА 05 · ЗАДАНИЕ 12</div>
+    <h2>🎭 Театр контекстов</h2>
+    <p>Слово в контексте, четыре значения — выбери правильное. Тренировка лексического анализа.</p>
+    <span class="badge">5 раундов</span>
+  </a>
+  <a class="menu-card leaderboard" onclick="openLeaderboard()">
+    <div class="num">⭐ ТОП-10</div>
+    <h2>🏆 Лидерборд</h2>
+    <p>Кто впереди в каждой игре. Топ-10 пчёлок по каждому соревнованию.</p>
+    <span class="badge">общий рейтинг</span>
+  </a>
+</div>
+
+<!-- GAME 1: PALETTE -->
+<div id="palette" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🎨 Палитра художника</div>
+  <div class="game-intro">12 предложений из ОБЗ ФИПИ. Разложи их по нужным холстам — где какое средство выразительности.</div>
+  <div class="instruction-row">
+    🐝 <span>Тапни на предложение, затем тапни на нужный холст. Чтобы вернуть карточку обратно — тапни по ней на холсте.</span>
+  </div>
+  <div class="score-bar">
+    <span class="score-label">🐝 Разложено:</span>
+    <span class="score-value" id="palette-placed">0 / 12</span>
+  </div>
+  <div class="canvases" id="palette-canvases">
+    <div class="canvas" data-type="metaphor" onclick="palettePlace('metaphor')">
+      <div class="canvas-title">🔵 МЕТАФОРА</div>
+      <div class="canvas-count" id="cnt-metaphor">пусто</div>
+      <div class="canvas-drop" id="drop-metaphor"></div>
+    </div>
+    <div class="canvas" data-type="epithet" onclick="palettePlace('epithet')">
+      <div class="canvas-title">🟡 ЭПИТЕТ</div>
+      <div class="canvas-count" id="cnt-epithet">пусто</div>
+      <div class="canvas-drop" id="drop-epithet"></div>
+    </div>
+    <div class="canvas" data-type="personification" onclick="palettePlace('personification')">
+      <div class="canvas-title">🟣 ОЛИЦЕТВОРЕНИЕ</div>
+      <div class="canvas-count" id="cnt-personification">пусто</div>
+      <div class="canvas-drop" id="drop-personification"></div>
+    </div>
+    <div class="canvas" data-type="comparison" onclick="palettePlace('comparison')">
+      <div class="canvas-title">🟢 СРАВНЕНИЕ</div>
+      <div class="canvas-count" id="cnt-comparison">пусто</div>
+      <div class="canvas-drop" id="drop-comparison"></div>
+    </div>
+  </div>
+  <div class="deck-label">📋 Предложения (тапни на нужное):</div>
+  <div class="deck" id="palette-deck"></div>
+  <button class="check-btn" id="palette-check-btn" onclick="paletteCheck()" disabled>🐝 Проверить</button>
+  <div id="palette-result"></div>
+</div>
+
+<!-- GAME 2: RAINBOW -->
+<div id="rainbow" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🌈 Радуга средств</div>
+  <div class="game-intro">5 раундов — пять разных средств выразительности. Тапни номера предложений, где встречается заданное средство.</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="rb-score">0</span> / <span id="rb-total">5</span></div>
+    <div class="progress-bar" style="flex-basis: 100%; height: 8px; background: var(--amber); border-radius: 4px; overflow: hidden;"><div id="rb-progress" style="height:100%; background: var(--honey-deep); width: 0%; transition: width 0.4s ease;"></div></div>
+  </div>
+  <div id="rb-content"></div>
+</div>
+
+<!-- GAME 3: SLOVAR -->
+<div id="slovar" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">📖 Словарь-открытие</div>
+  <div class="game-intro">5 текстов из ОБЗ ФИПИ. В каждом найди слово, у которого названо лексическое значение, и тапни на него.</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="sl-score">0</span> / <span id="sl-total">5</span></div>
+    <div class="progress-bar" style="flex-basis: 100%; height: 8px; background: var(--amber); border-radius: 4px; overflow: hidden;"><div id="sl-progress" style="height:100%; background: var(--honey-deep); width: 0%; transition: width 0.4s ease;"></div></div>
+  </div>
+  <div id="sl-content"></div>
+</div>
+
+<!-- GAME 4: SYNONIMY -->
+<div id="synonimy" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🔠 Синонимы-близнецы</div>
+  <div class="game-intro">5 раундов: дано слово из текста и пять кандидатов в синонимы. Выбери правильный.</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="sy-score">0</span> / <span id="sy-total">5</span></div>
+    <div class="progress-bar" style="flex-basis: 100%; height: 8px; background: var(--amber); border-radius: 4px; overflow: hidden;"><div id="sy-progress" style="height:100%; background: var(--honey-deep); width: 0%; transition: width 0.4s ease;"></div></div>
+  </div>
+  <div id="sy-content"></div>
+</div>
+
+<!-- GAME 5: TEATR -->
+<div id="teatr" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🎭 Театр контекстов</div>
+  <div class="game-intro">5 раундов: слово выделено в контексте, у тебя четыре варианта его лексического значения. Выбери верное.</div>
+  <div class="score-bar">
+    <div><span class="score-label">Пчёлки:</span> <span class="score-value" id="tt-score">0</span> / <span id="tt-total">5</span></div>
+    <div class="progress-bar" style="flex-basis: 100%; height: 8px; background: var(--amber); border-radius: 4px; overflow: hidden;"><div id="tt-progress" style="height:100%; background: var(--honey-deep); width: 0%; transition: width 0.4s ease;"></div></div>
+  </div>
+  <div id="tt-content"></div>
+</div>
+
+<!-- LEADERBOARD -->
+<div id="leaderboard" class="game-section">
+  <button class="back-btn" onclick="backToMenu()">← К меню</button>
+  <div class="game-title">🏆 Топ-10 игр</div>
+  <div class="game-intro">Лучшие пчёлки по каждой игре. Выбери игру выше — посмотри рейтинг.</div>
+  <div class="lb-tabs" id="lb-tabs"></div>
+  <div class="lb-list" id="lb-list"></div>
+</div>
+
+<!-- NAME MODAL -->
+<div class="modal-bg" id="name-modal">
+  <div class="modal">
+    <h3>🐝 Привет! Как тебя зовут?</h3>
+    <p style="font-size: 0.95rem; color: var(--ink-soft); margin-bottom: 8px;">
+      Чтобы педагог увидел твой результат в общем рейтинге, введи своё имя.
+    </p>
+    <input type="text" id="name-input" class="modal-input" placeholder="Например: Лиза К." maxlength="30">
+    <button class="modal-btn" onclick="saveName()">Сохранить и играть 🐝</button>
+  </div>
+</div>
+
+<footer>Палитра выразительности 🐝 Задания из ОБЗ ФИПИ · ЗебРус 2026</footer>
+
+<script>
+// =============== LEADERBOARD CONFIG ===============
+const LEADERBOARD_URL = "https://script.google.com/macros/s/AKfycbx1m0nlyn_cG-4u3fZ8gWP6JwuKhmjiRaB2PrRwaKm5WRygpaQkvOmTvM1E1XsAKDj9/exec";
+
+// =============== USER NAME ===============
+function getUserName() { return localStorage.getItem('crashIntensiveUserName') || ''; }
+function setUserName(name) {
+  localStorage.setItem('crashIntensiveUserName', name);
+  document.getElementById('user-name').textContent = name || '…';
+}
+function askForName() {
+  document.getElementById('name-input').value = getUserName();
+  document.getElementById('name-modal').classList.add('show');
+}
+function saveName() {
+  const v = document.getElementById('name-input').value.trim();
+  if (v.length < 2) { alert('Пожалуйста, введи имя'); return; }
+  setUserName(v);
+  document.getElementById('name-modal').classList.remove('show');
+}
+function changeUserName() { askForName(); }
+
+// =============== ANSWER LOGGING ===============
+let answersByTask = {};
+function resetAnswersLog() { answersByTask = {}; }
+
+async function submitGameResults(game, score, total) {
+  const name = getUserName();
+  if (!name) return false;
+  const payload = { name, game, score, total, answers: answersByTask };
+  if (LEADERBOARD_URL.startsWith('ВСТАВЬТЕ')) {
+    console.log('Leaderboard not configured. Would send:', payload);
+    return false;
+  }
+  try {
+    await fetch(LEADERBOARD_URL, {
+      method: 'POST',
+      mode: 'no-cors',
+      body: JSON.stringify(payload)
+    });
+    return true;
+  } catch (e) {
+    console.error('Submit error:', e);
+    return false;
+  }
+}
+
+// =============== NAVIGATION ===============
+function openGame(id) {
+  if (!getUserName()) { askForName(); return; }
+  document.getElementById('menu').style.display = 'none';
+  document.querySelector('header').style.display = 'none';
+  document.querySelectorAll('.game-section').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  window.scrollTo(0, 0);
+  if (id === 'palette') initPalette();
+  if (id === 'rainbow') initRainbow();
+  if (id === 'slovar') initSlovar();
+  if (id === 'synonimy') initSynonimy();
+  if (id === 'teatr') initTeatr();
+}
+function openLeaderboard() {
+  document.getElementById('menu').style.display = 'none';
+  document.querySelector('header').style.display = 'none';
+  document.querySelectorAll('.game-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('leaderboard').classList.add('active');
+  window.scrollTo(0, 0);
+  initLB();
+}
+function backToMenu() {
+  document.querySelectorAll('.game-section').forEach(s => s.classList.remove('active'));
+  document.getElementById('menu').style.display = '';
+  document.querySelector('header').style.display = '';
+  window.scrollTo(0, 0);
+}
+
+// =============== LEADERBOARD ===============
+const GAMES = [
+  { id: 'Палитра художника', short: '🎨 Палитра', max: 12 },
+  { id: 'Радуга средств', short: '🌈 Радуга', max: 5 },
+  { id: 'Словарь-открытие', short: '📖 Словарь', max: 5 },
+  { id: 'Синонимы-близнецы', short: '🔠 Синонимы', max: 5 },
+  { id: 'Театр контекстов', short: '🎭 Театр', max: 5 }
+];
+let lbCurrentGame = GAMES[0].id;
+function initLB() {
+  const tabs = document.getElementById('lb-tabs');
+  tabs.innerHTML = GAMES.map(g => `
+    <button class="lb-tab ${g.id === lbCurrentGame ? 'active' : ''}" onclick="lbSwitch('${g.id}', this)">${g.short}</button>
+  `).join('');
+  loadLB(lbCurrentGame);
+}
+function lbSwitch(game, btn) {
+  lbCurrentGame = game;
+  document.querySelectorAll('.lb-tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  loadLB(game);
+}
+async function loadLB(game) {
+  const list = document.getElementById('lb-list');
+  if (LEADERBOARD_URL.startsWith('ВСТАВЬТЕ')) {
+    list.innerHTML = '<div class="lb-empty">⚙️ Таблица лидеров ещё не настроена.<br>Педагог скоро её подключит!</div>';
+    return;
+  }
+  list.innerHTML = '<div class="lb-loading"><span class="dot">🐝</span><span class="dot">🐝</span><span class="dot">🐝</span></div>';
+  try {
+    const res = await fetch(LEADERBOARD_URL + '?game=' + encodeURIComponent(game));
+    const data = await res.json();
+    if (!data.ok || !data.top || data.top.length === 0) {
+      list.innerHTML = '<div class="lb-empty">Пока пчёлок нет 🐝<br>Будь первым(ой)!</div>';
+      return;
+    }
+    list.innerHTML = data.top.map((r, i) => `
+      <div class="lb-row ${i < 3 ? 'top-' + (i+1) : ''}">
+        <div class="lb-rank">${i+1}</div>
+        <div class="lb-name">${escHtml(r.name)}</div>
+        <div class="lb-score">🐝 ${escHtml(r.scoreStr || r.score)}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    list.innerHTML = '<div class="lb-empty">Не удалось загрузить рейтинг. Попробуй ещё раз.</div>';
+  }
+}
+function escHtml(s) { return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+// =============== PALETTE GAME ===============
+const PALETTE_DATA = [
+  // Сравнение — 3 предложения из 2 ID
+  { src: 'B6EA56', type: 'comparison', text: 'Но это было неважно, потому что мишка смотрел на меня своими разными глазами и обе лапы поднял кверху, как будто он уже заранее сдаётся.' },
+  { src: 'B6EA56', type: 'comparison', text: 'И вдруг я вспомнил, как давным-давно я с этим мишкой ни на минуту не расставался, повсюду таскал его за собой, и сажал его за стол рядом с собой обедать, и спать его укладывал, и укачивал его, как маленького братишку, и шептал ему разные сказки прямо в его бархатные твёрденькие ушки, и я его любил тогда, любил всей душой, я за него тогда жизнь бы отдал…' },
+  { src: '45C7CD', type: 'comparison', text: 'Глубокая и тихая вода лакированно блестела, словно в реку вылили масло, и в это чёрное зеркало смотрелись с обрыва задумчивые ели, тонкие берёзки, тронутые желтизной.' },
+
+  // Эпитет — 3 предложения из 2 ID
+  { src: 'E9AF26', type: 'epithet', text: 'Дети сначала побаивались немножко, но потом постепенно они привыкли и даже полюбили эти таинственные утренние прогулки.' },
+  { src: 'E9AF26', type: 'epithet', text: 'Учитель выступил вперёд, поклонился и сказал: — Это я, почтенный Камилл, я, скромный и ничтожный фалесский учитель, привёл к тебе пленников.' },
+  { src: '243E3D', type: 'epithet', text: '— А потом ещё хуже завернула осень, — сказал он, — стало совсем холодно, с неба сыпал зимний, сухой и меленький снег, и его тут же сдувало острым ветром.' },
+
+  // Метафора — 3 предложения из 2 ID
+  { src: '378DF0', type: 'metaphor', text: 'Безжалостный буравчик сверлил его сознание, заставлял думать о человеке, для которого на Земле всегда ночь и которому не помогают ни фонари, ни звёзды…' },
+  { src: '378DF0', type: 'metaphor', text: 'Ведь палка — это его глаза, его проводник, его неизменный друг.' },
+  { src: 'CE41AB', type: 'metaphor', text: 'Обилен лес сухостоем и валежником, над его мягкой щетиной чёрным шатром высоко поднималась сосновая чаща.' },
+
+  // Олицетворение — 3 предложения из 2 ID
+  { src: '909EAC', type: 'personification', text: 'Не любил за то, что опадали листья и «реже солнышко блистало», а больше всего за то, что осенью часто дожди не пускали его на улицу.' },
+  { src: '909EAC', type: 'personification', text: 'Но вот наступило такое утро, когда все окна были в извилистых водяных дорожках, а дождь заколачивал и заколачивал что-то в крышу…' },
+  { src: 'DFFB52', type: 'personification', text: 'Цветок этот — самый святой труженик, он из смерти работает жизнь…' }
+];
+
+const TYPE_LABELS = {
+  metaphor: '🔵 Метафора',
+  epithet: '🟡 Эпитет',
+  personification: '🟣 Олицетворение',
+  comparison: '🟢 Сравнение'
+};
+
+const paletteState = {
+  cards: [],        // массив { idx, type, src, text, placedIn }
+  selectedIdx: null,
+  checked: false,
+  order: []         // случайный порядок отображения карточек
+};
+
+function shuffle(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function initPalette() {
+  resetAnswersLog();
+  paletteState.cards = PALETTE_DATA.map((d, i) => ({
+    idx: i, type: d.type, src: d.src, text: d.text, placedIn: null
+  }));
+  paletteState.selectedIdx = null;
+  paletteState.checked = false;
+  paletteState.order = shuffle(paletteState.cards.map(c => c.idx));
+  document.getElementById('palette-result').innerHTML = '';
+  document.getElementById('palette-check-btn').disabled = true;
+  document.getElementById('palette-check-btn').style.display = '';
+  paletteRender();
+}
+
+function paletteRender() {
+  const deck = document.getElementById('palette-deck');
+  const drops = {
+    metaphor: document.getElementById('drop-metaphor'),
+    epithet: document.getElementById('drop-epithet'),
+    personification: document.getElementById('drop-personification'),
+    comparison: document.getElementById('drop-comparison')
+  };
+  deck.innerHTML = '';
+  Object.values(drops).forEach(el => el.innerHTML = '');
+
+  // Сначала разложенные плитки на холсты (в порядке, как их клали)
+  paletteState.cards.forEach(c => {
+    if (c.placedIn) {
+      drops[c.placedIn].appendChild(makeCard(c, true));
+    }
+  });
+  // Потом нераспределённые — в колоду, в случайном порядке
+  paletteState.order.forEach(idx => {
+    const c = paletteState.cards[idx];
+    if (!c.placedIn) deck.appendChild(makeCard(c, false));
+  });
+
+  // Счётчики на холстах
+  ['metaphor','epithet','personification','comparison'].forEach(t => {
+    const n = paletteState.cards.filter(c => c.placedIn === t).length;
+    document.getElementById('cnt-' + t).textContent = n ? (n + ' карт.') : 'пусто';
+  });
+  // Подсветка выбранного холста
+  document.querySelectorAll('.canvas').forEach(c => c.classList.toggle('target-ready', paletteState.selectedIdx !== null));
+
+  const placed = paletteState.cards.filter(c => c.placedIn).length;
+  document.getElementById('palette-placed').textContent = placed + ' / ' + paletteState.cards.length;
+  document.getElementById('palette-check-btn').disabled = (placed !== paletteState.cards.length || paletteState.checked);
+}
+
+function makeCard(c, isPlaced) {
+  const div = document.createElement('div');
+  div.className = 'card' + (isPlaced ? ' placed' : '') + (paletteState.selectedIdx === c.idx ? ' selected' : '');
+  if (paletteState.checked) {
+    div.classList.add('disabled');
+    if (c.placedIn === c.type) div.classList.add('correct');
+    else if (c.placedIn) div.classList.add('wrong');
+    else div.classList.add('unplaced');
+  }
+  // Номер карточки (по 1-based индексу в PALETTE_DATA)
+  const numSpan = document.createElement('span');
+  numSpan.className = 'card-num';
+  numSpan.textContent = (c.idx + 1);
+  div.appendChild(numSpan);
+  // Текст
+  const txt = document.createElement('span');
+  txt.textContent = c.text;
+  div.appendChild(txt);
+  // Подпись с ID источника (мелкая)
+  const srcDiv = document.createElement('div');
+  srcDiv.className = 'card-source';
+  srcDiv.textContent = 'ФИПИ ' + c.src;
+  div.appendChild(srcDiv);
+  // Фидбек после проверки
+  if (paletteState.checked) {
+    const fb = document.createElement('div');
+    fb.className = 'card-feedback';
+    if (c.placedIn === c.type) {
+      // ничего не пишем — зелёный сам по себе
+    } else if (c.placedIn) {
+      fb.textContent = '↳ правильный холст: ' + TYPE_LABELS[c.type];
+      div.appendChild(fb);
+    } else {
+      fb.textContent = '↳ надо было положить: ' + TYPE_LABELS[c.type];
+      div.appendChild(fb);
+    }
+  }
+  if (!paletteState.checked) {
+    div.onclick = (e) => {
+      e.stopPropagation();
+      paletteCardClick(c.idx);
+    };
+  }
+  return div;
+}
+
+function paletteCardClick(idx) {
+  if (paletteState.checked) return;
+  const c = paletteState.cards[idx];
+  // Если карточка на холсте — возвращаем в колоду
+  if (c.placedIn) {
+    c.placedIn = null;
+    paletteState.selectedIdx = null;
+    paletteRender();
+    return;
+  }
+  // Иначе — выбираем/снимаем выбор
+  if (paletteState.selectedIdx === idx) {
+    paletteState.selectedIdx = null;
+  } else {
+    paletteState.selectedIdx = idx;
+  }
+  paletteRender();
+}
+
+function palettePlace(type) {
+  if (paletteState.checked) return;
+  if (paletteState.selectedIdx === null) return;
+  paletteState.cards[paletteState.selectedIdx].placedIn = type;
+  paletteState.selectedIdx = null;
+  paletteRender();
+}
+
+function paletteCheck() {
+  if (paletteState.checked) return;
+  paletteState.checked = true;
+  let score = 0;
+  // Агрегируем по ID-источнику
+  const byId = {};
+  paletteState.cards.forEach(c => {
+    if (!byId[c.src]) byId[c.src] = { right: 0, total: 0, parts: [] };
+    byId[c.src].total++;
+    const ok = (c.placedIn === c.type);
+    if (ok) { byId[c.src].right++; score++; }
+    const userMark = c.placedIn ? TYPE_LABELS[c.placedIn].split(' ')[0] : '—';
+    const expectMark = TYPE_LABELS[c.type].split(' ')[0];
+    byId[c.src].parts.push(ok ? '✓' : (userMark + '≠' + expectMark));
+  });
+  Object.keys(byId).forEach(tid => {
+    const b = byId[tid];
+    answersByTask[tid] = b.parts.join(' ') + ' (' + b.right + '/' + b.total + ')';
+  });
+  paletteRender();
+  // Показ результата
+  showPaletteResult(score, paletteState.cards.length);
+}
+
+function showPaletteResult(score, total) {
+  const pct = Math.round((score / total) * 100);
+  let msg = 'Хорошее начало! Разберись, где какое средство выразительности — и попробуй ещё раз.';
+  let bees = '🐝';
+  if (pct >= 90) { msg = 'Невероятно! Ты различаешь все художественные средства!'; bees = '🐝🍯🎨'; }
+  else if (pct >= 70) { msg = 'Отлично! Видно, что чувствуешь язык. Несколько ошибок — посмотри красные карточки.'; bees = '🐝🍯'; }
+  else if (pct >= 50) { msg = 'Хорошо, но есть над чем поработать. Посмотри подсказки в красных карточках.'; bees = '🐝'; }
+
+  const out = document.getElementById('palette-result');
+  out.innerHTML = `
+    <div class="result-screen">
+      <div class="result-bees">${bees}</div>
+      <div class="result-title">Палитра разобрана!</div>
+      <div class="result-score">🐝 ${score} / ${total} · ${pct}%</div>
+      <div class="result-message">${msg}</div>
+      <div class="saving-note" id="palette-saving-note">⏳ Отправляю результат в рейтинг...</div>
+      <button class="restart-btn" onclick="initPalette()">🔄 Сыграть ещё</button>
+      <button class="restart-btn" onclick="openLeaderboard()" style="background: var(--honey-deep);">🏆 Топ-10</button>
+      <button class="restart-btn" onclick="backToMenu()" style="background: var(--artist);">🏠 К меню</button>
+    </div>
+  `;
+  // Отправка в Sheets
+  submitGameResults('Палитра художника', score, total).then(submitted => {
+    const note = document.getElementById('palette-saving-note');
+    if (note) note.textContent = submitted
+      ? '✓ Результат отправлен в общий рейтинг'
+      : '⚠ Не удалось отправить в рейтинг. Проверь интернет — или педагог ещё не настроил таблицу.';
+  });
+}
+
+// =============== GAME 2: RAINBOW =====================
+// 5 раундов, у каждого — тип средства + текст из 5 предложений из ФИПИ + правильные номера.
+const RAINBOW_DATA = [
+  {
+    fipiId: '2E3089',
+    type: 'сравнение',
+    correct: [1, 2],
+    sentences: [
+      'Может быть, борза́я, изогнутая, как вопросительный знак.',
+      'Жека жалостливо посмотрел на маму и опустил глаза, набрал побольше воздуха, словно собирался нырнуть, и тихо, одними губами, произнёс: — Собаку.',
+      'Прошло несколько дней, и мальчик переступил порог своего дома, прижимая к животу щенка.',
+      'Он крепко прижал к себе маленькое тёплое существо.',
+      'В квартире на восьмом этаже поселился новый жилец.'
+    ]
+  },
+  {
+    fipiId: '1F4932',
+    type: 'эпитет',
+    correct: [1, 4],
+    sentences: [
+      'Рядом за столиком шумно разговаривали молодые люди с тугими, красными затылками.',
+      'Но молодые люди спорили о футбольном матче и не обращали на это внимания.',
+      'Старик сел на скамейку, дал один бутерброд Пети, а другой завернул в серый носовой платок и спрятал в карман.',
+      'Над заливом свистящими полосами проносились зимние шквалы.',
+      '— Не смей брать у них ни крошки! — сказал старик.'
+    ]
+  },
+  {
+    fipiId: '75794E',
+    type: 'метафора',
+    correct: [1, 4],
+    sentences: [
+      'Чёрные блестящие глазки тут же закатились в портфель и остановились: они увидели куклу.',
+      'Он уже был в другом конце класса и, высоко держа над головой куклу, мчался к двери.',
+      'А через мгновение кукла была в цепкой руке Колючки.',
+      'Вера почувствовала, как что-то горячее хлынуло в её сердце.',
+      'Он с удивлением смотрел на Веру и ничего не говорил.'
+    ]
+  },
+  {
+    fipiId: '0CEDC6',
+    type: 'олицетворение',
+    correct: [2, 5],
+    sentences: [
+      'Мальчик искал скрипку.',
+      'Скрипка плакала и смеялась, она летала по небу и устало брела по земле.',
+      'Он поставил большой чёрный футляр на мокрый асфальт и прислонил его к стене дома.',
+      'Она уводила его от нудного дождя, от недоступной скрипки, от холодной Дианы.',
+      'И этот другой не имеет никакого отношения к неприступному зданию музыкального училища, к его таинственной жизни, к ярким окнам, у которых свои разные голоса.'
+    ]
+  },
+  {
+    fipiId: 'DCB1A7',
+    type: 'фразеологизм',
+    correct: [1, 2],
+    sentences: [
+      'В первую голову — за ум и отличные успехи.',
+      'Версию эту Сергей полностью не отрицал, она всё-таки утешала его, но цену себе он знал точную.',
+      'Серый приостановился возле ступенек в подвал, огляделся.',
+      '— Наталья, лебеди у меня там, — признался Сергей, — на озере лёд, погибнуть они могут.',
+      'Серый достал из карманов хлеб, растёр в ладонях, кинул лебедям.'
+    ]
+  }
+];
+const rbState = { cur: 0, score: 0, picked: [] };
+function initRainbow() {
+  resetAnswersLog();
+  rbState.cur = 0; rbState.score = 0; rbState.picked = [];
+  document.getElementById('rb-score').textContent = '0';
+  document.getElementById('rb-total').textContent = RAINBOW_DATA.length;
+  document.getElementById('rb-progress').style.width = '0%';
+  renderRainbow();
+}
+function renderRainbow() {
+  const idx = rbState.cur;
+  if (idx >= RAINBOW_DATA.length) { showRainbowResult(); return; }
+  const r = RAINBOW_DATA[idx];
+  const c = document.getElementById('rb-content');
+  c.innerHTML = `
+    <div class="rainbow-task">
+      <strong>Раунд ${idx+1} из ${RAINBOW_DATA.length}.</strong>
+      Укажите варианты ответов, в которых средством выразительности речи является <strong>${r.type}</strong>.
+    </div>
+    <div class="text-box" id="rb-text"></div>
+    <div class="rainbow-options" id="rb-options"></div>
+    <button class="check-btn" id="rb-check" onclick="rbCheck()" disabled>🐝 Проверить</button>
+    <div class="feedback-line" id="rb-fb"></div>
+    <button class="next-btn" id="rb-next" onclick="rbNext()">Дальше →</button>
+  `;
+  // Текст — каждое предложение с новой строки
+  const tb = document.getElementById('rb-text');
+  r.sentences.forEach((s, i) => {
+    const row = document.createElement('div');
+    row.className = 'rb-sentence-row';
+    const num = document.createElement('span');
+    num.className = 'num-mark';
+    num.textContent = (i+1);
+    row.appendChild(num);
+    row.appendChild(document.createTextNode(' ' + s));
+    tb.appendChild(row);
+  });
+  // Кнопки выбора
+  const opts = document.getElementById('rb-options');
+  for (let n = 1; n <= 5; n++) {
+    const b = document.createElement('button');
+    b.className = 'rainbow-num';
+    b.textContent = n;
+    b.onclick = () => rbPick(n);
+    b.id = 'rb-opt-' + n;
+    opts.appendChild(b);
+  }
+  rbState.picked = [];
+  document.getElementById('rb-check').disabled = true;
+}
+function rbPick(n) {
+  if (rbState.picked.includes(n)) {
+    rbState.picked = rbState.picked.filter(x => x !== n);
+    document.getElementById('rb-opt-' + n).classList.remove('picked');
+  } else {
+    rbState.picked.push(n);
+    document.getElementById('rb-opt-' + n).classList.add('picked');
+  }
+  document.getElementById('rb-check').disabled = rbState.picked.length === 0;
+}
+function rbCheck() {
+  const r = RAINBOW_DATA[rbState.cur];
+  const picked = rbState.picked.slice().sort();
+  const correct = r.correct.slice().sort();
+  const isFull = picked.length === correct.length && picked.every((v,i) => v === correct[i]);
+  // Разметка 4 состояний
+  for (let n = 1; n <= 5; n++) {
+    const b = document.getElementById('rb-opt-' + n);
+    b.classList.remove('picked');
+    b.classList.add('disabled');
+    b.onclick = null;
+    if (picked.includes(n) && correct.includes(n)) b.classList.add('correct');
+    else if (picked.includes(n) && !correct.includes(n)) b.classList.add('wrong');
+    else if (!picked.includes(n) && correct.includes(n)) b.classList.add('missed');
+  }
+  document.getElementById('rb-check').style.display = 'none';
+  const fb = document.getElementById('rb-fb');
+  const yoursTxt = picked.length ? picked.join('') : '—';
+  const cls = isFull ? 'correct' : 'wrong';
+  fb.innerHTML = `🐝 Твой ответ: <span class="yours ${cls}">${yoursTxt}</span> &nbsp;·&nbsp; Правильный: <span class="yours correct">${correct.join('')}</span>`;
+  fb.classList.add('show');
+  document.getElementById('rb-next').classList.add('show');
+  if (isFull) rbState.score++;
+  document.getElementById('rb-score').textContent = rbState.score;
+  document.getElementById('rb-progress').style.width = (((rbState.cur+1)/RAINBOW_DATA.length)*100) + '%';
+  // Лог в Sheets
+  answersByTask[r.fipiId] = `${yoursTxt} (${isFull ? 1 : 0}/1)`;
+}
+function rbNext() { rbState.cur++; renderRainbow(); }
+function showRainbowResult() {
+  showResultScreen('rb-content', '🌈', 'Радуга собрана!', rbState.score, RAINBOW_DATA.length, 'initRainbow', 'Радуга средств');
+}
+
+// =============== GAME 3: SLOVAR =====================
+// Найди слово с лексическим значением. Клик по слову в тексте.
+// answerForms — список допустимых форм слова (например, ["мольбертом", "мольберт"]).
+const SLOVAR_DATA = [
+  {
+    fipiId: '1230A5',
+    meaning: 'без остатка, до основания',
+    answerForms: ['дотла'],
+    sentences: [
+      [19, 'Григорий сорвал с плеч её тлевшую попону и, переламываясь пополам, стал метать лопатой в дверь мастерской большие комья снега; дед бежал около бабушки, бросая в неё снегом; она сунула бутыль в сугроб, бросилась к воротам, отворила их и, кланяясь бежавшим людям, говорила: — Амбар, соседи, отстаивайте!'],
+      [20, 'Перекинется огонь на амбар, на сеновал — наше всё дотла сгорит и ваше займётся!'],
+      [21, 'Рубите крышу, сено — в сад!'],
+      [22, 'Батюшки-соседи, беритесь дружней, Бог вам на по́мочь.']
+    ]
+  },
+  {
+    fipiId: 'DAB3AA',
+    meaning: 'широкий матерчатый пояс',
+    answerForms: ['кушаки', 'кушак'],
+    sentences: [
+      [1, 'В нашем классе когда-то висели картины.'],
+      [2, 'Их давно сняли, но в стенах осталось шесть больших железных крюков.'],
+      [3, 'Эти крюки вызвали у нас одну «удачную мысль».'],
+      [4, 'Наш класс осуществил её с блеском и ловкостью.'],
+      [5, 'Шестерых самых лёгких и маленьких ростом гимназистов, в том числе и меня, подвесили за туго затянутые кушаки к крюкам.'],
+      [6, 'Крюки больно давили на поясницу.'],
+      [7, 'Спирало дыхание.']
+    ]
+  },
+  {
+    fipiId: '036CE8',
+    meaning: 'учреждение, оборудованное для астрономических, метеорологических, геофизических наблюдений',
+    answerForms: ['обсерваторию', 'обсерватория'],
+    sentences: [
+      [30, 'Она засмеялась.'],
+      [31, 'Он иногда заплывает вон на ту скалу в море и поёт песни из кинофильмов или читает стихи.'],
+      [32, 'А однажды он устроил там обсерваторию, — сказал первый мальчик.'],
+      [33, 'Всю ночь глядел в какую-то трубу: хотел увидеть космический корабль.'],
+      [34, 'А я слышал, — сказал второй мальчик, — как он разговаривал с морем.'],
+      [35, 'Иду я.'],
+      [36, 'Тихо.'],
+      [37, 'И вдруг слышу: «Молчишь, не отвечаешь?'],
+      [38, 'Всё равно я разгадаю твои тайны и овладею твоей силой!'],
+      [39, 'Иногда ты мне кажешься очень хитрым.'],
+      [40, 'А иногда — добрым, когда я лежу на твоём берегу и ты шепчешь мне, какие можно построить морские электростанции, используя твои подводные течения».']
+    ]
+  },
+  {
+    fipiId: '16374D',
+    meaning: 'подставка, на которой художник укрепляет подрамник с холстом, картон, бумагу',
+    answerForms: ['мольбертом', 'мольберт'],
+    sentences: [
+      [14, 'На подмостки выходит высокий, стройный человек с симпатичным лицом.'],
+      [15, 'Оба рукава его пиджака совершенно пусты сверху донизу, и концы рукавов заложены в оба кармана.'],
+      [16, 'Это и есть безрукий художник.'],
+      [17, 'Он кланяется зрителям без улыбки, с достоинством.'],
+      [18, 'Художник садится на стул перед мольбертом.'],
+      [19, 'Человек с мятым лицом вставляет кусок угля в пальцы ноги художника.'],
+      [20, 'И художник начинает рисовать ногой.']
+    ]
+  },
+  {
+    fipiId: '4B61DD',
+    meaning: 'изысканный, изящный',
+    answerForms: ['элегантный'],
+    sentences: [
+      [27, 'Венька, стиснув зубы, влез в Виталькин пиджак.'],
+      [28, 'Он тоже был ничего: стального цвета в чёрную крапинку.'],
+      [29, 'Только не нужен был Веньке этот элегантный пиджак!'],
+      [30, 'Никто из его одноклассников в пиджаках по школе не ходил.'],
+      [31, 'Никто!'],
+      [32, 'Лишь один он!'],
+      [33, 'Он, правда, ни разу ни от кого не слышал обидных слов в адрес своей одежды, но всем своим существом чувствовал, что никак не вписывается в этих пиджаках в мужской коллектив класса.']
+    ]
+  }
+];
+const slState = { cur: 0, score: 0, pickedSpan: null };
+function normWord(w) {
+  return w.toLowerCase().replace(/[ё]/g, 'е').replace(/[^а-яa-z0-9-]/g, '');
+}
+function initSlovar() {
+  resetAnswersLog();
+  slState.cur = 0; slState.score = 0;
+  document.getElementById('sl-score').textContent = '0';
+  document.getElementById('sl-total').textContent = SLOVAR_DATA.length;
+  document.getElementById('sl-progress').style.width = '0%';
+  renderSlovar();
+}
+function renderSlovar() {
+  const idx = slState.cur;
+  if (idx >= SLOVAR_DATA.length) { showSlovarResult(); return; }
+  const r = SLOVAR_DATA[idx];
+  const c = document.getElementById('sl-content');
+  c.innerHTML = `
+    <div class="slovar-task">
+      <strong>Раунд ${idx+1} из ${SLOVAR_DATA.length}.</strong>
+      Найди в тексте слово с лексическим значением: <strong>«${r.meaning}»</strong>. Тапни на нужное слово.
+    </div>
+    <div class="slovar-text" id="sl-text"></div>
+    <button class="check-btn" id="sl-check" onclick="slCheck()" disabled>🐝 Проверить</button>
+    <div class="feedback-line" id="sl-fb"></div>
+    <button class="next-btn" id="sl-next" onclick="slNext()">Дальше →</button>
+  `;
+  const tb = document.getElementById('sl-text');
+  r.sentences.forEach(([n, txt]) => {
+    const num = document.createElement('span');
+    num.className = 'num-mark';
+    num.textContent = n;
+    tb.appendChild(num);
+    // Разбиваем txt на токены: слова и не-слова
+    const tokens = txt.split(/(\s+|[—.,;:!?«»…()"'-])/);
+    tokens.forEach(tk => {
+      if (/^[а-яА-ЯёЁa-zA-Z0-9]+$/.test(tk)) {
+        const span = document.createElement('span');
+        span.className = 'slovar-word';
+        span.textContent = tk;
+        span.dataset.word = tk;
+        span.onclick = () => slPick(span);
+        tb.appendChild(span);
+      } else {
+        tb.appendChild(document.createTextNode(tk));
+      }
+    });
+    tb.appendChild(document.createElement('br'));
+  });
+  slState.pickedSpan = null;
+}
+function slPick(span) {
+  if (slState.pickedSpan) slState.pickedSpan.classList.remove('picked');
+  if (slState.pickedSpan === span) { slState.pickedSpan = null; document.getElementById('sl-check').disabled = true; return; }
+  slState.pickedSpan = span;
+  span.classList.add('picked');
+  document.getElementById('sl-check').disabled = false;
+}
+function slCheck() {
+  const r = SLOVAR_DATA[slState.cur];
+  if (!slState.pickedSpan) return;
+  const userWord = slState.pickedSpan.dataset.word;
+  const userNorm = normWord(userWord);
+  const ok = r.answerForms.some(f => normWord(f) === userNorm);
+  // Помечаем все слова disabled
+  document.querySelectorAll('#sl-text .slovar-word').forEach(s => {
+    s.classList.add('disabled');
+    s.onclick = null;
+    s.classList.remove('picked');
+  });
+  if (ok) {
+    slState.pickedSpan.classList.add('correct');
+    slState.score++;
+  } else {
+    slState.pickedSpan.classList.add('wrong');
+    // Подсветить правильное (первое, что нашли)
+    document.querySelectorAll('#sl-text .slovar-word').forEach(s => {
+      if (r.answerForms.some(f => normWord(f) === normWord(s.dataset.word)) && s !== slState.pickedSpan) {
+        s.classList.add('missed');
+      }
+    });
+  }
+  document.getElementById('sl-check').style.display = 'none';
+  const fb = document.getElementById('sl-fb');
+  const cls = ok ? 'correct' : 'wrong';
+  fb.innerHTML = `🐝 Твой ответ: <span class="yours ${cls}">${userWord}</span> &nbsp;·&nbsp; Правильный: <span class="yours correct">${r.answerForms[0]}</span>`;
+  fb.classList.add('show');
+  document.getElementById('sl-next').classList.add('show');
+  document.getElementById('sl-score').textContent = slState.score;
+  document.getElementById('sl-progress').style.width = (((slState.cur+1)/SLOVAR_DATA.length)*100) + '%';
+  answersByTask[r.fipiId] = `${userWord} (${ok ? 1 : 0}/1)`;
+}
+function slNext() { slState.cur++; renderSlovar(); }
+function showSlovarResult() {
+  showResultScreen('sl-content', '📖', 'Словарь раскрыт!', slState.score, SLOVAR_DATA.length, 'initSlovar', 'Словарь-открытие');
+}
+
+// =============== GAME 4: SYNONIMY =====================
+// Дан текст-контекст и слово в нём, надо подобрать стилистически нейтральный синоним.
+// 5 вариантов = 1 правильный + 4 правильных ответа других ID того же раздела (то есть синонимы
+// к ДРУГИМ словам — они не подходят, но при этом не выдуманные).
+const SYNONIMY_DATA = [
+  {
+    fipiId: '0BBC3B',
+    sourceWords: 'быстрый, увёртливый',
+    context: '(9) Колючка был юркий чернявый мальчишка, который вечно сновал по школе, ко всем приставал и всюду совал свой острый носик.',
+    answer: 'юркий',
+    distractors: ['понуро', 'шагал', 'шелестом', 'рассеянный']
+  },
+  {
+    fipiId: '8316F7',
+    sourceWords: 'уныло, печально',
+    context: '(6) Он ничего не заказывал и понуро сидел на деревянном диване, засунув руки в рукава неумело заплатанной рыбачьей куртки.',
+    answer: 'понуро',
+    distractors: ['юркий', 'шагал', 'шелестом', 'рассеянный']
+  },
+  {
+    fipiId: '358D72',
+    sourceWords: 'идти',
+    context: '(2) Он шагал прямиком по степи.',
+    answer: 'шагал',
+    distractors: ['юркий', 'понуро', 'шелестом', 'рассеянный']
+  },
+  {
+    fipiId: '9EAD52',
+    sourceWords: 'шуршание, шорох',
+    context: '(2) Все леса хороши с их грибным воздухом и шелестом листьев.',
+    answer: 'шелестом',
+    distractors: ['юркий', 'понуро', 'шагал', 'рассеянный']
+  },
+  {
+    fipiId: 'F67409',
+    sourceWords: 'невнимательный',
+    context: '(38) И на уроках он был рассеянным и даже похудел.',
+    answer: 'рассеянным',
+    distractors: ['юркий', 'понуро', 'шагал', 'шелестом']
+  }
+];
+const syState = { cur: 0, score: 0, picked: null };
+function initSynonimy() {
+  resetAnswersLog();
+  syState.cur = 0; syState.score = 0;
+  document.getElementById('sy-score').textContent = '0';
+  document.getElementById('sy-total').textContent = SYNONIMY_DATA.length;
+  document.getElementById('sy-progress').style.width = '0%';
+  renderSynonimy();
+}
+function renderSynonimy() {
+  const idx = syState.cur;
+  if (idx >= SYNONIMY_DATA.length) { showSynonimyResult(); return; }
+  const r = SYNONIMY_DATA[idx];
+  // Перемешать варианты
+  const options = shuffle([r.answer, ...r.distractors]);
+  syState.picked = null;
+  const c = document.getElementById('sy-content');
+  c.innerHTML = `
+    <div class="mc-task">
+      <div class="source-tag">Раунд ${idx+1} · ФИПИ ${r.fipiId}</div>
+      <div class="mc-prompt">Найди синоним к словам:</div>
+      <div class="mc-target">«${r.sourceWords}»</div>
+      <div class="mc-context">${r.context}</div>
+      <div class="mc-options" id="sy-options"></div>
+    </div>
+    <button class="check-btn" id="sy-check" onclick="syCheck()" disabled>🐝 Проверить</button>
+    <div class="feedback-line" id="sy-fb"></div>
+    <button class="next-btn" id="sy-next" onclick="syNext()">Дальше →</button>
+  `;
+  const opts = document.getElementById('sy-options');
+  options.forEach((opt, i) => {
+    const b = document.createElement('button');
+    b.className = 'mc-option';
+    b.textContent = opt;
+    b.dataset.value = opt;
+    b.onclick = () => syPick(b);
+    opts.appendChild(b);
+  });
+}
+function syPick(btn) {
+  document.querySelectorAll('#sy-options .mc-option').forEach(b => b.classList.remove('picked'));
+  btn.classList.add('picked');
+  syState.picked = btn.dataset.value;
+  document.getElementById('sy-check').disabled = false;
+}
+function syCheck() {
+  const r = SYNONIMY_DATA[syState.cur];
+  const ok = syState.picked === r.answer;
+  document.querySelectorAll('#sy-options .mc-option').forEach(b => {
+    b.classList.add('disabled');
+    b.onclick = null;
+    b.classList.remove('picked');
+    if (b.dataset.value === r.answer && ok) b.classList.add('correct');
+    else if (b.dataset.value === r.answer && !ok) b.classList.add('missed');
+    else if (b.dataset.value === syState.picked) b.classList.add('wrong');
+  });
+  document.getElementById('sy-check').style.display = 'none';
+  if (ok) syState.score++;
+  const fb = document.getElementById('sy-fb');
+  const cls = ok ? 'correct' : 'wrong';
+  fb.innerHTML = `🐝 Твой ответ: <span class="yours ${cls}">${syState.picked}</span> &nbsp;·&nbsp; Правильный: <span class="yours correct">${r.answer}</span>`;
+  fb.classList.add('show');
+  document.getElementById('sy-next').classList.add('show');
+  document.getElementById('sy-score').textContent = syState.score;
+  document.getElementById('sy-progress').style.width = (((syState.cur+1)/SYNONIMY_DATA.length)*100) + '%';
+  answersByTask[r.fipiId] = `${syState.picked} (${ok ? 1 : 0}/1)`;
+}
+function syNext() { syState.cur++; renderSynonimy(); }
+function showSynonimyResult() {
+  showResultScreen('sy-content', '🔠', 'Близнецы найдены!', syState.score, SYNONIMY_DATA.length, 'initSynonimy', 'Синонимы-близнецы');
+}
+
+// =============== GAME 5: TEATR =====================
+// Слово выделено в контексте, 4 варианта значения, выбрать правильное.
+// distractors — значения других ID, не относящиеся к нашему слову.
+const TEATR_DATA = [
+  {
+    fipiId: '4cD9B6',
+    word: 'жестокой',
+    context: '(8) Вдруг вспомнилось стихотворение Дмитрия Кедрина о том, как сын, вырвав сердце матери, понёс его жестокой возлюбленной.',
+    answer: 'безжалостный, беспощадный',
+    distractors: ['изысканный, изящный', 'без остатка, до основания', 'очень холодный']
+  },
+  {
+    fipiId: 'B2D602',
+    word: 'этюдов',
+    context: '(3) Добрая сотня картин и этюдов до сих пор хранится в запасниках Центрального музея.',
+    answer: 'рисунок или картина, выполненные с натуры, часть будущего большого произведения',
+    distractors: ['широкий матерчатый пояс', 'подставка, на которой художник укрепляет подрамник с холстом, картон, бумагу', 'сомкнув, закрыв']
+  },
+  {
+    fipiId: 'B65794',
+    word: 'пренебрёг',
+    context: '(5) В альбоме с марками его привлекли портреты царей, шахов, султанов, магараджей, президентов и прочих правителей кануна мировой войны, когда этот альбом был выпущен, — коллекцией моей он пренебрёг.',
+    answer: 'отнестись без внимания к чему-либо',
+    distractors: ['заменить чем-нибудь недостающее или утраченное', 'учреждение для астрономических наблюдений', 'изысканный, изящный']
+  },
+  {
+    fipiId: '44C089',
+    word: 'смежив',
+    context: '(15) Он лежал, свернувшись в клубок, смежив единственный глаз, и след от слезы пересекал его нос.',
+    answer: 'сомкнув, закрыв',
+    distractors: ['безжалостный, беспощадный', 'очень холодный', 'без остатка, до основания']
+  },
+  {
+    fipiId: '6E646D',
+    word: 'студёную',
+    context: '(10) Вот я и выкопал вам берёзу, чтобы на всю студёную зиму вам летняя память была.',
+    answer: 'очень холодный',
+    distractors: ['рисунок с натуры', 'отнестись без внимания', 'сомкнув, закрыв']
+  }
+];
+const ttState = { cur: 0, score: 0, picked: null };
+function initTeatr() {
+  resetAnswersLog();
+  ttState.cur = 0; ttState.score = 0;
+  document.getElementById('tt-score').textContent = '0';
+  document.getElementById('tt-total').textContent = TEATR_DATA.length;
+  document.getElementById('tt-progress').style.width = '0%';
+  renderTeatr();
+}
+function renderTeatr() {
+  const idx = ttState.cur;
+  if (idx >= TEATR_DATA.length) { showTeatrResult(); return; }
+  const r = TEATR_DATA[idx];
+  const options = shuffle([r.answer, ...r.distractors]);
+  ttState.picked = null;
+  const c = document.getElementById('tt-content');
+  // Заголовок с подсветкой слова в контексте
+  const ctxHtml = escHtml(r.context).replace(escHtml(r.word), '<strong style="color: var(--artist-deep); background: var(--amber); padding: 1px 5px; border-radius: 4px;">' + escHtml(r.word) + '</strong>');
+  c.innerHTML = `
+    <div class="mc-task">
+      <div class="source-tag">Раунд ${idx+1} · ФИПИ ${r.fipiId}</div>
+      <div class="mc-prompt">Что означает выделенное слово в контексте?</div>
+      <div class="mc-target">«${r.word}»</div>
+      <div class="mc-context">${ctxHtml}</div>
+      <div class="mc-options" id="tt-options"></div>
+    </div>
+    <button class="check-btn" id="tt-check" onclick="ttCheck()" disabled>🐝 Проверить</button>
+    <div class="feedback-line" id="tt-fb"></div>
+    <button class="next-btn" id="tt-next" onclick="ttNext()">Дальше →</button>
+  `;
+  const opts = document.getElementById('tt-options');
+  options.forEach(opt => {
+    const b = document.createElement('button');
+    b.className = 'mc-option';
+    b.textContent = opt;
+    b.dataset.value = opt;
+    b.onclick = () => ttPick(b);
+    opts.appendChild(b);
+  });
+}
+function ttPick(btn) {
+  document.querySelectorAll('#tt-options .mc-option').forEach(b => b.classList.remove('picked'));
+  btn.classList.add('picked');
+  ttState.picked = btn.dataset.value;
+  document.getElementById('tt-check').disabled = false;
+}
+function ttCheck() {
+  const r = TEATR_DATA[ttState.cur];
+  const ok = ttState.picked === r.answer;
+  document.querySelectorAll('#tt-options .mc-option').forEach(b => {
+    b.classList.add('disabled');
+    b.onclick = null;
+    b.classList.remove('picked');
+    if (b.dataset.value === r.answer && ok) b.classList.add('correct');
+    else if (b.dataset.value === r.answer && !ok) b.classList.add('missed');
+    else if (b.dataset.value === ttState.picked) b.classList.add('wrong');
+  });
+  document.getElementById('tt-check').style.display = 'none';
+  if (ok) ttState.score++;
+  const fb = document.getElementById('tt-fb');
+  const cls = ok ? 'correct' : 'wrong';
+  fb.innerHTML = `🐝 Твой ответ: <span class="yours ${cls}">${ttState.picked}</span> &nbsp;·&nbsp; Правильный: <span class="yours correct">${r.answer}</span>`;
+  fb.classList.add('show');
+  document.getElementById('tt-next').classList.add('show');
+  document.getElementById('tt-score').textContent = ttState.score;
+  document.getElementById('tt-progress').style.width = (((ttState.cur+1)/TEATR_DATA.length)*100) + '%';
+  answersByTask[r.fipiId] = `${ttState.picked.slice(0, 30)} (${ok ? 1 : 0}/1)`;
+}
+function ttNext() { ttState.cur++; renderTeatr(); }
+function showTeatrResult() {
+  showResultScreen('tt-content', '🎭', 'Занавес!', ttState.score, TEATR_DATA.length, 'initTeatr', 'Театр контекстов');
+}
+
+// =============== ОБЩИЙ ЭКРАН РЕЗУЛЬТАТА ===============
+function showResultScreen(containerId, bees, title, score, total, restartFn, gameName) {
+  const pct = Math.round((score / total) * 100);
+  let msg = 'Хорошее начало! Разбери ошибки и попробуй ещё раз.';
+  let beesLine = bees;
+  if (pct >= 90) { msg = 'Невероятно! Ты настоящий мастер слова.'; beesLine = bees + '🍯🐝'; }
+  else if (pct >= 70) { msg = 'Отлично! Видно, что чувствуешь язык. Несколько ошибок — посмотри подсказки.'; beesLine = bees + '🍯'; }
+  else if (pct >= 50) { msg = 'Хорошо, но есть над чем поработать. Попробуй ещё раз — внимательно перечитай разбор.'; }
+  const c = document.getElementById(containerId);
+  c.innerHTML = `
+    <div class="result-screen">
+      <div class="result-bees">${beesLine}</div>
+      <div class="result-title">${title}</div>
+      <div class="result-score">🐝 ${score} / ${total} · ${pct}%</div>
+      <div class="result-message">${msg}</div>
+      <div class="saving-note" id="${containerId}-saving">⏳ Отправляю результат в рейтинг...</div>
+      <button class="restart-btn" onclick="${restartFn}()">🔄 Сыграть ещё</button>
+      <button class="restart-btn" onclick="openLeaderboard()" style="background: var(--honey-deep);">🏆 Топ-10</button>
+      <button class="restart-btn" onclick="backToMenu()" style="background: var(--artist);">🏠 К меню</button>
+    </div>
+  `;
+  submitGameResults(gameName, score, total).then(submitted => {
+    const note = document.getElementById(containerId + '-saving');
+    if (note) note.textContent = submitted
+      ? '✓ Результат отправлен в общий рейтинг'
+      : '⚠ Не удалось отправить в рейтинг. Проверь интернет — или педагог ещё не настроил таблицу.';
+  });
+}
+
+// =============== INIT ===============
+window.addEventListener('DOMContentLoaded', () => {
+  const n = getUserName();
+  document.getElementById('user-name').textContent = n || '…';
+  if (!n) askForName();
+});
+</script>
+
+</body>
+</html>

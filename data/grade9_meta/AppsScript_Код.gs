@@ -95,6 +95,33 @@ function jsonResp(obj) {
 // Если такая вкладка уже есть — функция её НЕ трогает (idempotent).
 // =================================================================
 
+function setupTabsForPalitra() {
+  // 4-й сайт — Палитра выразительности. Все 5 игр.
+  const TABS = [
+    {
+      name: 'Палитра художника',
+      ids: ['B6EA56', '45C7CD', 'E9AF26', '243E3D', '378DF0', 'CE41AB', '909EAC', 'DFFB52']
+    },
+    {
+      name: 'Радуга средств',
+      ids: ['2E3089', '1F4932', '75794E', '0CEDC6', 'DCB1A7']
+    },
+    {
+      name: 'Словарь-открытие',
+      ids: ['1230A5', 'DAB3AA', '036CE8', '16374D', '4B61DD']
+    },
+    {
+      name: 'Синонимы-близнецы',
+      ids: ['0BBC3B', '8316F7', '358D72', '9EAD52', 'F67409']
+    },
+    {
+      name: 'Театр контекстов',
+      ids: ['4cD9B6', 'B2D602', 'B65794', '44C089', '6E646D']
+    }
+  ];
+  return createTabsFromSpec_(TABS);
+}
+
 function setupTabsForDetektiv() {
   // 3-я игра — Синтаксический детектив. Создаёт 5 вкладок (3 первые + 2 новые).
   const TABS = [
@@ -120,6 +147,92 @@ function setupTabsForDetektiv() {
     }
   ];
   return createTabsFromSpec_(TABS);
+}
+
+function addNavigationLinks() {
+  // Вставляет в верх вкладки «📖 Инструкция» блок-навигатор:
+  // 4 столбца по сайтам, в каждом по 5 игр-ссылок.
+  // Идемпотентно: при повторном вызове перезаписывает старый блок.
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const baseUrl = ss.getUrl();
+
+  const instr = ss.getSheetByName('📖 Инструкция') || ss.getSheets()[0];
+
+  const SITES = [
+    {
+      title: '1️⃣ Игротека ОГЭ',
+      games: ['Верные характеристики', '5 лишний', 'Крестики-нолики', 'Пунктуация-пазл', 'Правило-пример']
+    },
+    {
+      title: '2️⃣ Лексика',
+      games: ['Цветочное поле', 'Лабиринт форм', 'Сборка улья', 'Аквариум', 'Собери котят']
+    },
+    {
+      title: '3️⃣ Детектив',
+      games: ['Поиск основ', 'Колонны характеристик', 'Правило-сыщик', 'Пунктуация-мозаика', 'Снайпер запятых']
+    },
+    {
+      title: '4️⃣ Палитра',
+      games: ['Палитра художника', 'Радуга средств', 'Словарь-открытие', 'Синонимы-близнецы', 'Театр контекстов']
+    }
+  ];
+
+  // Если блок уже есть — снести его (заголовок + подзаголовки + 5 игр + разделитель = 8 строк).
+  const firstCell = String(instr.getRange(1, 1).getValue() || '');
+  if (firstCell.indexOf('Перейти к вкладке') !== -1) {
+    instr.deleteRows(1, 8);
+  }
+
+  // Вставляем 8 пустых строк в самом верху
+  instr.insertRowsBefore(1, 8);
+
+  // Заголовок (объединяем 4 колонки)
+  const headerRange = instr.getRange(1, 1, 1, 4);
+  headerRange.merge();
+  headerRange.setValue('🎯 Перейти к вкладке (тапни на название игры)')
+    .setFontWeight('bold')
+    .setFontSize(14)
+    .setHorizontalAlignment('center')
+    .setBackground('#3D2817')
+    .setFontColor('#FFE38A');
+
+  // Подзаголовки сайтов
+  SITES.forEach((s, col) => {
+    instr.getRange(2, col + 1)
+      .setValue(s.title)
+      .setFontWeight('bold')
+      .setBackground('#FFE38A')
+      .setHorizontalAlignment('center')
+      .setBorder(true, true, true, true, false, false);
+  });
+
+  // Игры с гиперссылками
+  SITES.forEach((s, col) => {
+    s.games.forEach((name, idx) => {
+      const sh = ss.getSheetByName(name);
+      const cell = instr.getRange(3 + idx, col + 1);
+      if (!sh) {
+        cell.setValue('(нет вкладки: ' + name + ')').setFontColor('#999').setFontStyle('italic');
+        return;
+      }
+      const url = baseUrl + '#gid=' + sh.getSheetId();
+      const rt = SpreadsheetApp.newRichTextValue()
+        .setText(name)
+        .setLinkUrl(url)
+        .build();
+      cell.setRichTextValue(rt)
+        .setBackground('#FFF8E7')
+        .setFontColor('#2A1810')
+        .setBorder(true, true, true, true, false, false);
+    });
+  });
+
+  // Пустая строка-разделитель (строка 8) уже есть.
+  // Ширина колонок
+  for (let c = 1; c <= 4; c++) instr.setColumnWidth(c, 200);
+
+  Logger.log('✓ Навигационный блок добавлен в верх вкладки «📖 Инструкция».');
+  return 'OK';
 }
 
 // Универсальная фабрика: создаёт вкладки по спецификации.
