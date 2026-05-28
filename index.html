@@ -2000,7 +2000,7 @@ async function saveTheoryToDb(n, text){
    ПОПЫТКИ В ТРЕНАЖЁРЕ — сохранение и загрузка через REST → таблица attempts.
    Структура answers JSONB: { limit, shuffled, items: [{src, user, expected, ok}] }
    ======================================================================= */
-async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, shuffled }){
+async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, shuffled, assembledVariantId }){
   if(!sb || !MY_PROFILE) return null;  /* демо-режим — не сохраняем */
   const items = bank.map((q, i) => {
     /* expected: правильный ответ. Раньше для inlineChoice клали q.a — но у
@@ -2079,11 +2079,17 @@ async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, 
     student_id: MY_PROFILE.id,
     ege_task_n: taskN,
     is_random: !!(limit || shuffled),
-    answers: { limit: limit || null, shuffled: !!shuffled, items },
+    answers: { limit: limit || null, shuffled: !!shuffled, items,
+      assembled: assembledVariantId ? true : undefined },
     score,
     max_score,
     bee_earned: beeEarned
   };
+  /* Если попытка по сборке — добавляем ссылку на assembled_variants.
+     В таблице attempts колонка nullable (см. миграцию 2026-05-28). */
+  if(assembledVariantId){
+    payload.assembled_variant_id = assembledVariantId;
+  }
   try {
     const inserted = await restRequest('POST', '/attempts', payload, { prefer: 'return=representation' });
     /* Попытка успешно сохранена → чистим localStorage-черновик, иначе после
@@ -2476,6 +2482,11 @@ async function restoreSession(){
        зайдёт ли ученик на главную или сразу откроет конкретное задание. */
     if(profile.role === 'student' && typeof tryRestoreTestProgressFromDb === 'function'){
       tryRestoreTestProgressFromDb();
+    }
+    /* Если в URL есть ?aid=<slug> — открываем сборку для ученика.
+       Доступно и учителю/куратору тоже (на случай если хочет проверить). */
+    if(typeof tryOpenAssembledFromUrl === 'function'){
+      tryOpenAssembledFromUrl();
     }
     /* Загружаем теорию в фоне */
     Promise.all([loadTheoryFromDb(), loadMaterialsFromDb(), loadEssaysFromDb(), loadEssaySamplesFromDb(), loadStudentsFromDb().then(() => loadPaymentsFromDb()), loadCuratorsFromDb(), loadAchievementsFromDb(), loadMyStats(), loadMyActivity(), loadGroupStats(), loadWebinarsFromDb().then(() => loadAllAttendance()), loadQuizOverridesFromDb().then(() => loadQuizSeedFile()), loadPaymentSuggestionsFromDb()]).then(() => {
@@ -10632,12 +10643,15 @@ function modalTheory(n){
    МОДАЛЬ ТРЕНАЖЁРА
    ======================================================================= */
 function modalTest(taskN){
-  /* Три режима банка:
+  /* Режимы банка:
+     0. assembledRunning — сборка по ссылке ?aid=<slug> (snapshot вопросов)
      1. testShuffle — случайные пары паронимов (только задание 5)
      2. testLimit — N случайных вопросов из QUIZ_BANK[taskN]
      3. иначе — весь банк по заданию */
   let bank;
-  if(STATE.testShuffle){
+  if(STATE.assembledRunning && Array.isArray(STATE.assembledRunning.questions)){
+    bank = STATE.assembledRunning.questions;
+  } else if(STATE.testShuffle){
     if(!STATE.shuffledBank){
       /* Задание 5 — пары паронимов; остальные — letterGap (с опц. фильтром по коллекции). */
       if(taskN === 5 && !STATE.testCollection){
@@ -11634,10 +11648,14 @@ function modalTest(taskN){
       el('div', { class:'modal-head' },
         el('div', { style:{ flex:1, minWidth:0 }},
           el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
-            '⚡ Тренажёр · автопроверка · задание ' + taskN +
-            (STATE.testLimit != null ? ' · ' + bank.length + ' вопр.' : '')),
+            STATE.assembledRunning
+              ? '🧩 Сборка от учителя · ' + bank.length + ' вопр.'
+              : ('⚡ Тренажёр · автопроверка · задание ' + taskN +
+                 (STATE.testLimit != null ? ' · ' + bank.length + ' вопр.' : ''))),
           el('h2', { style:{ marginTop:'4px' }},
-            (EGE_TASKS.find(t => t.n === taskN) || {}).topic || 'Разминка'),
+            STATE.assembledRunning
+              ? STATE.assembledRunning.title
+              : ((EGE_TASKS.find(t => t.n === taskN) || {}).topic || 'Разминка')),
           /* Чекбокс «Мгновенная проверка» — под заголовком, как доп-настройка.
              Не уезжает наверх, чтобы крестик ВСЕГДА оставался виден справа. */
           el('label', {
@@ -11736,7 +11754,8 @@ function modalTest(taskN){
                       taskN, bank,
                       getUser: i => STATE.testAnswers[i] ?? null,
                       isCorrect, beeEarned,
-                      limit: STATE.testLimit, shuffled: STATE.testShuffle
+                      limit: STATE.testLimit, shuffled: STATE.testShuffle,
+                      assembledVariantId: STATE.assembledRunning ? STATE.assembledRunning.id : null
                     });
                   } catch(e){ console.warn(e); }
                   /* 🧳 Чемодан без ручки: для каждого letterGap-вопроса записываем
@@ -11776,6 +11795,7 @@ function modalTest(taskN){
                   STATE.testShuffle = null;
                   STATE.testLimit = null;
                   STATE.shuffledBank = null;
+                  STATE.assembledRunning = null;
                   STATE.testSaving = false;
                   showToast('Сохранено · +' + beeEarned + ' 🐝 на счёт');
                   render();
@@ -20767,6 +20787,51 @@ function _randomSlugTail(){
   for(let i = 0; i < 6; i++) out += chars[Math.floor(Math.random() * chars.length)];
   return out;
 }
+/* Парсинг URL ?aid=<slug>. Если есть и сборка активна — запускаем её как
+   тренажёр. Вызывается из restoreSession после успешной авторизации. */
+async function tryOpenAssembledFromUrl(){
+  if(!sb || !MY_PROFILE) return;
+  try {
+    const u = new URL(window.location.href);
+    const aid = u.searchParams.get('aid');
+    if(!aid) return;
+    /* Убираем aid из URL чтобы при F5 не запускалось снова в работающую
+       попытку. Восстановление состояния прогресса — отдельная задача
+       (через test_progress), пока не делаем для сборок. */
+    u.searchParams.delete('aid');
+    try { history.replaceState(null, '', u.pathname + (u.search || '') + (u.hash || '')); } catch(_){}
+    const arr = await restRequest('GET',
+      '/assembled_variants?slug=eq.' + encodeURIComponent(aid) +
+      '&is_active=eq.true&limit=1&select=id,slug,title,description,questions');
+    if(!Array.isArray(arr) || !arr.length){
+      showToast('⚠ Сборка не найдена или выключена');
+      return;
+    }
+    const av = arr[0];
+    if(!Array.isArray(av.questions) || !av.questions.length){
+      showToast('⚠ В сборке нет вопросов');
+      return;
+    }
+    /* Открываем модал тренажёра с подсунутыми вопросами. taskN ставим
+       из первого вопроса, чтобы саму модалку не сломать (она использует
+       таскN для логирования в attempts.ege_task_n). */
+    STATE.assembledRunning = av;
+    STATE.testOpen = (av.questions[0] && av.questions[0]._source_task_n) || 0;
+    STATE.testAnswers = {};
+    STATE.testChecked = false;
+    STATE.testInstantSubmitted = {};
+    STATE.testShuffle = null;
+    STATE.testLimit = null;
+    STATE.shuffledBank = av.questions;   /* модал берёт bank из shuffledBank */
+    STATE.testCollection = null;
+    STATE.testInstant = true;
+    showToast('🧩 Открыта сборка: ' + av.title);
+    render();
+  } catch(e){
+    console.warn('tryOpenAssembledFromUrl:', e && e.message);
+  }
+}
+
 async function loadAssembledVariants(){
   if(!sb) return [];
   try {
