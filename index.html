@@ -24563,8 +24563,35 @@ function viewTeacherWarmup(){
     wrap.append(renderWarmupActivityTable());
   }
 
+  /* Свёрнутость дней разогрева — сохраняется между сессиями.
+     По умолчанию все свёрнуты — учитель сам разворачивает нужный.
+     Если день в режиме редактирования или сейчас в нём добавляется пост —
+     принудительно открываем, иначе ввод и кнопки будут не видны. */
+  if(!STATE.warmupDayOpen){
+    try {
+      STATE.warmupDayOpen = JSON.parse(localStorage.getItem('warmup-day-open') || '{}') || {};
+    } catch(_){ STATE.warmupDayOpen = {}; }
+  }
+  const persistWarmupOpen = () => {
+    try { localStorage.setItem('warmup-day-open', JSON.stringify(STATE.warmupDayOpen)); }
+    catch(_){}
+  };
+
   STATE.warmupDays.forEach(d => {
-    const det = el('details', { class:'card', open:true, style:{ marginBottom:'12px' }});
+    const forceOpen = (STATE.editingWarmupDayId === d.id) ||
+                      (STATE.addingPostToDayId === d.id) ||
+                      (STATE.editingBlockId &&
+                       (STATE.warmupBlocksByDay && STATE.warmupBlocksByDay[d.id] || [])
+                         .some(b => b.id === STATE.editingBlockId));
+    const isOpen = forceOpen || !!STATE.warmupDayOpen[d.id];
+    const detAttrs = { class:'card', style:{ marginBottom:'12px' },
+      ontoggle: (ev) => {
+        STATE.warmupDayOpen[d.id] = !!ev.target.open;
+        persistWarmupOpen();
+      }
+    };
+    if(isOpen) detAttrs.open = true;
+    const det = el('details', detAttrs);
     const ss = { padding:'6px 10px', borderRadius:'6px', border:'1px solid var(--border-2)', fontSize:'14px' };
     const isEditingDay = STATE.editingWarmupDayId === d.id;
     /* Шапка дня: либо обычный заголовок, либо поля редактирования */
