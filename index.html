@@ -34488,13 +34488,33 @@ function legalFooter(){
       el('a', { href:'https://parashut-26.github.io/krash-test-2026/', target:'_blank', rel:'noopener', style: linkStyle }, 'О школе')));
 }
 
-/* render() — публичная обёртка, дебаунсит через RAF: если несколько
-   вызовов придёт в один кадр (cold-start с пачкой async-загрузок, или
-   подряд при кликах) — выполнится только один реальный рендер.
-   Это убирает «мигание» страницы. */
+/* render() — публичная обёртка с двумя уровнями дебаунса.
+   1) Если уже запланирован рендер в этом кадре — пропускаем.
+   2) В «cold-start окне» (первые 1.5 сек после загрузки страницы) — больше
+      склеиваем: ждём 100мс «тишины» после последнего вызова, чтобы пачка
+      async-загрузок (игры + варианты + посты + реакции + дни разогрева)
+      слилась в один реальный рендер. Иначе картинки в постах пересоздавались
+      несколько раз подряд и мигали в первые секунды. Прецедент 29.05.2026.
+   3) После cold-start — обычное RAF (требует моментальной отклика на клики). */
 let _renderScheduled = false;
+let _renderColdStartTimer = null;
+const _renderStartedAt = Date.now();
 function render(){
   if(_renderScheduled) return;
+  const inColdStart = (Date.now() - _renderStartedAt) < 1500;
+  if(inColdStart){
+    if(_renderColdStartTimer) clearTimeout(_renderColdStartTimer);
+    _renderColdStartTimer = setTimeout(() => {
+      _renderColdStartTimer = null;
+      if(_renderScheduled) return;
+      _renderScheduled = true;
+      requestAnimationFrame(() => {
+        _renderScheduled = false;
+        _renderNow();
+      });
+    }, 100);
+    return;
+  }
   _renderScheduled = true;
   requestAnimationFrame(() => {
     _renderScheduled = false;
