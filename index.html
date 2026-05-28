@@ -10856,13 +10856,75 @@ function modalTest(taskN){
        детект для 3 мягче (любая заглавная после «1) »), для 2 — старый строгий
        критерий (3+ CAPS-букв подряд). Прецедент 28.05.2026. */
     const isTask2Format = taskN === 2 && /\d+\)\s+[А-ЯЁ]{3,}/.test(q.q || '');
-    const isTask3Format = taskN === 3 && /\d+\)\s+[А-ЯЁ]/.test(q.q || '');
+    const isTask3Format = taskN === 3 && /\d+\)\s+/.test(q.q || '');
     const isNumberedListQ = isTask2Format || isTask3Format;
     /* CAPS-слова из формулировки нужны только заданию 2 (для подсветки
        корней в sourceText). Для задания 3 это не имеет смысла — текст
        обсуждается комплексно, без выделенных корней. */
     const targetCapsWords = isTask2Format ? extractTargetCapsWords(q.q) : [];
-    if(isNumberedListQ){
+
+    /* Для задания 3 порядок переворачиваем: сначала исходный текст,
+       потом формулировка с пятью пунктами-боксами. Логичнее: «прочитал
+       текст → выбираю варианты». Поэтому ниже флаг — пропускаем стандартный
+       рендер sourceText в этом блоке, если 3. Для остальных заданий —
+       старый порядок. Прецедент 28.05.2026. */
+    const renderSourceBefore = (taskN === 3) && q.sourceText;
+    const renderSourceAfter  = (taskN !== 3 && taskN !== 22) && q.sourceText;
+
+    /* Хелпер: формирует «📖 Исходный текст» блок (одинаковый для верха и низа). */
+    const buildSrcBox = () => {
+      const srcBox = el('details', { style:{ padding:'12px 14px', background:'#FFFCF2', borderRadius:'10px', borderLeft:'3px solid var(--y)', marginBottom:'12px', fontSize:'13px', lineHeight:'1.6', color:'var(--ink)' }});
+      let srcHtml = renderInlineMd(q.sourceText);
+      if(targetCapsWords.length){
+        srcHtml = highlightRootsInText(srcHtml, targetCapsWords);
+      } else if(taskN !== 3){
+        /* highlightCaps только для других заданий (задание 5 — паронимы);
+           для 3 не надо красить случайные CAPS-слова в тексте. */
+        srcHtml = highlightCaps(srcHtml);
+      }
+      srcBox.append(
+        el('summary', { style:{ cursor:'pointer', fontWeight:'700', color:'var(--ink-2)', fontSize:'12px', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'8px', listStyle:'none' }},
+          '📖 Прочитайте текст и выполните задание ▾'),
+        el('div', { html: srcHtml, style:{ marginTop:'10px', whiteSpace:'pre-wrap' }}));
+      srcBox.setAttribute('open', '');
+      return srcBox;
+    };
+
+    if(renderSourceBefore) block.append(buildSrcBox());
+
+    if(isTask3Format){
+      /* Для задания 3 разрезаем формулировку на «вступление + 5 пунктов»
+         с боксами (каждый пункт — карточка, как в полноценных вариантах). */
+      const safe = String(q.q || '')
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/\*\*([^*]+?)\*\*/g, '<strong>$1</strong>');
+      const parts = safe.split(/\s+(?=\d+\)\s+)/);
+      if(parts.length >= 2){
+        const head = parts[0];
+        const items = parts.slice(1);
+        block.append(el('div', {
+          style:{ fontWeight:'700', marginBottom:'10px', lineHeight:'1.55' },
+          html: (i+1) + '. ' + head
+        }));
+        const itemsBox = el('div', { style:{ display:'flex', flexDirection:'column', gap:'8px', marginBottom:'12px' }});
+        items.forEach(part => {
+          const m = part.match(/^(\d+)\)\s*([\s\S]*)$/);
+          if(!m) return;
+          const num = m[1];
+          const txt = m[2].trim();
+          itemsBox.append(el('div', {
+            style:{ padding:'12px 14px', background:'#FEF9C3', border:'1px solid #FACC15',
+                    borderRadius:'10px', fontSize:'14px', lineHeight:'1.55',
+                    display:'flex', gap:'10px', alignItems:'flex-start' }
+          },
+            el('span', { style:{ fontWeight:'800', color:'#92400E', flexShrink:0, minWidth:'22px' }}, num + ')'),
+            el('span', { html: txt })));
+        });
+        block.append(itemsBox);
+      } else {
+        block.append(el('div', { style:{ fontWeight:'700', marginBottom:'10px' }}, (i+1) + '. ' + q.q));
+      }
+    } else if(isNumberedListQ){
       const numberedHtml = formatNumberedOptions(q.q);
       block.append(el('div', {
         style:{ fontWeight:'700', marginBottom:'10px', lineHeight:'1.55' },
@@ -10872,25 +10934,7 @@ function modalTest(taskN){
       block.append(el('div', { style:{ fontWeight:'700', marginBottom:'10px' }}, (i+1) + '. ' + q.q));
     }
 
-    /* Задание 22: формат как в задании 8 — предложения А-Д уже в q.errors,
-       большой исходный текст не нужен и только мешает. Прячем его. */
-    if(q.sourceText && taskN !== 22){
-      const srcBox = el('details', { style:{ padding:'12px 14px', background:'#FFFCF2', borderRadius:'10px', borderLeft:'3px solid var(--y)', marginBottom:'12px', fontSize:'13px', lineHeight:'1.6', color:'var(--ink)' }});
-      /* Если есть целевые слова из формулировки — подсветим их корни в тексте,
-         иначе fallback на старый highlightCaps (для задания 5 — паронимы). */
-      let srcHtml = renderInlineMd(q.sourceText);
-      if(targetCapsWords.length){
-        srcHtml = highlightRootsInText(srcHtml, targetCapsWords);
-      } else {
-        srcHtml = highlightCaps(srcHtml);
-      }
-      srcBox.append(
-        el('summary', { style:{ cursor:'pointer', fontWeight:'700', color:'var(--ink-2)', fontSize:'12px', textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'8px', listStyle:'none' }},
-          '📖 Прочитайте текст и выполните задание ▾'),
-        el('div', { html: srcHtml, style:{ marginTop:'10px', whiteSpace:'pre-wrap' }}));
-      srcBox.setAttribute('open', '');
-      block.append(srcBox);
-    }
+    if(renderSourceAfter) block.append(buildSrcBox());
     if(q.context){
       /* Если в context есть цифры в скобках (1), (2), (3)... и тип text —
          делаем их кликабельными: ученик щёлкает по цифре → она превращается
