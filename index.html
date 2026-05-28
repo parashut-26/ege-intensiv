@@ -20995,22 +20995,45 @@ function modalAssembledBuilder(){
      поэтому для выбора важны сами слова/предложения/опции. */
   const previewBitsOf = (q) => {
     const bits = [];
+    /* Исходный текст (для 1-3, 22-26) — показываем сверху, чтобы учитель
+       видел КАКОЙ именно текст лежит за этим вопросом. Сокращаем превью
+       до 400 символов, чтобы строка не стала бесконечной. */
+    if(q.sourceText){
+      const st = String(q.sourceText);
+      const preview = st.length > 400 ? st.slice(0, 400).trim() + '…' : st;
+      bits.push({ kind:'source', text: '📖 ' + preview });
+    }
+    /* Контекст (для заданий 17-21 — само предложение под анализ) */
+    if(q.context && (typeof q.context === 'string') && !q.sourceText){
+      bits.push({ kind:'context', text: '📌 ' + q.context });
+    }
     /* Сама формулировка — показываем ВСЕГДА, целиком */
     if(q.q) bits.push({ kind:'q', text: q.q });
     /* Для letterGap (9–12, 15) — слово с пропуском */
     if(q.letterGap && q.word) bits.push({ kind:'word', text: '✏️ ' + q.word });
+    /* Хелпер: добавить «1) » префикс только если его ещё нет в начале строки.
+       В банке часто маркер «1) литота» уже включён в строку — повторное
+       префиксование даёт «1) 1) литота». */
+    const numbered = (arr) => arr.map((item, i) => {
+      const s = String(item).trim();
+      return /^\d+\)/.test(s) ? s : ((i+1) + ') ' + s);
+    }).join('\n');
+    const lettered = (arr) => arr.map((item, i) => {
+      const s = String(item).trim();
+      const letter = String.fromCharCode(0x0410 + i);
+      return new RegExp('^' + letter + '\\)').test(s) ? s : (letter + ') ' + s);
+    }).join('\n');
     /* Для multi/single — все варианты ответа */
     if(Array.isArray(q.opts) && q.opts.length){
-      bits.push({ kind:'opts', text: q.opts.map((o, i) => (i+1) + ') ' + o).join('\n') });
+      bits.push({ kind:'opts', text: numbered(q.opts) });
     }
     /* Для commaPick (16) и match-предложений — список предложений */
     if(Array.isArray(q.sentences) && q.sentences.length){
-      bits.push({ kind:'sentences', text: q.sentences.map((s, i) => (i+1) + ') ' + s).join('\n') });
+      bits.push({ kind:'sentences', text: numbered(q.sentences) });
     }
     /* Для match (8/22) — список ошибок А-Д */
     if(Array.isArray(q.errors) && q.errors.length){
-      bits.push({ kind:'errors', text: q.errors.map((e, i) =>
-        String.fromCharCode(0x0410 + i) + ') ' + e).join('\n') });
+      bits.push({ kind:'errors', text: lettered(q.errors) });
     }
     /* Для fillNn (15) — шаблон с пропусками */
     if(q.fillNn && q.text) bits.push({ kind:'text', text: q.text });
@@ -21072,8 +21095,9 @@ function modalAssembledBuilder(){
     value: b.title || '',
     style:{ width:'100%', padding:'8px 10px', borderRadius:'8px',
             border:'1.5px solid var(--y)', fontSize:'14px', fontWeight:'700',
-            boxSizing:'border-box', marginBottom:'8px' },
-    oninput: ev => { b.title = ev.target.value; }
+            boxSizing:'border-box', marginBottom:'8px' }
+    /* oninput назначу ниже, после создания saveBtn — нужно обновлять его
+       disabled-состояние сразу при наборе названия, без полного render(). */
   });
   const descInput = el('textarea', {
     placeholder:'Описание для учеников (необязательно)',
@@ -21131,9 +21155,11 @@ function modalAssembledBuilder(){
     });
   }
 
+  /* Готова ли сборка к сохранению (есть название и хотя бы 1 вопрос). */
+  const isReady = () => !!b.title.trim() && b.picks.length > 0;
   const saveBtn = el('button', { class:'btn btn-y',
-    disabled: !b.title.trim() || !b.picks.length,
-    style: (!b.title.trim() || !b.picks.length) ? { opacity:'.5', cursor:'not-allowed' } : null,
+    disabled: !isReady(),
+    style: !isReady() ? { opacity:'.5', cursor:'not-allowed' } : null,
     onclick: async () => {
       const title = b.title.trim();
       if(!title){ showToast('Введи название'); return; }
@@ -21165,6 +21191,18 @@ function modalAssembledBuilder(){
       }
     }
   }, '💾 Сохранить сборку');
+
+  /* Активируем кнопку сразу при наборе названия, без render() — иначе
+     каждое нажатие клавиши перерисовывало бы весь модал и сбрасывало бы
+     фокус с поля ввода. */
+  const refreshSaveBtn = () => {
+    const ready = isReady();
+    saveBtn.disabled = !ready;
+    saveBtn.style.opacity = ready ? '1' : '.5';
+    saveBtn.style.cursor = ready ? 'pointer' : 'not-allowed';
+  };
+  titleInput.oninput = ev => { b.title = ev.target.value; refreshSaveBtn(); };
+  refreshSaveBtn();
 
   const head = el('div', { class:'modal-head' },
     el('h2', { style:{ margin:0 }}, '🧩 Новая сборка вариантов'),
