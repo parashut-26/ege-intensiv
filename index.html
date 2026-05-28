@@ -2617,12 +2617,15 @@ const DAYS = [
     summary: 'Утренняя разминка готова к старту',
     tasks: [
       /* assembledSlug — slug сборки из Контент → Сборки. Если задан, кнопка
-         «Пройти» откроет именно её, а не полный тренажёр задания 4. Slug
-         можно скопировать из «🔗 Копировать» — часть URL после «?aid=». */
+         «Пройти» откроет именно её, а не полный тренажёр задания 4. */
       { id: 't1-1', kind: 'morning', title: 'Орфоэпическая разминка', est: '15 мин', maxBee: 10, time: 'утро',
         assembledSlug: 'orfoepiya-intensiv-BXXEJL' },
-      { id: 't1-2', kind: 'webinar', title: 'Вебинар: орфография + задания 4–6', est: '2–2.5 ч', maxBee: 5, time: '13:00' },
-      { id: 't1-3', kind: 'review',  title: 'Разбор варианта ЕГЭ', est: '1.5 ч', maxBee: 10, time: '18:00' },
+      /* url — постоянная Zoom-ссылка Ольги. Кнопка «🎥 Подключиться к Zoom»
+         одновременно отмечает посещение и открывает ссылку. */
+      { id: 't1-2', kind: 'webinar', title: 'Вебинар: орфография + задания 4–6', est: '2–2.5 ч', maxBee: 5, time: '13:00',
+        url: 'https://us06web.zoom.us/j/9163617412' },
+      { id: 't1-3', kind: 'review',  title: 'Разбор варианта ЕГЭ', est: '1.5 ч', maxBee: 10, time: '18:00',
+        url: 'https://us06web.zoom.us/j/9163617412' },
       { id: 't1-4', kind: 'essay',   title: 'Сочинение по тексту (задание 27)', est: 'до конца дня', maxBee: 22, time: 'вечер' },
     ] },
   { id: 'walk1', kind: 'walk', date: '30 мая', title: 'Прогулка с друзьями', subtitle: 'мотивация', emoji: '🌸' },
@@ -2632,15 +2635,19 @@ const DAYS = [
     summary: 'Ещё не открыт — ждите 2 июня',
     tasks: [
       { id: 't2-1', kind: 'morning', title: 'Разминка по паронимам', est: '15 мин', maxBee: 10, time: 'утро' },
-      { id: 't2-2', kind: 'webinar', title: 'Вебинар: пунктуация + задания 7–8', est: '2–2.5 ч', maxBee: 5, time: '13:00' },
-      { id: 't2-3', kind: 'review',  title: 'Разбор варианта ЕГЭ', est: '1.5 ч', maxBee: 10, time: '18:00' },
+      { id: 't2-2', kind: 'webinar', title: 'Вебинар: пунктуация + задания 7–8', est: '2–2.5 ч', maxBee: 5, time: '13:00',
+        url: 'https://us06web.zoom.us/j/9163617412' },
+      { id: 't2-3', kind: 'review',  title: 'Разбор варианта ЕГЭ', est: '1.5 ч', maxBee: 10, time: '18:00',
+        url: 'https://us06web.zoom.us/j/9163617412' },
     ] },
   { id: 3, kind: 'work', ord: '03', date: '3 июня', weekday: 'среда', title: 'Текст + разбор сочинений',
     summary: 'Финальный день — повторение текста и анализ сданных сочинений',
     tasks: [
       { id: 't3-1', kind: 'morning', title: 'Разминка по 21 заданию', est: '15 мин', maxBee: 10, time: 'утро' },
-      { id: 't3-2', kind: 'webinar', title: 'Маленький и большой текст', est: '2–2.5 ч', maxBee: 5, time: '11:00' },
-      { id: 't3-3', kind: 'review',  title: 'Разбор варианта ЕГЭ + сочинений', est: '1.5 ч', maxBee: 10, time: '15:00' },
+      { id: 't3-2', kind: 'webinar', title: 'Маленький и большой текст', est: '2–2.5 ч', maxBee: 5, time: '11:00',
+        url: 'https://us06web.zoom.us/j/9163617412' },
+      { id: 't3-3', kind: 'review',  title: 'Разбор варианта ЕГЭ + сочинений', est: '1.5 ч', maxBee: 10, time: '15:00',
+        url: 'https://us06web.zoom.us/j/9163617412' },
     ] },
   { id: 'exam', kind: 'exam', date: '4 июня', title: 'ЭКЗАМЕН', subtitle: 'вперёд!' },
 ];
@@ -9937,7 +9944,36 @@ function taskAction(t, locked){
       onclick: () => { STATE.essayDraftOpen = true; STATE.essayDraftText = ''; STATE.essayDraftPhotos = []; STATE.essayDraftMode = 'typed'; render(); }
     }, '✍️ Сдать');
   }
-  if(t.kind === 'webinar')
+  if(t.kind === 'webinar'){
+    /* Если у задачи задан url (Zoom-ссылка) — рисуем одну большую яркую
+       кнопку «🎥 Подключиться к Zoom», которая одновременно отмечает
+       посещение и открывает ссылку в новой вкладке. Это самый удобный
+       UX для ученика — один тап. Если url не задан — старая кнопка
+       «Я на уроке» (только отметка). */
+    if(t.url){
+      return el('button', { class:'btn btn-p btn-sm',
+        style:{ background:'#2563EB', color:'#fff', fontWeight:'700' },
+        onclick: async () => {
+          /* Сначала открываем Zoom — иначе всплывающее окно браузер заблокирует
+             как «не пользовательское действие» из-за await. */
+          try { window.open(t.url, '_blank', 'noopener'); }
+          catch(_){ location.href = t.url; }
+          /* Параллельно — отмечаем посещение */
+          if(!sb || !MY_PROFILE) return;
+          if(!CURRENT_ATTENDANCE_ID) return;
+          try {
+            const r = await markStudentAttendance(MY_PROFILE.id, CURRENT_ATTENDANCE_ID, 'self');
+            if(!r.alreadyMarked){
+              const w = WEBINARS.find(x => x.id === CURRENT_ATTENDANCE_ID);
+              const bee = w ? w.maxBee : 3;
+              if(MY_PROFILE) MY_PROFILE.bee = (MY_PROFILE.bee || 0) + bee;
+              showToast('🎥 Подключение · +' + bee + ' 🐝');
+            }
+            render();
+          } catch(e){ console.warn(e); }
+        }
+      }, '🎥 Подключиться к Zoom');
+    }
     return el('button', { class:'btn btn-secondary btn-sm',
       onclick: async () => {
         if(!sb || !MY_PROFILE){ showToast('Войдите через почту, чтобы отметка засчиталась'); return; }
@@ -9949,7 +9985,6 @@ function taskAction(t, locked){
           } else {
             const w = WEBINARS.find(x => x.id === CURRENT_ATTENDANCE_ID);
             const bee = w ? w.maxBee : 3;
-            /* Локально подкрутим показатели — без ожидания poll-тика */
             if(MY_PROFILE) MY_PROFILE.bee = (MY_PROFILE.bee || 0) + bee;
             showToast('🎙️ Засчитано · +' + bee + ' 🐝');
           }
@@ -9957,8 +9992,27 @@ function taskAction(t, locked){
         } catch(e){ showToast('⚠ ' + e.message); }
       }
     }, 'Я на уроке');
+  }
+  /* Кнопка для kind='review' — открывает прикреплённую ссылку (Zoom, запись).
+     Если url есть — синяя кнопка «🎥 Подключиться к Zoom». Иначе тост. */
+  if(t && t.url){
+    return el('button', { class:'btn btn-p btn-sm',
+      style:{ background:'#2563EB', color:'#fff', fontWeight:'700' },
+      onclick: () => {
+        try { window.open(t.url, '_blank', 'noopener'); }
+        catch(_){ location.href = t.url; }
+      }
+    }, '🎥 Подключиться к Zoom');
+  }
   return el('button', { class:'btn btn-secondary btn-sm',
-    onclick: () => showToast('Откроется страница разбора')
+    onclick: () => {
+      if(t && t.url){
+        try { window.open(t.url, '_blank', 'noopener'); }
+        catch(_){ location.href = t.url; }
+        return;
+      }
+      showToast('Ссылка ещё не привязана — учитель её скоро добавит');
+    }
   }, 'Смотреть');
 }
 
