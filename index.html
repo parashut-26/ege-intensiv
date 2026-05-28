@@ -10654,6 +10654,13 @@ function modalTest(taskN){
     bank = STATE.shuffledBank;
   } else {
     bank = bankFor(taskN);
+    /* Учительский режим «Все вопросы коллекции»: если задан testCollection
+       без shuffle/limit — фильтруем bank до этой коллекции. Нужно учителю,
+       чтобы открыть полный набор задач конкретной коллекции для проверки
+       (а не 20 случайных, как было раньше). Прецедент 28.05.2026. */
+    if(STATE.testCollection){
+      bank = bank.filter(q => (q.collection || q.src) === STATE.testCollection);
+    }
   }
   if(!bank) return null;
 
@@ -22244,8 +22251,21 @@ function modalEditTheory(n){
               el('div', { style:{ flex:1, minWidth:0 }},
                 el('div', { style:{ fontWeight:'700', fontSize:'13px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}, col.name),
                 el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }}, col.count + ' вопр.')),
-              /* Случайные 20 / Быстрые 10 / Все */
-              el('button', { class:'btn btn-p btn-sm', title:'Тренажёр случайных 20 слов из этой коллекции',
+              /* Все вопросы коллекции (учительский режим — полный набор для просмотра) */
+              el('button', { class:'btn btn-p btn-sm',
+                title:'Открыть тренажёр со ВСЕМИ вопросами этой коллекции (' + col.count + ' шт.)',
+                onclick: () => {
+                  STATE.contentEditTaskN = null;
+                  STATE.testOpen = n; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {};
+                  STATE.testShuffle = null; STATE.testLimit = null; STATE.shuffledBank = null;
+                  STATE.testCollection = col.name;
+                  STATE.theoryOpen = null;
+                  render();
+                }
+              }, '📋 Все ' + col.count),
+              /* Случайные 20 — оставлено как опция (можно для тренировки) */
+              el('button', { class:'btn btn-secondary btn-sm',
+                title:'Тренажёр случайных 20 вопросов из этой коллекции',
                 onclick: () => {
                   STATE.contentEditTaskN = null;
                   STATE.testOpen = n; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {};
@@ -22254,7 +22274,7 @@ function modalEditTheory(n){
                   STATE.theoryOpen = null;
                   render();
                 }
-              }, '🎯 20 случ.'),
+              }, '🎲 20 случ.'),
               col.name !== '— без коллекции —'
                 ? el('button', { class:'btn-icon', title:'Удалить всю коллекцию из банка',
                     style:{ color:'var(--red)' },
