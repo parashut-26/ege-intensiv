@@ -540,11 +540,12 @@ body.no-anim .fade-in{animation:none}
    автоматически переключается на альтернативу и повторяет.
    Так один ученик может работать через Cloudflare, другой через reg.ru,
    а учитель через прямой supabase.co — каждому что доехало. */
-const SUPABASE_PROXY_CANDIDATES = [
-  'https://api.zebrus.online',    /* Cloudflare Worker — быстрый, но у части РФ режут */
-  'https://api2.zebrus.online'    /* reg.ru PHP — медленный, но российский IP */
-];
 const SUPABASE_DIRECT_URL = 'https://hyczawwuehrqsqqosgub.supabase.co';
+const SUPABASE_PROXY_CANDIDATES = [
+  'https://api.zebrus.online',    /* Cloudflare Worker — быстрый, у части РФ режут */
+  'https://api2.zebrus.online',   /* reg.ru PHP — медленный, российский IP */
+  SUPABASE_DIRECT_URL             /* прямой supabase.co — для тех у кого прокси режут */
+];
 /* Прочитать кешированный выбор из localStorage (TTL 30 мин) — чтобы при
    перезагрузке страницы не пинговать заново. */
 function _readCachedProxy(){
@@ -1496,30 +1497,33 @@ async function authSendMagicLink(email){
 async function fetchWithRetry(url, opts, attempts){
   attempts = attempts || 3;
   let lastErr;
-  let triedSwitch = false;
   /* Определяем «суффикс» URL после прокси, чтобы при failover можно было
      собрать новый URL с новым SUPABASE_URL. */
   const proxyHit = SUPABASE_PROXY_CANDIDATES.find(p => url.indexOf(p) === 0);
   const suffix = proxyHit ? url.slice(proxyHit.length) : null;
+  /* Сколько раз можно переключаться внутри одного вызова — по одному на
+     каждого ОСТАВШЕГОСЯ кандидата. Так за один вход в систему мы пройдём
+     api → api2 → direct supabase.co, если первые два мёртвые. */
+  const switchesAllowed = suffix ? SUPABASE_PROXY_CANDIDATES.length - 1 : 0;
+  let switchesUsed = 0;
   for(let i = 1; i <= attempts; i++){
-    /* Если знаем, что это URL на прокси, всегда берём актуальный SUPABASE_URL */
     const currentUrl = suffix ? (SUPABASE_URL + suffix) : url;
     try {
       const resp = await Promise.race([
         fetch(currentUrl, opts),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 30000))
+        /* 8 секунд — типичный timeout сетевого отказа. 30 сек ждать
+           нельзя: ученик решит что зависло и закроет страницу. */
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
       ]);
-      /* 4xx/5xx — не ретраим: ошибка от сервера */
       return resp;
     } catch(e){
       lastErr = e;
-      /* Сетевой отказ И мы на прокси И ещё не переключались в этом вызове —
-         failover, повтор без бэкоффа. */
-      if(suffix && !triedSwitch && SUPABASE_PROXY_CANDIDATES.length > 1){
+      /* Сетевой отказ И есть куда переключиться → переключаемся, повтор без бэкоффа. */
+      if(suffix && switchesUsed < switchesAllowed){
         const switched = _switchToNextProxy();
         if(switched){
-          triedSwitch = true;
-          console.warn('fetch failover → ' + SUPABASE_URL + ', повторяю');
+          switchesUsed++;
+          console.warn('fetch failover → ' + SUPABASE_URL + ', повторяю (свич ' + switchesUsed + '/' + switchesAllowed + ')');
           continue;
         }
       }
@@ -1845,8 +1849,10 @@ async function restRequest(method, path, body, opts){
      opts.noRetry → 1 попытка без ретраев. */
   const noRetry = !!opts.noRetry;
   let lastErr;
-  let networkFailCount = 0;   /* подряд идущие сетевые отказы — триггер failover */
-  let triedSwitchOnce = false; /* в одном вызове переключаемся максимум один раз */
+  /* Максимум переключений = кол-во ОСТАЛЬНЫХ кандидатов: пройдём всех живых,
+     если первый мёртв. */
+  const switchesAllowed = SUPABASE_PROXY_CANDIDATES.length - 1;
+  let switchesUsed = 0;
   /* Бэкоффы по индексу попытки. Фактический максимум попыток =
      длине массива бэкоффов + 1 (последняя попытка без ожидания после). */
   const gatewayBackoffs  = [250, 500, 800, 1200]; // 5 попыток для 502/503/504
@@ -1860,7 +1866,9 @@ async function restRequest(method, path, body, opts){
     try {
       const resp = await Promise.race([
         fetch(currentUrl, { method, headers, body: body ? JSON.stringify(body) : undefined }),
-        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout REST ' + method)), 30000))
+        /* 8 сек timeout (а не 30) — на лежачем прокси быстрее переключимся.
+           Для тяжёлых аплоадов используется uploadToStorage с прямым URL. */
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout REST ' + method)), 8000))
       ]);
       if(!resp.ok){
         const txt = await resp.text();
@@ -1883,16 +1891,14 @@ async function restRequest(method, path, body, opts){
     } catch(e){
       lastErr = e;
       /* Сетевой отказ (timeout/Failed to fetch/CORS) — кандидат на failover.
-         Если у нас ещё есть второй прокси и мы на этом запросе не переключались —
-         переключаемся и повторяем без бэкоффа. Это самый быстрый путь
-         восстановить пользователя, у которого провайдер режет основной прокси. */
-      networkFailCount++;
-      if(!triedSwitchOnce && networkFailCount >= 1 && SUPABASE_PROXY_CANDIDATES.length > 1){
+         Переключаемся на следующий ОСТАВШИЙСЯ кандидат, повторяем без бэкоффа.
+         Так за один restRequest пройдём api → api2 → direct supabase.co. */
+      if(switchesUsed < switchesAllowed){
         const switched = _switchToNextProxy();
         if(switched){
-          triedSwitchOnce = true;
-          console.warn('[rest] переключила прокси после network-fail, повторяю');
-          continue;   /* без бэкоффа, идём сразу */
+          switchesUsed++;
+          console.warn('[rest] failover → ' + SUPABASE_URL + ' (свич ' + switchesUsed + '/' + switchesAllowed + ')');
+          continue;
         }
       }
     }
