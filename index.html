@@ -2626,7 +2626,11 @@ const DAYS = [
         url: 'https://us06web.zoom.us/j/9163617412' },
       { id: 't1-3', kind: 'review',  title: 'Разбор варианта ЕГЭ', est: '1.5 ч', maxBee: 10, time: '18:00',
         url: 'https://us06web.zoom.us/j/9163617412' },
-      { id: 't1-4', kind: 'essay',   title: 'Сочинение по тексту (задание 27)', est: 'до конца дня', maxBee: 22, time: 'вечер' },
+      /* essayVariantTitleMatch — подстрока названия опубликованного варианта.
+         Кнопка «✍️ Сдать» автоматически переключит форму на «Из вариантов
+         пробников» и выберет первый матч из STATE.variantsList. */
+      { id: 't1-4', kind: 'essay',   title: 'Сочинение по тексту (задание 27)', est: 'до конца дня', maxBee: 22, time: 'вечер',
+        essayVariantTitleMatch: 'Сказочник' },
     ] },
   { id: 'walk1', kind: 'walk', date: '30 мая', title: 'Прогулка с друзьями', subtitle: 'мотивация', emoji: '🌸' },
   { id: 'walk2', kind: 'walk', date: '31 мая', title: 'Воскресная мотивация', subtitle: 'самоподготовка',  emoji: '☀️' },
@@ -9953,6 +9957,36 @@ async function openAssembledBySlugForTask(slug){
   }
 }
 
+/* Поиск опубликованного варианта по подстроке в названии (case-insensitive)
+   и подстановка его в форму сдачи сочинения. Если список вариантов ещё не
+   загружен — сначала грузим. Используется кнопкой сочинения в DAYS,
+   когда у задачи задан t.essayVariantTitleMatch. */
+async function preselectEssayVariantByTitle(titleSubstring){
+  if(!titleSubstring) return;
+  const needle = titleSubstring.toLowerCase();
+  const findInList = () => {
+    const arr = (STATE.variantsList || []);
+    return arr.find(v => v && v.title && String(v.title).toLowerCase().includes(needle))
+        || null;
+  };
+  let match = findInList();
+  if(!match && !STATE.variantsListLoaded && typeof loadVariantsList === 'function'){
+    try { await loadVariantsList(); } catch(_){}
+    match = findInList();
+  }
+  if(!match){
+    showToast('⚠ Вариант «' + titleSubstring + '» не найден — выбери исходный текст вручную');
+    return;
+  }
+  STATE.essayDraftSourceMode = 'variant';
+  STATE.essayDraftSourceVariantId = match.id;
+  STATE.essayDraftSourcePreview = null;
+  if(typeof loadEssayVariantContext === 'function'){
+    loadEssayVariantContext(match.id).catch(()=>{});
+  }
+  render();
+}
+
 function taskAction(t, locked){
   if(locked) return chip('🔒 закрыто', 'grey');
   if(t.kind === 'morning')
@@ -9973,15 +10007,28 @@ function taskAction(t, locked){
   if(t.kind === 'essay'){
     const myId = MY_PROFILE && MY_PROFILE.id;
     const myEssay = myId ? DB_ESSAYS.find(x => x.studentId === myId) : null;
+    /* Если у задачи привязан вариант (essayVariantTitleMatch) — открываем форму
+       сразу с преселектом «Из вариантов пробников» и нужным вариантом.
+       Сделано после жалобы 29.05.2026: ученики не понимали, где взять
+       исходный текст «Сказочник», искали его руками во вкладке вариантов. */
+    const openEssayDraft = () => {
+      STATE.essayDraftOpen = true;
+      STATE.essayDraftText = '';
+      STATE.essayDraftPhotos = [];
+      STATE.essayDraftMode = 'typed';
+      if(t.essayVariantTitleMatch){
+        STATE.essayDraftSourceMode = 'variant';
+        STATE.essayDraftSourceVariantId = null;
+        STATE.essayDraftSourcePreview = null;
+        preselectEssayVariantByTitle(t.essayVariantTitleMatch);
+      }
+      render();
+    };
     /* Кнопка-пересдача — небольшая, рядом с основным статусом */
     const resubmitBtn = el('button', { class:'btn btn-secondary btn-sm', title:'Сдать ещё одну работу',
       onclick: ev => {
         ev.stopPropagation();
-        STATE.essayDraftOpen = true;
-        STATE.essayDraftText = '';
-        STATE.essayDraftPhotos = [];
-        STATE.essayDraftMode = 'typed';
-        render();
+        openEssayDraft();
       }
     }, '↻ Пересдать');
 
@@ -10013,7 +10060,7 @@ function taskAction(t, locked){
         primary, resubmitBtn);
     }
     return el('button', { class:'btn btn-p btn-sm',
-      onclick: () => { STATE.essayDraftOpen = true; STATE.essayDraftText = ''; STATE.essayDraftPhotos = []; STATE.essayDraftMode = 'typed'; render(); }
+      onclick: openEssayDraft
     }, '✍️ Сдать');
   }
   if(t.kind === 'webinar'){
