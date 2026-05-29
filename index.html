@@ -531,11 +531,15 @@ body.no-anim .fade-in{animation:none}
 /* =======================================================================
    ПОДКЛЮЧЕНИЕ К SUPABASE
    ======================================================================= */
-/* Используем api2.zebrus.online — PHP-прокси на российском reg.ru хостинге
-   (IP 31.31.197.47). Cloudflare Worker (api.zebrus.online) тоже работает,
-   но некоторые провайдеры РФ режут Cloudflare-IP, а российский хостинг — нет.
-   PHP-скрипт пробрасывает все запросы на hyczawwuehrqsqqosgub.supabase.co. */
-const SUPABASE_URL = 'https://api2.zebrus.online';
+/* 29.05.2026 EMERGENCY: api2.zebrus.online (PHP-прокси на reg.ru, IP 31.31.197.47)
+   лёг — все запросы ERR_TIMED_OUT, ни ученики ни учитель не могут войти.
+   Cloudflare Worker api.zebrus.online живой (отвечает «requested path is invalid»
+   на пустой путь). Перевожу платформу на него.
+   Минус: некоторые РФ-провайдеры режут Cloudflare-IP; для таких пользователей
+   нужен мобильный интернет/VPN. Но это лучше, чем полностью лежащая платформа.
+   Когда reg.ru вернётся — можно будет переключить обратно на api2. */
+const SUPABASE_URL = 'https://api.zebrus.online';
+const SUPABASE_BACKUP_URL = 'https://api2.zebrus.online'; /* reg.ru, временно отключён */
 const SUPABASE_DIRECT_URL = 'https://hyczawwuehrqsqqosgub.supabase.co';
 
 /* Подменяет прямой URL Supabase на наш прокси-домен. Нужно для отображения
