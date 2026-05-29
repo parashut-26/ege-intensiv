@@ -6171,11 +6171,11 @@ async function uploadMaterial(file, taskN, activityId){
   const folder = activityId ? 'act_' + activityId : ('task' + (taskN || 0));
   const path = folder + '/' + Date.now() + '_' +
                Math.random().toString(36).slice(2, 10) + '.' + ext;
-  const { error: upErr } = await sb.storage.from('materials').upload(path, file, {
-    cacheControl: '3600', upsert: false,
-    contentType: file.type || 'application/octet-stream'
-  });
-  if(upErr) throw new Error('Storage: ' + upErr.message);
+  /* Раньше: sb.storage.from('materials').upload(...) — это шло через прокси
+     reg.ru, где Storage стабильно ловит 400/502 (PHP-cURL баг). С 29.05.2026
+     используем uploadToStorage — он сначала пробует прямой supabase.co
+     (Storage в РФ не блокируется), и только при отказе валится в прокси. */
+  await uploadToStorage('materials', path, file, file.type || 'application/octet-stream');
   const inserted = await restRequest('POST', '/materials', {
     name: file.name,
     storage_path: path,
