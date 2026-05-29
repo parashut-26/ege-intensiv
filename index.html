@@ -554,7 +554,9 @@ function _readCachedProxy(){
     if(!raw) return null;
     const obj = JSON.parse(raw);
     if(!obj || !obj.url || !obj.ts) return null;
-    if(Date.now() - obj.ts > 30 * 60 * 1000) return null;
+    /* TTL 2 минуты — если ученик переключает VPN или ходит между Wi-Fi/мобилкой,
+       старый выбор может стать неактуальным. 30 минут было слишком долго. */
+    if(Date.now() - obj.ts > 2 * 60 * 1000) return null;
     if(SUPABASE_PROXY_CANDIDATES.indexOf(obj.url) < 0) return null;
     return obj.url;
   } catch(_){ return null; }
@@ -596,7 +598,12 @@ async function probeProxyCandidates(){
     .map((r, i) => r.status === 'fulfilled' ? r.value : { url: SUPABASE_PROXY_CANDIDATES[i], ok: false })
     .filter(x => x.ok);
   if(!alive.length){
-    console.warn('[proxy] ВСЕ кандидаты мёртвые, остаюсь на', SUPABASE_URL);
+    /* Если все три probe-запроса упали — это скорее всего проблема СЕТИ
+       клиента (VPN выключен/переключается, провайдер режет). Кэш стираем,
+       чтобы при следующей загрузке стартовать с дефолта, а не с кешированного
+       (возможно неверного) выбора. */
+    try { localStorage.removeItem('zebrus_proxy_choice'); } catch(_){}
+    console.warn('[proxy] ВСЕ кандидаты мёртвые, кэш сброшен. Текущий:', SUPABASE_URL);
     return;
   }
   /* Если текущий — среди живых, оставляем (не дёргаем sb). Иначе — переключаем. */
@@ -642,6 +649,54 @@ function _switchToNextProxy(){
   } catch(_){}
   return true;
 }
+
+/* Перезапуск пробы при возврате во вкладку. Прецедент 29.05.2026:
+   ученик включил VPN после того, как страница уже загрузилась — но probe
+   запускался только при boot, и в кэше оставался «битый» выбор. Теперь
+   на visibilitychange (возврат в активную вкладку) и focus делаем свежий
+   probe; если результат лучше — переключаемся без перезагрузки. */
+if(typeof document !== 'undefined' && typeof window !== 'undefined'){
+  let _lastReprobeTs = 0;
+  const _maybeReprobe = () => {
+    if(Date.now() - _lastReprobeTs < 30 * 1000) return; /* не чаще раза в 30 сек */
+    _lastReprobeTs = Date.now();
+    try { probeProxyCandidates(); } catch(_){}
+  };
+  document.addEventListener('visibilitychange', () => {
+    if(document.visibilityState === 'visible') _maybeReprobe();
+  });
+  window.addEventListener('focus', _maybeReprobe);
+  window.addEventListener('online', _maybeReprobe);
+}
+
+/* === Глобальный fetch-патч: вырезаем X-Supabase-Api-Version ===
+   Прецедент 29.05.2026: новый Supabase SDK добавляет в preflight заголовок
+   `x-supabase-api-version`, а Cloudflare Worker (api.zebrus.online) его не
+   разрешает в CORS — браузер режет все запросы к /auth/v1 на api.zebrus.online
+   с ошибкой «Request header field X-Supabase-Api-Version is not allowed by
+   Access-Control-Allow-Headers». Worker мы прямо сейчас не обновим. Простой
+   обход: монки-патч на fetch — удалить этот заголовок ДО отправки, тогда
+   preflight пройдёт стандартным набором. На прямом supabase.co заголовок
+   тоже не нужен (сервер сам версионирует через URL). */
+(function patchFetchForCors(){
+  if(typeof window === 'undefined' || !window.fetch) return;
+  const _origFetch = window.fetch;
+  window.fetch = function(input, init){
+    try {
+      if(init && init.headers){
+        if(init.headers instanceof Headers){
+          init.headers.delete('x-supabase-api-version');
+          init.headers.delete('X-Supabase-Api-Version');
+        } else if(typeof init.headers === 'object'){
+          delete init.headers['x-supabase-api-version'];
+          delete init.headers['X-Supabase-Api-Version'];
+        }
+      }
+    } catch(_){}
+    return _origFetch.apply(this, arguments);
+  };
+  console.log('[fetch] патч: вырезаю X-Supabase-Api-Version для CORS');
+})();
 
 /* Подменяет прямой URL Supabase на наш прокси-домен. Нужно для отображения
    старых ссылок (photo_urls, voice_url), сохранённых до перехода. */
