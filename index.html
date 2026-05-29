@@ -33810,8 +33810,35 @@ function viewTeacherDays(){
   /* Догружаем игры и привязки для блока «Игры дня» */
   if(!STATE.gamesList) loadGamesList().then(() => render());
 
+  /* Сворачивание дней у учителя — persist в localStorage отдельным ключом
+     (teacher-day-open), чтобы не пересекаться с состоянием ученика.
+     Дефолт: открыт только сегодняшний; прочие свёрнуты. Прецедент 29.05.2026
+     — учитель жалуется, что три простыни одновременно неудобно листать. */
+  if(!STATE.teacherDayOpen){
+    try {
+      STATE.teacherDayOpen = JSON.parse(localStorage.getItem('teacher-day-open') || '{}') || {};
+    } catch(_){ STATE.teacherDayOpen = {}; }
+  }
+  const persistTeacherOpen = () => {
+    try { localStorage.setItem('teacher-day-open', JSON.stringify(STATE.teacherDayOpen)); }
+    catch(_){}
+  };
+  const realToday = getRealTodayDay();
+
   DAYS.filter(d => d.kind === 'work').forEach(d => {
-    const det = el('details', { class:'card', open:true, style:{ marginBottom:'12px' }});
+    /* Дефолт для нового дня — открыт только сегодня. */
+    if(STATE.teacherDayOpen[d.id] == null){
+      STATE.teacherDayOpen[d.id] = !!(realToday && realToday.id === d.id);
+    }
+    const det = el('details', { class:'card', style:{ marginBottom:'12px' }});
+    if(STATE.teacherDayOpen[d.id]) det.setAttribute('open', 'open');
+    /* Сохраняем флаг при открытии/закрытии. Не вызываем render() — нативный
+       <details> сам перерисуется, а render бы лишний раз стирал состояние
+       редакторов постов. */
+    det.addEventListener('toggle', () => {
+      STATE.teacherDayOpen[d.id] = det.open;
+      persistTeacherOpen();
+    });
     det.append(
       el('summary', { style:{ cursor:'pointer', listStyle:'none', display:'flex', justifyContent:'space-between', alignItems:'center' }},
         el('div', null,
