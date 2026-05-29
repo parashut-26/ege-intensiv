@@ -28857,6 +28857,26 @@ async function ensureLiveAttempt(){
   if(STATE.solverPreview || STATE.solverTeacherEdit) return null;
   if(STATE.liveAttemptId) return STATE.liveAttemptId;
   if(!MY_PROFILE || !MY_PROFILE.id) return null;
+  /* === Защита от дублей попыток ===
+     Прецедент 29.05.2026: у Софии и Ульяны в варианте 37 две строки —
+     «сдал» (finished_at + полный набор ответов) И «решает сейчас» (пустой).
+     Причина: ученицы открыли уже сданный вариант повторно (посмотреть свой
+     результат / случайный клик по ссылке) → ensureLiveAttempt не нашёл live
+     в STATE.myVariantAttempts (поиск делается по !finished_at) и создал
+     новую запись. У учителя в Сводке Варианта она показывалась как «🔴 live»
+     второй строкой.
+     Решение: если у ученика для этого variant_id уже есть finished_at
+     И это НЕ явный retry (solverParentAttemptId пуст) — не создаём новую,
+     возвращаем null. Перерешать можно только через кнопку «Решить заново». */
+  if(!STATE.solverParentAttemptId && Array.isArray(STATE.myVariantAttempts)){
+    const alreadyFinished = STATE.myVariantAttempts.find(a =>
+      a && a.variant_id === STATE.solverVariantId && a.finished_at);
+    if(alreadyFinished){
+      console.log('[live] вариант', STATE.solverVariantId,
+        'уже сдан попыткой', alreadyFinished.id, '— новую не создаю');
+      return null;
+    }
+  }
   try {
     const att = await restRequest('POST', '/test_variant_attempts', {
       variant_id: STATE.solverVariantId,
