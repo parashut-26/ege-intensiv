@@ -531,16 +531,116 @@ body.no-anim .fade-in{animation:none}
 /* =======================================================================
    ПОДКЛЮЧЕНИЕ К SUPABASE
    ======================================================================= */
-/* 29.05.2026 EMERGENCY: api2.zebrus.online (PHP-прокси на reg.ru, IP 31.31.197.47)
-   лёг — все запросы ERR_TIMED_OUT, ни ученики ни учитель не могут войти.
-   Cloudflare Worker api.zebrus.online живой (отвечает «requested path is invalid»
-   на пустой путь). Перевожу платформу на него.
-   Минус: некоторые РФ-провайдеры режут Cloudflare-IP; для таких пользователей
-   нужен мобильный интернет/VPN. Но это лучше, чем полностью лежащая платформа.
-   Когда reg.ru вернётся — можно будет переключить обратно на api2. */
-const SUPABASE_URL = 'https://api.zebrus.online';
-const SUPABASE_BACKUP_URL = 'https://api2.zebrus.online'; /* reg.ru, временно отключён */
+/* 29.05.2026 EMERGENCY: динамический выбор прокси с авто-failover.
+   Утром api2.zebrus.online (reg.ru PHP) лёг под пиком — никто не вошёл.
+   Переключилась на api.zebrus.online (Cloudflare), но у части учеников
+   провайдер режет Cloudflare-IP — снова не входят без VPN.
+   Решение: клиент сам пробует ОБА прокси, ставит «живым» тот, который
+   ответил первым. На каждом fetch при network-fail (timeout/CORS/refused)
+   автоматически переключается на альтернативу и повторяет.
+   Так один ученик может работать через Cloudflare, другой через reg.ru,
+   а учитель через прямой supabase.co — каждому что доехало. */
+const SUPABASE_PROXY_CANDIDATES = [
+  'https://api.zebrus.online',    /* Cloudflare Worker — быстрый, но у части РФ режут */
+  'https://api2.zebrus.online'    /* reg.ru PHP — медленный, но российский IP */
+];
 const SUPABASE_DIRECT_URL = 'https://hyczawwuehrqsqqosgub.supabase.co';
+/* Прочитать кешированный выбор из localStorage (TTL 30 мин) — чтобы при
+   перезагрузке страницы не пинговать заново. */
+function _readCachedProxy(){
+  try {
+    const raw = localStorage.getItem('zebrus_proxy_choice');
+    if(!raw) return null;
+    const obj = JSON.parse(raw);
+    if(!obj || !obj.url || !obj.ts) return null;
+    if(Date.now() - obj.ts > 30 * 60 * 1000) return null;
+    if(SUPABASE_PROXY_CANDIDATES.indexOf(obj.url) < 0) return null;
+    return obj.url;
+  } catch(_){ return null; }
+}
+function _cacheProxy(url){
+  try { localStorage.setItem('zebrus_proxy_choice', JSON.stringify({ url, ts: Date.now() })); }
+  catch(_){}
+}
+/* SUPABASE_URL — let (а не const), потому что failover может поменять его
+   на следующий кандидат при первом сбое. Все вызовы (REST, Edge Functions,
+   imgThumb, proxifyUrl) читают этот let — переключение прозрачное. */
+let SUPABASE_URL = _readCachedProxy() || SUPABASE_PROXY_CANDIDATES[0];
+console.log('[proxy] стартую с', SUPABASE_URL,
+  _readCachedProxy() ? '(из кэша)' : '(дефолт)');
+
+/* Перебор кандидатов: ставит SUPABASE_URL на первого, кто ответит за 4 сек.
+   Запускается в фоне сразу после загрузки; если у текущего URL первый запрос
+   падает — функция уже подскочит к рабочему. */
+async function probeProxyCandidates(){
+  const probe = async (baseUrl) => {
+    try {
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 4000);
+      /* GET /rest/v1/ без apikey возвращает 401 — но соединение установлено,
+         значит endpoint живой. ERR_TIMED_OUT/ERR_NETWORK_CHANGED/CORS-блок дадут
+         throw из fetch, что и значит «мёртв для этого пользователя». */
+      const r = await fetch(baseUrl + '/rest/v1/', {
+        method: 'GET', signal: ctrl.signal, cache: 'no-store'
+      });
+      clearTimeout(tid);
+      /* Любой HTTP-ответ (даже 401/404) — значит сервер жив и провайдер пропускает. */
+      return { url: baseUrl, ok: r.status > 0 };
+    } catch(e){
+      return { url: baseUrl, ok: false, err: e.message };
+    }
+  };
+  const results = await Promise.allSettled(SUPABASE_PROXY_CANDIDATES.map(probe));
+  const alive = results
+    .map((r, i) => r.status === 'fulfilled' ? r.value : { url: SUPABASE_PROXY_CANDIDATES[i], ok: false })
+    .filter(x => x.ok);
+  if(!alive.length){
+    console.warn('[proxy] ВСЕ кандидаты мёртвые, остаюсь на', SUPABASE_URL);
+    return;
+  }
+  /* Если текущий — среди живых, оставляем (не дёргаем sb). Иначе — переключаем. */
+  const stillAlive = alive.find(x => x.url === SUPABASE_URL);
+  if(stillAlive){
+    console.log('[proxy] текущий', SUPABASE_URL, '— жив, остаюсь');
+    _cacheProxy(SUPABASE_URL);
+    return;
+  }
+  /* Берём первого живого из приоритетного списка */
+  const next = SUPABASE_PROXY_CANDIDATES.find(u => alive.some(a => a.url === u));
+  if(next && next !== SUPABASE_URL){
+    console.warn('[proxy] переключаюсь', SUPABASE_URL, '→', next);
+    SUPABASE_URL = next;
+    _cacheProxy(next);
+    /* Пересоздаём supabase-клиент — старый прибит к старому URL.
+       Делаем это безопасно: если sb ещё не создан, ничего не трогаем. */
+    try {
+      if(typeof window !== 'undefined' && window.supabase && window.supabase.createClient){
+        sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+          auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+        });
+        console.log('[proxy] sb пересоздан на', SUPABASE_URL);
+      }
+    } catch(e){ console.warn('[proxy] не смог пересоздать sb:', e.message); }
+  }
+}
+/* Переключение «текущего прокси» вручную — используется в restRequest и
+   обёртках Edge Functions при подряд идущих сетевых ошибках. */
+function _switchToNextProxy(){
+  const idx = SUPABASE_PROXY_CANDIDATES.indexOf(SUPABASE_URL);
+  const next = SUPABASE_PROXY_CANDIDATES[(idx + 1) % SUPABASE_PROXY_CANDIDATES.length];
+  if(next === SUPABASE_URL) return false;
+  console.warn('[proxy] failover', SUPABASE_URL, '→', next);
+  SUPABASE_URL = next;
+  _cacheProxy(next);
+  try {
+    if(window.supabase && window.supabase.createClient){
+      sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
+      });
+    }
+  } catch(_){}
+  return true;
+}
 
 /* Подменяет прямой URL Supabase на наш прокси-домен. Нужно для отображения
    старых ссылок (photo_urls, voice_url), сохранённых до перехода. */
@@ -558,7 +658,13 @@ try {
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
       auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true }
     });
-    console.log('✓ Supabase подключён');
+    console.log('✓ Supabase подключён через', SUPABASE_URL);
+    /* Параллельно пингуем все известные прокси и, если текущий выбор плохой,
+       автоматически переключаемся. Запускаем в фоне — не блокируем UI.
+       Если кешированный выбор живой — функция оставит его. */
+    setTimeout(() => {
+      try { probeProxyCandidates(); } catch(e){ console.warn('proxy probe failed:', e.message); }
+    }, 0);
   } else {
     console.warn('Supabase SDK не загрузился — работаем в демо-режиме');
   }
@@ -1381,22 +1487,44 @@ async function authSendMagicLink(email){
 }
 
 /* === Вход по 6-значному коду через Edge Functions (обход блокировки /auth/v1 в РФ) === */
-/* Fetch с таймаутом 30 сек и до 2 автоповторов на сетевых ошибках */
+/* Fetch с таймаутом 30 сек, автоповторами и АВТО-FAILOVER между прокси.
+   29.05.2026: если url начинается с одного из SUPABASE_PROXY_CANDIDATES, при
+   сетевом отказе автоматически переключаемся на другого кандидата (через
+   _switchToNextProxy) и пересобираем URL. Это критично для входа: для
+   половины учеников лежит api2 (reg.ru), для другой половины режется
+   api.zebrus.online (Cloudflare). */
 async function fetchWithRetry(url, opts, attempts){
   attempts = attempts || 3;
   let lastErr;
+  let triedSwitch = false;
+  /* Определяем «суффикс» URL после прокси, чтобы при failover можно было
+     собрать новый URL с новым SUPABASE_URL. */
+  const proxyHit = SUPABASE_PROXY_CANDIDATES.find(p => url.indexOf(p) === 0);
+  const suffix = proxyHit ? url.slice(proxyHit.length) : null;
   for(let i = 1; i <= attempts; i++){
+    /* Если знаем, что это URL на прокси, всегда берём актуальный SUPABASE_URL */
+    const currentUrl = suffix ? (SUPABASE_URL + suffix) : url;
     try {
       const resp = await Promise.race([
-        fetch(url, opts),
+        fetch(currentUrl, opts),
         new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 30000))
       ]);
       /* 4xx/5xx — не ретраим: ошибка от сервера */
       return resp;
     } catch(e){
       lastErr = e;
+      /* Сетевой отказ И мы на прокси И ещё не переключались в этом вызове —
+         failover, повтор без бэкоффа. */
+      if(suffix && !triedSwitch && SUPABASE_PROXY_CANDIDATES.length > 1){
+        const switched = _switchToNextProxy();
+        if(switched){
+          triedSwitch = true;
+          console.warn('fetch failover → ' + SUPABASE_URL + ', повторяю');
+          continue;
+        }
+      }
       if(i < attempts){
-        console.warn('fetch ' + url + ' попытка ' + i + ' упала: ' + e.message + ' — повторяем');
+        console.warn('fetch ' + currentUrl + ' попытка ' + i + ' упала: ' + e.message + ' — повторяем');
         await new Promise(r => setTimeout(r, 1000 * i));
       }
     }
@@ -1717,6 +1845,8 @@ async function restRequest(method, path, body, opts){
      opts.noRetry → 1 попытка без ретраев. */
   const noRetry = !!opts.noRetry;
   let lastErr;
+  let networkFailCount = 0;   /* подряд идущие сетевые отказы — триггер failover */
+  let triedSwitchOnce = false; /* в одном вызове переключаемся максимум один раз */
   /* Бэкоффы по индексу попытки. Фактический максимум попыток =
      длине массива бэкоффов + 1 (последняя попытка без ожидания после). */
   const gatewayBackoffs  = [250, 500, 800, 1200]; // 5 попыток для 502/503/504
@@ -1724,9 +1854,12 @@ async function restRequest(method, path, body, opts){
 
   for(let attempt = 1; ; attempt++){
     let isGatewayError = false;
+    /* URL пересчитываем на КАЖДОЙ итерации — _switchToNextProxy мог
+       поменять SUPABASE_URL после прошлой попытки. */
+    const currentUrl = SUPABASE_URL + '/rest/v1' + path;
     try {
       const resp = await Promise.race([
-        fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined }),
+        fetch(currentUrl, { method, headers, body: body ? JSON.stringify(body) : undefined }),
         new Promise((_, rej) => setTimeout(() => rej(new Error('timeout REST ' + method)), 30000))
       ]);
       if(!resp.ok){
@@ -1749,6 +1882,19 @@ async function restRequest(method, path, body, opts){
       }
     } catch(e){
       lastErr = e;
+      /* Сетевой отказ (timeout/Failed to fetch/CORS) — кандидат на failover.
+         Если у нас ещё есть второй прокси и мы на этом запросе не переключались —
+         переключаемся и повторяем без бэкоффа. Это самый быстрый путь
+         восстановить пользователя, у которого провайдер режет основной прокси. */
+      networkFailCount++;
+      if(!triedSwitchOnce && networkFailCount >= 1 && SUPABASE_PROXY_CANDIDATES.length > 1){
+        const switched = _switchToNextProxy();
+        if(switched){
+          triedSwitchOnce = true;
+          console.warn('[rest] переключила прокси после network-fail, повторяю');
+          continue;   /* без бэкоффа, идём сразу */
+        }
+      }
     }
 
     if(noRetry) throw lastErr;
