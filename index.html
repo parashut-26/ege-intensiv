@@ -542,9 +542,12 @@ body.no-anim .fade-in{animation:none}
    а учитель через прямой supabase.co — каждому что доехало. */
 const SUPABASE_DIRECT_URL = 'https://hyczawwuehrqsqqosgub.supabase.co';
 const SUPABASE_PROXY_CANDIDATES = [
+  /* 30.05.2026 — api3 первым: TimeWeb VPS Ольги (nginx). Свежий IP, не атакован,
+     не в блок-листах, 2 CPU/2 GB, держит 100+ одновременных соединений. */
+  'https://api3.zebrus.online',
   'https://api.zebrus.online',    /* Cloudflare Worker — быстрый, у части РФ режут */
-  'https://api2.zebrus.online',   /* reg.ru PHP — медленный, российский IP */
-  SUPABASE_DIRECT_URL             /* прямой supabase.co — для тех у кого прокси режут */
+  'https://api2.zebrus.online',   /* reg.ru c защищённым IP 95.163.224.26 (DDoS-фильтр) */
+  SUPABASE_DIRECT_URL             /* прямой supabase.co — последний резерв */
 ];
 /* Прочитать кешированный выбор из localStorage (TTL 30 мин) — чтобы при
    перезагрузке страницы не пинговать заново. */
