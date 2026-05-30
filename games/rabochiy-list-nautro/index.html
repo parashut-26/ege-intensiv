@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Рабочий лист. НАУТРО и НА УТРО</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root{
+    --blue-lightest: #e3f2fd;
+    --blue-light: #bbdefb;
+    --blue: #5a9bd5;
+    --blue-deep: #1e5a8e;
+    --blue-text: #0d3b66;
+    --gold: #ffc107;
+    --gold-light: #fff8e1;
+    --cream: #f5fbff;
+    --mint: #c8e6c9;
+    --green: #43a047;
+    --green-soft: #e8f5e9;
+    --red: #e53935;
+    --red-soft: #ffebee;
+    --text: #1a3a52;
+    --text-soft: #4a6b85;
+    --shadow: 0 8px 24px rgba(30, 90, 142, 0.15);
+  }
+  html, body{ height: 100%; }
+  body{
+    font-family: -apple-system, "Segoe UI", "Nunito", "Comfortaa", system-ui, sans-serif;
+    background: linear-gradient(180deg, #f0f8ff 0%, #d6eaf8 50%, #aed6f1 100%);
+    color: var(--text);
+    line-height: 1.55;
+    min-height: 100vh;
+    overflow-x: hidden;
+    position: relative;
+  }
+  /* Незабудки */
+  .forget-me-nots{ position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+  .flower{ position: absolute; width: 22px; height: 22px; animation: float linear infinite; opacity: 0.65; }
+  .flower svg{ width: 100%; height: 100%; display: block; }
+  @keyframes float{
+    0%{ transform: translateY(-10vh) rotate(0deg); }
+    100%{ transform: translateY(110vh) rotate(360deg); }
+  }
+  .container{
+    position: relative; z-index: 1;
+    max-width: 740px; margin: 0 auto; padding: 20px 16px 56px;
+  }
+  /* Шапка / прогресс */
+  .topbar{
+    position: sticky; top: 10px; z-index: 20;
+    background: rgba(255,255,255,0.94);
+    backdrop-filter: blur(6px);
+    border-radius: 16px; padding: 12px 18px;
+    box-shadow: var(--shadow);
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 700; color: var(--text-soft);
+    margin-bottom: 22px; gap: 12px;
+  }
+  .topbar .track{ flex: 1; height: 6px; background: var(--blue-light); border-radius: 3px; overflow: hidden; }
+  .topbar .fill{ height: 100%; background: linear-gradient(90deg, var(--blue), var(--gold)); border-radius: 3px; transition: width .4s ease; width: 0%; }
+  .topbar .score{ white-space: nowrap; color: var(--blue-deep); }
+
+  .card{
+    background: white; border-radius: 24px; padding: 26px 22px;
+    box-shadow: var(--shadow); margin-bottom: 22px;
+    animation: rise .5s ease both;
+  }
+  @keyframes rise{ from{ opacity:0; transform: translateY(20px);} to{ opacity:1; transform: translateY(0);} }
+
+  /* Старт */
+  .start{ text-align: center; }
+  .start .emoji{ font-size: 46px; display:block; margin: 2px 0 12px; }
+  .start h1{ font-size: 26px; color: var(--blue-deep); font-weight: 800; margin-bottom: 6px; }
+  .start .sub{ color: var(--text-soft); font-size: 16px; margin-bottom: 18px; }
+  .rule{
+    background: var(--gold-light); border-radius: 16px; padding: 18px 18px;
+    text-align: left; font-size: 15px; color: var(--text); margin-bottom: 18px;
+  }
+  .rule h3{ color: var(--blue-deep); font-size: 16px; margin-bottom: 8px; }
+  .rule p{ margin: 8px 0; }
+  .rule .ex{ color: var(--text-soft); font-style: italic; }
+  .rule .tip{ background: #fff; border-left: 4px solid var(--gold); padding: 10px 12px; border-radius: 8px; margin-top: 10px; }
+  .word{ font-weight: 800; color: var(--blue-deep); }
+  input[type="text"]{
+    width: 100%; padding: 13px 15px; border: 2px solid var(--blue-light);
+    border-radius: 14px; font-size: 16px; font-family: inherit; background: white; color: var(--text);
+  }
+  input[type="text"]:focus{ outline: none; border-color: var(--blue); }
+
+  .btn{
+    background: linear-gradient(135deg, var(--blue), var(--blue-deep));
+    color: white; border: none; border-radius: 14px; padding: 13px 22px;
+    font-size: 16px; font-weight: 700; font-family: inherit; cursor: pointer;
+    box-shadow: 0 4px 14px rgba(30,90,142,.3); transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .btn:hover{ transform: translateY(-2px); box-shadow: 0 6px 18px rgba(30,90,142,.4); }
+  .btn:active{ transform: translateY(0); }
+  .btn-ghost{ background: white; color: var(--blue-deep); border: 2px solid var(--blue-light); box-shadow: none; }
+  .btn-wide{ width: 100%; margin-top: 6px; }
+
+  /* Заголовок упражнения */
+  .ex-head{ display:flex; align-items:flex-start; gap:10px; margin-bottom: 6px; }
+  .ex-num{
+    flex: 0 0 auto; width: 30px; height: 30px; border-radius: 9px;
+    background: var(--blue-deep); color: white; font-weight: 800; font-size: 15px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ex-title{ font-size: 17px; font-weight: 800; color: var(--blue-deep); }
+  .ex-hint{ color: var(--text-soft); font-size: 14px; margin: 4px 0 14px; }
+
+  /* Пункты-строки */
+  .item{ border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; background: var(--cream); border: 2px solid transparent; transition: background .2s, border-color .2s; }
+  .item .q{ margin-bottom: 8px; }
+  .item .qn{ color: var(--blue); font-weight: 800; margin-right: 4px; }
+  .item.correct{ background: var(--green-soft); border-color: var(--mint); }
+  .item.wrong{ background: var(--red-soft); border-color: #ffcdd2; }
+
+  .choices{ display: flex; flex-wrap: wrap; gap: 8px; }
+  .choice{
+    border: 2px solid var(--blue-light); background: white; color: var(--text);
+    border-radius: 11px; padding: 8px 14px; font-size: 15px; font-weight: 600; cursor: pointer;
+    font-family: inherit; transition: all .15s ease;
+  }
+  .choice:hover{ border-color: var(--blue); }
+  .choice.sel{ background: var(--blue); color: white; border-color: var(--blue); }
+  .choice.ok{ background: var(--green); color: white; border-color: var(--green); }
+  .choice.bad{ background: var(--red); color: white; border-color: var(--red); }
+  .choice:disabled{ cursor: default; opacity: 1; }
+
+  /* Упр.3 — фишки-определения и пропуски */
+  .chips-pool{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; padding:12px; background:var(--gold-light); border-radius:14px; }
+  .chip{
+    border:2px solid var(--gold); background:#fff; color:var(--blue-deep);
+    border-radius:11px; padding:7px 14px; font-size:15px; font-weight:700; cursor:pointer; font-family:inherit;
+    transition: all .15s ease;
+  }
+  .chip:hover{ transform: translateY(-1px); }
+  .chip.sel{ background:var(--gold); color:#5a4500; box-shadow:0 0 0 3px rgba(255,193,7,.35); }
+  .chip.used{ opacity:.35; text-decoration: line-through; cursor:default; pointer-events:none; }
+  .chip:disabled{ cursor:default; }
+  .ex3-item .q{ line-height: 2; }
+  .slot{
+    display:inline-block; min-width:84px; text-align:center;
+    border:2px dashed var(--blue); border-radius:9px; padding:2px 10px; margin:0 2px;
+    background:#fff; color:var(--blue-deep); font-weight:700; cursor:pointer; transition: all .15s ease;
+  }
+  .slot:hover{ background:var(--blue-lightest); }
+  .slot.filled{ border-style:solid; background:var(--blue-lightest); }
+  .fix-row{ display:none; margin-top: 8px; }
+  .fix-row.show{ display:block; }
+  .fix-row label{ font-size: 13px; color: var(--text-soft); display:block; margin-bottom: 4px; }
+
+  .feedback{ display:none; margin-top: 8px; font-size: 14px; padding: 8px 10px; border-radius: 9px; }
+  .feedback.show{ display:block; }
+  .feedback.good{ background: var(--green-soft); color: #2e7d32; }
+  .feedback.bad{ background: var(--red-soft); color: #c62828; }
+
+  .check-btn{ margin-top: 6px; }
+
+  /* Открытые задания (1, 6) */
+  textarea{
+    width: 100%; min-height: 80px; padding: 12px 14px; border: 2px solid var(--blue-light);
+    border-radius: 12px; font-size: 15px; font-family: inherit; resize: vertical; color: var(--text);
+  }
+  textarea:focus{ outline:none; border-color: var(--blue); }
+  .reveal{
+    display: none; margin-top: 12px; background: var(--gold-light); border-radius: 12px; padding: 12px 14px; font-size: 14px;
+  }
+  .reveal.show{ display:block; }
+  .reveal b{ color: var(--blue-deep); }
+
+  .hidden{ display:none !important; }
+
+  /* Финал */
+  .final{ text-align:center; }
+  .final .big{ font-size: 64px; font-weight: 800; color: var(--blue-deep); margin: 6px 0; }
+  .final .pct{ font-size: 30px; font-weight: 800; margin-bottom: 8px; }
+  .final .msg{ color: var(--text-soft); font-size: 16px; margin-bottom: 18px; }
+  .final-actions{ display:flex; flex-direction: column; gap: 10px; margin-top: 16px; }
+  .errors-box{ text-align:left; background: var(--cream); border-radius: 14px; padding: 14px; margin-top: 14px; }
+  .errors-box .t{ font-weight: 800; color: var(--blue-deep); margin-bottom: 8px; }
+  .errors-box .e{ font-size: 14px; padding: 7px 0; border-bottom: 1px dashed var(--blue-light); }
+  .errors-box .e:last-child{ border-bottom: none; }
+  .saved-note{ background: var(--blue-light); padding: 13px; border-radius: 13px; color: var(--blue-deep); font-size: 14px; margin-top: 16px; }
+</style>
+</head>
+<body>
+<div class="forget-me-nots" id="flowers"></div>
+<div class="container">
+
+  <!-- ПРОГРЕСС -->
+  <div class="topbar hidden" id="topbar">
+    <span id="topLabel">Рабочий лист</span>
+    <div class="track"><div class="fill" id="topFill"></div></div>
+    <span class="score" id="topScore">0 / 27</span>
+  </div>
+
+  <!-- СТАРТ -->
+  <div class="card start" id="screenStart">
+    <span class="emoji">🌼</span>
+    <h1>НАУТРО и НА УТРО</h1>
+    <div class="sub">Интерактивный рабочий лист · слитное и раздельное написание</div>
+
+    <div class="rule">
+      <h3>Как различать</h3>
+      <p><span class="word">НАУТРО</span> — наречие со значением «на следующее утро / поутру». Отвечает на вопрос <b>когда?</b> Между <i>на</i> и <i>утро</i> нельзя вставить слово. Легко заменяется словом <b>утром</b>.<br>
+      <span class="ex">Наутро выпал первый снег. → Утром выпал первый снег.</span></p>
+      <p><span class="word">НА УТРО</span> — предлог <i>на</i> + существительное <i>утро</i>. Отвечает на вопрос <b>на что? на какое время?</b> Между предлогом и словом можно вставить определение (<i>на раннее утро</i>), а у существительного может быть зависимое слово (<i>на утро понедельника</i>).<br>
+      <span class="ex">Отъезд перенесли на утро.</span></p>
+      <div class="tip">🔑 <b>Два приёма проверки:</b><br>1. Попробуйте вставить определение. Получается («на тёплое утро») → <b>раздельно</b>. Не получается, а смысл «на следующий день» → <b>слитно</b>.<br>2. Замените на <b>утром</b>. Получается («утром выпал снег») → наречие, <b>слитно</b>.</div>
+    </div>
+
+    <input type="text" id="userName" placeholder="Как тебя зовут?" autocomplete="off">
+    <button class="btn btn-wide" id="startBtn" onclick="startSheet()">Начать рабочий лист →</button>
+  </div>
+
+  <!-- РАБОЧИЙ ЛИСТ -->
+  <div id="screenSheet" class="hidden"></div>
+
+  <!-- ФИНАЛ -->
+  <div class="card final hidden" id="screenFinal"></div>
+
+</div>
+
+<script>
+const urlParams = new URLSearchParams(window.location.search);
+const isEmbed = urlParams.get('mode') === 'embed';
+const embedName = urlParams.get('name') || '';
+
+const MAX_SCORE = 27;
+const state = { name: '', score: 0, startTime: 0, items: {}, wrong: [] };
+
+/* ---------- Незабудки ---------- */
+function flowerSVG(){
+  return `<svg viewBox="0 0 24 24"><g>
+    <circle cx="12" cy="5" r="3.2" fill="#90caf9"/>
+    <circle cx="19" cy="12" r="3.2" fill="#64b5f6"/>
+    <circle cx="12" cy="19" r="3.2" fill="#90caf9"/>
+    <circle cx="5" cy="12" r="3.2" fill="#64b5f6"/>
+    <circle cx="12" cy="12" r="2.6" fill="#ffc107"/></g></svg>`;
+}
+(function spawnFlowers(){
+  const box = document.getElementById('flowers');
+  for(let i=0;i<14;i++){
+    const f = document.createElement('div');
+    f.className = 'flower';
+    f.style.left = (Math.random()*100) + 'vw';
+    f.style.animationDuration = (14 + Math.random()*14) + 's';
+    f.style.animationDelay = (-Math.random()*20) + 's';
+    const s = 14 + Math.random()*16;
+    f.style.width = s + 'px'; f.style.height = s + 'px';
+    f.innerHTML = flowerSVG();
+    box.appendChild(f);
+  }
+})();
+
+/* ---------- Данные упражнений ---------- */
+// Тип choice2: один пункт = вопрос + два варианта; correct = индекс верного.
+// id уникален для подсчёта прогресса.
+
+const EX2 = {  // Раскройте скобки: слитно / раздельно
+  options: ['наутро (слитно)', 'на утро (раздельно)'],
+  items: [
+    { id:'e2_1', q:'(На)утро отряд снялся с привала.', c:0, why:'когда? = утром' },
+    { id:'e2_2', q:'(На)утро ударил первый мороз.', c:0, why:'когда? = утром' },
+    { id:'e2_3', q:'Все хлопоты пришлось отложить (на)утро.', c:1 },
+    { id:'e2_4', q:'(На)утро о ссоре никто и не вспоминал.', c:0, why:'когда? = утром' },
+    { id:'e2_5', q:'Экзамен назначен (на)утро понедельника.', c:1, why:'есть зависимое слово «понедельника»' },
+    { id:'e2_6', q:'Трудный участок пути лучше планировать (на)утро.', c:1 },
+    { id:'e2_7', q:'Поговорим об этом (на)утро, на свежую голову.', c:0, why:'когда? = утром' },
+    { id:'e2_8', q:'Я рассчитывал (на)утро, но выехали только к обеду.', c:1, why:'рассчитывал на что? — на утро, предлог + существительное' },
+  ]
+};
+
+const EX3 = {  // Перетащи определение в предложение, куда его можно вставить
+  chips: ['раннее', 'следующее', 'тёплое'], // один лишний — не все нужны
+  items: [
+    // accept:true  → определение вставляется → раздельно
+    // accept:false → определение вставить нельзя → слитно (= утром)
+    { id:'e3_1', before:'Экскурсию перенесли ', after:'.', cap:false, accept:true,  why:'«на раннее утро» — определение вставляется → раздельно' },
+    { id:'e3_2', before:'', after:' дорога подсохла.',          cap:true,  accept:false, why:'= утром, определение не вставить → слитно' },
+    { id:'e3_3', before:'', after:' мы были уже далеко от города.', cap:true, accept:false, why:'= утром, определение не вставить → слитно' },
+    { id:'e3_4', before:'Встречу назначили ', after:'.', cap:false, accept:true,  why:'«на следующее утро» — определение вставляется → раздельно' },
+  ]
+};
+
+const EX4 = {  // Распределение по колонкам
+  options: ['НАУТРО (наречие)', 'НА УТРО (предлог + сущ.)'],
+  items: [
+    { id:'e4_1', q:'(На)утро решение пришло само собой.', c:0, why:'когда? = утром → наречие' },
+    { id:'e4_2', q:'(На)утро лес стоял в инее.', c:0, why:'когда? = утром → наречие' },
+    { id:'e4_3', q:'Поход назначен (на)утро субботы.', c:1, why:'зависимое слово «субботы» → предлог + сущ.' },
+    { id:'e4_4', q:'(На)утро от лужи не осталось и следа.', c:0, why:'когда? = утром → наречие' },
+    { id:'e4_5', q:'Сложный разговор отложили (на)утро.', c:1, why:'отложили на что? на какое время? → предлог + сущ.' },
+    { id:'e4_6', q:'Я не строил планов (на)утро.', c:1, why:'планов на что? → предлог + сущ.' },
+  ]
+};
+
+const EX5 = {  // Найдите ошибки
+  options: ['есть ошибка', 'написано верно'],
+  items: [
+    { id:'e5_1', q:'На утро от грозы не осталось и следа.', c:0, fix:'наутро', why:'когда? = утром → наутро' },
+    { id:'e5_2', q:'Заседание перенесли наутро среды.', c:0, fix:'на утро', why:'есть зависимое слово «среды» → на утро' },
+    { id:'e5_3', q:'Наутро путники тронулись в путь.', c:1, why:'когда? = утром → слитно, верно' },
+    { id:'e5_4', q:'Я возлагал большие надежды наутро.', c:0, fix:'на утро', why:'надежды на что? → на утро' },
+    { id:'e5_5', q:'Наутро снег растаял.', c:1, why:'когда? = утром → слитно, верно' },
+  ]
+};
+
+const EX7 = {  // Мини-диктант
+  options: ['наутро (слитно)', 'на утро (раздельно)'],
+  items: [
+    { id:'e7_1', q:'Вечером договорились о походе и назначили выход (на)утро.', c:1, why:'назначили на какое время? → раздельно' },
+    { id:'e7_2', q:'Спать легли рано. (На)утро небо было ясным.', c:0, why:'когда? = утром → слитно' },
+    { id:'e7_3', q:'(На)утро усталость прошла без следа.', c:0, why:'когда? = утром → слитно' },
+    { id:'e7_4', q:'Все дела мы отложили (на)утро следующего дня…', c:1, why:'зависимое слово «следующего дня» → раздельно' },
+  ]
+};
+
+const ALL_GROUPS = [EX2, EX4, EX5, EX7]; // EX3 — отдельный drag-формат
+
+/* ---------- Старт ---------- */
+if(isEmbed && embedName){
+  document.getElementById('userName').value = embedName;
+  document.getElementById('userName').parentElement.querySelector('#userName').style.display = 'none';
+}
+
+function startSheet(){
+  const nameInput = document.getElementById('userName');
+  const name = (embedName || nameInput.value || '').trim();
+  if(!isEmbed && !name){ nameInput.focus(); nameInput.style.borderColor = 'var(--red)'; return; }
+  state.name = name || 'Гость';
+  state.startTime = Date.now();
+  document.getElementById('screenStart').classList.add('hidden');
+  document.getElementById('topbar').classList.remove('hidden');
+  renderSheet();
+  updateProgress();
+}
+
+/* ---------- Рендер листа ---------- */
+function esc(s){ return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function choiceBlock(group, gid){
+  let h = '';
+  group.items.forEach(it => {
+    state.items[it.id] = { answered:false, correct:false, group };
+    h += `<div class="item" id="item_${it.id}">
+      <div class="q"><span class="qn">${group.items.indexOf(it)+1})</span>${esc(it.q)}</div>
+      <div class="choices">
+        ${group.options.map((opt,oi)=>`<button class="choice" data-id="${it.id}" data-oi="${oi}" onclick="pick('${it.id}',${oi})">${esc(opt)}</button>`).join('')}
+      </div>
+      <div class="feedback" id="fb_${it.id}"></div>
+    </div>`;
+  });
+  return h;
+}
+
+function renderSheet(){
+  const root = document.getElementById('screenSheet');
+  let h = '';
+
+  // Упр 1 — сравнение (открытое, без баллов)
+  h += `<div class="card">
+    <div class="ex-head"><div class="ex-num">1</div><div class="ex-title">Сравните и объясните</div></div>
+    <div class="ex-hint">Прочитайте пары. К какому слову можно задать вопрос <b>когда?</b>, а к какому — <b>на что?</b></div>
+    <div class="item"><b>Наутро</b> буря стихла. — Собрание назначили <b>на утро</b>.</div>
+    <div class="item"><b>Наутро</b> он обо всём забыл. — Все надежды я возлагал <b>на утро</b>.</div>
+    <textarea id="ans1" placeholder="Запиши свои рассуждения…"></textarea>
+    <button class="btn btn-ghost btn-wide check-btn" onclick="revealBox('rv1')">Показать подсказку</button>
+    <div class="reveal" id="rv1"><b>Наутро</b> (= на следующее утро) — наречие, вопрос <b>когда?</b> <b>На утро</b> — предлог + существительное, вопрос <b>на что? / на какое время?</b> (можно вставить определение и подставить зависимое слово).</div>
+  </div>`;
+
+  // Упр 2
+  h += `<div class="card">
+    <div class="ex-head"><div class="ex-num">2</div><div class="ex-title">Раскройте скобки</div></div>
+    <div class="ex-hint">Выберите слитное или раздельное написание.</div>
+    ${choiceBlock(EX2)}
+  </div>`;
+
+  // Упр 3 — перетащи определение в предложение
+  h += `<div class="card">
+    <div class="ex-head"><div class="ex-num">3</div><div class="ex-title">В какое предложение можно вставить определение?</div></div>
+    <div class="ex-hint">Нажмите на определение, затем на пропуск в предложении, куда его можно вставить (тогда пишем <b>раздельно</b>). Если определение вставить нельзя — оставьте пропуск пустым: пишем <b>слитно</b>. Одно определение лишнее.</div>
+    ${ex3Block()}
+  </div>`;
+
+  // Упр 4
+  h += `<div class="card">
+    <div class="ex-head"><div class="ex-num">4</div><div class="ex-title">Распределите по колонкам</div></div>
+    <div class="ex-hint">Определите: наречие НАУТРО или предлог с существительным НА УТРО?</div>
+    ${choiceBlock(EX4)}
+  </div>`;
+
+  // Упр 5
+  h += `<div class="card">
+    <div class="ex-head"><div class="ex-num">5</div><div class="ex-title">Найдите и исправьте ошибки</div></div>
+    <div class="ex-hint">Отметьте, есть ли ошибка. Если есть — выберите верное написание: наутро или на утро.</div>
+    ${ex5Block()}
+  </div>`;
+
+  // Упр 6 — составьте сами (открытое)
+  h += `<div class="card">
+    <div class="ex-head"><div class="ex-num">6</div><div class="ex-title">Составьте предложения сами</div></div>
+    <div class="ex-hint">Придумайте по два предложения.</div>
+    <div class="item"><b>наутро</b> = «на следующее утро»:</div>
+    <textarea id="ans6a" placeholder="1.&#10;2."></textarea>
+    <div class="item" style="margin-top:10px;"><b>на утро</b> — предлог + существительное (с определением или зависимым словом):</div>
+    <textarea id="ans6b" placeholder="1.&#10;2."></textarea>
+    <button class="btn btn-ghost btn-wide check-btn" onclick="revealBox('rv6')">Показать образец</button>
+    <div class="reveal" id="rv6"><b>наутро:</b> Наутро всё было готово. Наутро мы отправились в путь.<br><b>на утро:</b> Встречу перенесли на утро понедельника. Я возлагал большие надежды на это утро.</div>
+  </div>`;
+
+  // Упр 7
+  h += `<div class="card">
+    <div class="ex-head"><div class="ex-num">7</div><div class="ex-title">Мини-диктант</div></div>
+    <div class="ex-hint">Спишите, раскрывая скобки. Выберите написание.</div>
+    ${choiceBlock(EX7)}
+  </div>`;
+
+  // Кнопка завершения
+  h += `<div class="card" style="text-align:center;">
+    <div class="ex-hint" id="finishHint" style="margin-bottom:12px;">Ответь на все пункты упражнений 2–5 и 7, чтобы завершить.</div>
+    <button class="btn btn-wide" id="finishBtn" onclick="finish()">Завершить и узнать результат</button>
+  </div>`;
+
+  root.innerHTML = h;
+  root.classList.remove('hidden');
+}
+
+function ex5Block(){
+  let h = '';
+  EX5.items.forEach((it, idx) => {
+    state.items[it.id] = { answered:false, correct:false, group:EX5 };
+    h += `<div class="item" id="item_${it.id}">
+      <div class="q"><span class="qn">${idx+1})</span>${esc(it.q)}</div>
+      <div class="choices">
+        ${EX5.options.map((opt,oi)=>`<button class="choice" data-id="${it.id}" data-oi="${oi}" onclick="pick('${it.id}',${oi})">${esc(opt)}</button>`).join('')}
+      </div>
+      <div class="fix-row" id="fixrow_${it.id}">
+        <label>Как написать верно?</label>
+        <div class="choices">
+          <button class="choice fixc" id="fix_${it.id}_0" onclick="ex5Fix('${it.id}','наутро')">наутро</button>
+          <button class="choice fixc" id="fix_${it.id}_1" onclick="ex5Fix('${it.id}','на утро')">на утро</button>
+        </div>
+      </div>
+      <div class="feedback" id="fb_${it.id}"></div>
+    </div>`;
+  });
+  return h;
+}
+
+/* ---------- Упр.3: перетаскивание определений ---------- */
+const ex3State = { selected: null, placed: {}, done: false };
+
+function ex3Block(){
+  EX3.items.forEach(it => { state.items[it.id] = { answered:false, correct:false, group:EX3 }; });
+  let h = '<div class="chips-pool" id="ex3pool">';
+  EX3.chips.forEach((w,i) => {
+    h += `<button class="chip" id="chip_${i}" data-word="${esc(w)}" onclick="ex3SelectChip(${i})">${esc(w)}</button>`;
+  });
+  h += '</div>';
+  EX3.items.forEach((it, idx) => {
+    const def = it.cap ? '(На)утро' : '(на)утро';
+    h += `<div class="item ex3-item" id="item_${it.id}">
+      <div class="q"><span class="qn">${idx+1})</span>${esc(it.before)}<span class="slot" id="slot_${it.id}" onclick="ex3SlotClick('${it.id}')">${def}</span>${esc(it.after)}</div>
+      <div class="feedback" id="fb_${it.id}"></div>
+    </div>`;
+  });
+  h += `<button class="btn btn-wide check-btn" id="ex3check" onclick="ex3Check()">Проверить упражнение 3</button>`;
+  return h;
+}
+
+function ex3SelectChip(i){
+  if(ex3State.done) return;
+  const chip = document.getElementById('chip_'+i);
+  if(chip.classList.contains('used')) return;
+  if(ex3State.selected === i){ ex3State.selected = null; chip.classList.remove('sel'); return; }
+  document.querySelectorAll('#ex3pool .chip.sel').forEach(c=>c.classList.remove('sel'));
+  ex3State.selected = i;
+  chip.classList.add('sel');
+}
+
+function ex3SlotClick(id){
+  if(ex3State.done) return;
+  const it = EX3.items.find(x=>x.id===id);
+  const slot = document.getElementById('slot_'+id);
+  // слот заполнен → вернуть фишку в пул
+  if(ex3State.placed[id]){
+    const ci = ex3State.placed[id].chipIndex;
+    document.getElementById('chip_'+ci).classList.remove('used');
+    ex3State.placed[id] = null;
+    slot.textContent = it.cap ? '(На)утро' : '(на)утро';
+    slot.classList.remove('filled');
+    return;
+  }
+  // вставить выбранную фишку
+  if(ex3State.selected == null) return;
+  const ci = ex3State.selected;
+  const word = document.getElementById('chip_'+ci).dataset.word;
+  ex3State.placed[id] = { chipIndex: ci, word };
+  const chip = document.getElementById('chip_'+ci);
+  chip.classList.add('used'); chip.classList.remove('sel');
+  ex3State.selected = null;
+  slot.textContent = (it.cap ? 'На ' : 'на ') + word + ' утро';
+  slot.classList.add('filled');
+}
+
+function ex3Check(){
+  if(ex3State.done) return;
+  ex3State.done = true;
+  EX3.items.forEach(it => {
+    const st = state.items[it.id];
+    const hasChip = !!ex3State.placed[it.id];
+    const correct = (hasChip === it.accept);
+    st.answered = true; st.correct = correct;
+    if(correct){ state.score++; }
+    else {
+      state.wrong.push({
+        id: it.id, group: 'Упр. 3 · вставка определения',
+        q: it.before + (it.cap?'(На)утро':'(на)утро') + it.after,
+        correct: it.accept ? 'раздельно (определение вставляется)' : 'слитно (вставить нельзя)',
+        user: hasChip ? 'раздельно' : 'слитно'
+      });
+    }
+    document.getElementById('item_'+it.id).classList.add(correct ? 'correct' : 'wrong');
+    const fb = document.getElementById('fb_'+it.id);
+    fb.className = 'feedback show ' + (correct ? 'good' : 'bad');
+    fb.textContent = (correct ? '✓ Верно. ' : '✗ Неверно. ') + (it.why || '');
+    // показать эталонную запись в слоте
+    const slot = document.getElementById('slot_'+it.id);
+    if(!it.accept){ slot.textContent = it.cap ? 'Наутро' : 'наутро'; slot.classList.remove('filled'); }
+    else if(!ex3State.placed[it.id]){ slot.textContent = it.cap ? 'На … утро' : 'на … утро'; }
+  });
+  document.getElementById('ex3check').disabled = true;
+  document.querySelectorAll('#ex3pool .chip').forEach(c=>{ c.disabled = true; });
+  updateProgress();
+}
+
+/* ---------- Логика ответа ---------- */
+function findItem(id){
+  for(const g of ALL_GROUPS){
+    const it = g.items.find(x=>x.id===id);
+    if(it) return { it, group:g };
+  }
+  return null;
+}
+
+function pick(id, oi){
+  const st = state.items[id];
+  if(st.answered) return;
+  const { it, group } = findItem(id);
+
+  const itemEl = document.getElementById('item_'+id);
+  const btns = itemEl.querySelector('.choices').querySelectorAll('.choice');
+  btns.forEach(b=>b.classList.remove('sel'));
+
+  // Упр.5: «есть ошибка» — показать выбор верного слова и ждать его
+  if(group === EX5 && oi === 0){
+    btns[oi].classList.add('sel');
+    document.getElementById('fixrow_'+id).classList.add('show');
+    return;
+  }
+  if(group === EX5 && oi === 1){
+    document.getElementById('fixrow_'+id).classList.remove('show');
+  }
+
+  finalizePick(id, oi, null);
+}
+
+// Упр.5: выбор верного слова после «есть ошибка»
+function ex5Fix(id, word){
+  if(state.items[id].answered) return;
+  finalizePick(id, 0, word);
+}
+
+function finalizePick(id, oi, fixWord){
+  const st = state.items[id];
+  if(st.answered) return;
+  const { it, group } = findItem(id);
+  const itemEl = document.getElementById('item_'+id);
+  const btns = itemEl.querySelector('.choices').querySelectorAll('.choice');
+  const fb = document.getElementById('fb_'+id);
+
+  let correct = (oi === it.c);
+
+  // Упр.5: правильность = верный выбор «есть ошибка» + верное слово
+  if(group === EX5){
+    const f0 = document.getElementById('fix_'+id+'_0'); // наутро
+    const f1 = document.getElementById('fix_'+id+'_1'); // на утро
+    if(oi === 0){
+      correct = (it.c === 0) && (fixWord === it.fix);
+      if(f0 && f1){
+        [f0,f1].forEach(b=>{ b.disabled = true; b.classList.remove('sel'); });
+        const chosen = (fixWord === 'наутро') ? f0 : f1;
+        chosen.classList.add(correct ? 'ok' : 'bad');
+        if(!correct && it.fix){ (it.fix === 'наутро' ? f0 : f1).classList.add('ok'); }
+      }
+    } else {
+      if(f0) f0.disabled = true;
+      if(f1) f1.disabled = true;
+    }
+  }
+
+  st.answered = true;
+  st.correct = correct;
+  btns.forEach(b=>{ b.disabled = true; b.classList.remove('sel'); });
+  btns[oi].classList.add(correct ? 'ok' : 'bad');
+  if(!correct){ btns[it.c].classList.add('ok'); }
+
+  itemEl.classList.add(correct ? 'correct' : 'wrong');
+  if(correct){ state.score++; }
+  else {
+    let userAns, correctAns;
+    if(group === EX5){
+      if(it.c === 0){
+        correctAns = 'есть ошибка → ' + it.fix;
+        userAns = (oi === 0) ? ('есть ошибка → ' + (fixWord || '—')) : 'написано верно';
+      } else {
+        correctAns = 'написано верно';
+        userAns = (oi === 0) ? 'есть ошибка' : 'написано верно';
+      }
+    } else {
+      correctAns = group.options[it.c];
+      userAns = group.options[oi];
+    }
+    state.wrong.push({ id, group:groupName(group), q: it.q, correct: correctAns, user: userAns });
+  }
+
+  fb.className = 'feedback show ' + (correct ? 'good':'bad');
+  let txt = correct ? '✓ Верно.' : '✗ Неверно.';
+  if(it.why){ txt += ' ' + it.why + '.'; }
+  fb.textContent = txt;
+
+  updateProgress();
+}
+
+function groupName(g){
+  if(g===EX2) return 'Упр. 2 · раскрытие скобок';
+  if(g===EX3) return 'Упр. 3 · вставка определения';
+  if(g===EX4) return 'Упр. 4 · наречие/предлог';
+  if(g===EX5) return 'Упр. 5 · поиск ошибок';
+  if(g===EX7) return 'Упр. 7 · мини-диктант';
+  return 'Упражнение';
+}
+
+function norm(s){
+  return (s||'').toLowerCase().replace(/ё/g,'е').replace(/[«».,!?;:—\-]/g,'').replace(/\s+/g,' ').trim();
+}
+function closeEnough(a, b){
+  // допускаем мелкие расхождения: считаем ок, если ключевая часть «наутро/на утро» совпала и слова те же
+  return a.replace(/\s/g,'') === b.replace(/\s/g,'');
+}
+
+function answeredCount(){
+  return Object.values(state.items).filter(s=>s.answered).length;
+}
+function totalCount(){ return Object.keys(state.items).length; }
+
+function updateProgress(){
+  const done = answeredCount(), total = totalCount();
+  document.getElementById('topFill').style.width = (total? (done/total*100):0) + '%';
+  document.getElementById('topScore').textContent = state.score + ' / ' + total;
+  const hint = document.getElementById('finishHint');
+  if(hint){
+    if(done >= total){ hint.textContent = 'Все пункты отвечены — можно завершать!'; hint.style.color = 'var(--green)'; }
+    else { hint.textContent = `Отвечено ${done} из ${total}. Можно завершить в любой момент.`; hint.style.color = ''; }
+  }
+}
+
+/* ---------- Открытые подсказки ---------- */
+function revealBox(id){ document.getElementById(id).classList.toggle('show'); }
+
+/* ---------- Финал ---------- */
+function finish(){
+  const elapsed = Math.round((Date.now() - state.startTime)/1000);
+  const total = totalCount();
+  const pct = Math.round(state.score/total*100);
+  document.getElementById('screenSheet').classList.add('hidden');
+  document.getElementById('topbar').classList.add('hidden');
+
+  let msg;
+  if(pct>=90) msg='Отличный результат! Правило усвоено.';
+  else if(pct>=70) msg='Хорошо! Осталось закрепить отдельные случаи.';
+  else if(pct>=50) msg='Неплохо, но стоит повторить правило и приём вставки определения.';
+  else msg='Стоит вернуться к правилу и пройти лист ещё раз.';
+
+  const mm = Math.floor(elapsed/60), ss = elapsed%60;
+  const timeStr = (mm?mm+' мин ':'') + ss + ' с';
+
+  let h = `<span style="font-size:46px;">🌼</span>
+    <h1 style="color:var(--blue-deep);font-size:24px;margin:6px 0;">Готово, ${esc(state.name)}!</h1>
+    <div class="big">${state.score} / ${total}</div>
+    <div class="pct" style="color:${pct>=70?'#2e7d32':pct>=50?'#f57f17':'#c62828'};">${pct}%</div>
+    <div class="msg">${msg}<br><small>⏱ ${timeStr}</small></div>`;
+
+  if(state.wrong.length){
+    h += `<div class="errors-box"><div class="t">📝 Разбор ошибок (${state.wrong.length}):</div>`;
+    state.wrong.forEach(w=>{
+      h += `<div class="e"><div>${esc(w.q)}</div>
+        <div style="color:var(--red);">Твой ответ: ${esc(w.user)}</div>
+        <div style="color:var(--green);">Правильно: ${esc(w.correct)} <span style="color:var(--text-soft);">(${w.group})</span></div></div>`;
+    });
+    h += `</div>`;
+  } else {
+    h += `<div class="errors-box" style="background:var(--green-soft);text-align:center;"><div class="t" style="color:var(--green);">🌼 Ни одной ошибки!</div></div>`;
+  }
+
+  if(isEmbed){
+    h += `<div class="saved-note">✓ Результат сохранён на платформе ЗебРус.</div>
+      <div class="final-actions">
+        <button class="btn" onclick="closeEmbed()">Закрыть</button>
+        <button class="btn btn-ghost" onclick="restartSheet()">Пройти ещё раз</button>
+      </div>`;
+  } else {
+    h += `<div class="final-actions">
+        <button class="btn btn-ghost" onclick="restartSheet()">Пройти ещё раз</button>
+      </div>`;
+  }
+
+  const fin = document.getElementById('screenFinal');
+  fin.innerHTML = h;
+  fin.classList.remove('hidden');
+  window.scrollTo({top:0, behavior:'smooth'});
+
+  if(isEmbed){ sendResultToZebrus(elapsed); }
+}
+
+function sendResultToZebrus(timeSeconds){
+  window.parent.postMessage({
+    type: 'zebrus_game_result',
+    payload: {
+      score: state.score,
+      max_score: totalCount(),
+      time_seconds: timeSeconds,
+      wrong_tasks: state.wrong.map(w=>({ id:w.id, type:w.group, correct:w.correct, user:w.user }))
+    }
+  }, '*');
+}
+
+function closeEmbed(){ window.parent.postMessage({ type:'zebrus_game_close' }, '*'); }
+
+function restartSheet(){
+  state.score = 0; state.items = {}; state.wrong = []; state.startTime = Date.now();
+  ex3State.selected = null; ex3State.placed = {}; ex3State.done = false;
+  document.getElementById('screenFinal').classList.add('hidden');
+  document.getElementById('topbar').classList.remove('hidden');
+  renderSheet();
+  updateProgress();
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+</script>
+</body>
+</html>
