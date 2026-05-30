@@ -1382,6 +1382,8 @@ const STATE = {
   myVariantAttempts: [],          // у ученика: его попытки по всем вариантам
   myVariantAnswers: {},           // у ученика: ответы по всем своим попыткам {attemptId: {qNum: ans}}
   myVariantAttemptsLoaded: false,
+  myVariantAttemptsLoading: false, // идёт ли запрос прямо сейчас (защита от двойного старта)
+  myVariantAttemptsError: false,  // последняя загрузка упала (сеть/прокси) — НЕ показываем варианты как новые
   myExpandedAttemptId: null,      // какую строку «Мои пробники» раскрыл ученик
   examineQuestion: null,           // { variantId, num, userAnswer, points, max } для модалки
   examineQuestionData: null,       // загруженный test_variant_questions
@@ -14319,9 +14321,42 @@ function studentVariantsCard(){
   const list = el('div', null);
   card.append(list);
 
-  /* Ленивая загрузка попыток + ответов + доступных вариантов */
+  /* Ленивая загрузка попыток + ответов + доступных вариантов.
+     ВАЖНО: список «Доступные пробники» строится как availableVariants МИНУС
+     варианты с моей попыткой. Если загрузка попыток упадёт (таймаут прокси,
+     сетевой сбой) и мы при этом пометим myVariantAttemptsLoaded=true с пустым
+     myVariantAttempts — ВСЕ варианты покажутся «новыми» с кнопкой «Начать»,
+     а решённые/в процессе исчезнут. Ученик/учитель жмёт «Начать» по уже
+     решённому → плодятся дубли «в процессе». Поэтому при ошибке НЕ помечаем
+     загрузку успешной: выставляем флаг ошибки и показываем плашку с кнопкой
+     «Обновить». Прецедент 30.05.2026 (Ольга: «все варианты как новые, после
+     обновления появляются»). */
   if(!STATE.myVariantAttemptsLoaded){
+    if(STATE.myVariantAttemptsError){
+      list.append(el('div', {
+        style:{ padding:'14px 16px', background:'var(--red-soft)',
+                border:'1px solid var(--red)', borderRadius:'12px',
+                display:'flex', justifyContent:'space-between', alignItems:'center',
+                gap:'12px', flexWrap:'wrap' }
+      },
+        el('div', { style:{ minWidth:0, flex:1, fontSize:'13px', color:'var(--ink)' }},
+          el('div', { style:{ fontWeight:'700', marginBottom:'2px' }},
+            '⚠ Не удалось загрузить твои результаты'),
+          el('div', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
+            'Скорее всего, сеть подвисла. Нажми «Обновить» — варианты и прогресс подтянутся. Не начинай заново: твои решённые пробники не потеряны.')),
+        el('button', { class:'btn btn-p btn-sm', style:{ flexShrink:0 },
+          onclick: () => {
+            STATE.myVariantAttemptsError = false;
+            render();  // myVariantAttemptsLoaded всё ещё false → загрузка стартует заново
+          }
+        }, '🔄 Обновить')));
+      return card;
+    }
     list.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'10px 0' }}, '⏳ Загружаю результаты…'));
+    /* Защита от двойного запуска: render() может вызваться повторно, пока
+       первый async ещё летит — без флага создастся второй параллельный запрос. */
+    if(STATE.myVariantAttemptsLoading) return card;
+    STATE.myVariantAttemptsLoading = true;
     (async () => {
       try {
         if(!ESSAYS_LOADED){ try { await loadEssaysFromDb(); } catch(_){} }
@@ -14345,20 +14380,23 @@ function studentVariantsCard(){
           STATE.myVariantAnswers = {};
         }
         /* Загружаем только опубликованные PDF-варианты — ученик видит то что учитель открыл.
-           Также подтягиваем day_id, чтобы показать привязку к дню интенсива. */
-        try {
-          const pdfVariants = await restRequest('GET',
-            '/test_variants?source=eq.pdf_import&is_published=eq.true&select=id,title,questions_count,created_at,day_id&order=created_at.desc');
-          STATE.availableVariants = Array.isArray(pdfVariants) ? pdfVariants : [];
-        } catch(_){ STATE.availableVariants = []; }
+           Также подтягиваем day_id, чтобы показать привязку к дню интенсива.
+           Здесь сбой КРИТИЧЕН (без него availableVariants пуст и список пропадёт),
+           поэтому ошибку НЕ глотаем — пусть уйдёт во внешний catch и покажет
+           плашку «Обновить», а не пустой/новый список. */
+        const pdfVariants = await restRequest('GET',
+          '/test_variants?source=eq.pdf_import&is_published=eq.true&select=id,title,questions_count,created_at,day_id&order=created_at.desc');
+        STATE.availableVariants = Array.isArray(pdfVariants) ? pdfVariants : [];
+        STATE.myVariantAttemptsError = false;
         STATE.myVariantAttemptsLoaded = true;
+        STATE.myVariantAttemptsLoading = false;
         render();
       } catch(e){
         console.warn('[student variants] load error:', e.message);
-        STATE.myVariantAttempts = [];
-        STATE.myVariantAnswers = {};
-        STATE.availableVariants = [];
-        STATE.myVariantAttemptsLoaded = true;
+        /* НЕ помечаем Loaded=true и НЕ обнуляем уже имеющиеся данные —
+           иначе варианты отрисуются как новые. Показываем плашку ошибки. */
+        STATE.myVariantAttemptsError = true;
+        STATE.myVariantAttemptsLoading = false;
         render();
       }
     })();
@@ -31165,6 +31203,7 @@ async function finishSolvingAndSave(){
   STATE.solverResultAttemptId = attemptId;
   /* Инвалидируем кэш «Мои пробники» — чтоб обновился список */
   STATE.myVariantAttemptsLoaded = false;
+  STATE.myVariantAttemptsError = false;
   render();
 }
 
