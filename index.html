@@ -5782,7 +5782,13 @@ function modalLightbox(){
   if(idx < 0) idx = 0;
   if(idx >= photos.length) idx = photos.length - 1;
 
-  const close = () => { STATE.lightbox = null; render(); };
+  /* Закрытие: сначала снимаем keydown-listener (чтобы не копились на каждый render),
+     потом сбрасываем состояние и перерисовываем. */
+  const close = () => {
+    document.removeEventListener('keydown', onKey);
+    STATE.lightbox = null;
+    render();
+  };
   const goPrev = () => {
     if(idx > 0){ STATE.lightbox.idx = idx - 1; render(); }
   };
@@ -5790,29 +5796,29 @@ function modalLightbox(){
     if(idx < photos.length - 1){ STATE.lightbox.idx = idx + 1; render(); }
   };
 
-  /* Закрытие по ESC и навигация стрелками */
-  const keyHandler = (ev) => {
+  /* Закрытие по ESC и навигация стрелками (десктоп).
+     Вешаем именованный обработчик на document и СНИМАЕМ его в close().
+     Чтобы повторные render() не плодили дубликаты — сначала снимаем
+     возможный прошлый (то же имя функции на каждый вызов разное, поэтому
+     храним ссылку в STATE и чистим её), затем вешаем заново. */
+  const onKey = (ev) => {
     if(ev.key === 'Escape') { close(); }
     else if(ev.key === 'ArrowLeft') { goPrev(); }
     else if(ev.key === 'ArrowRight') { goNext(); }
   };
-  /* Привязываем один раз на window и снимаем при закрытии — render() пересоздаст обработчик */
-  setTimeout(() => {
-    document.addEventListener('keydown', keyHandler, { once: false });
-    /* Снимаем когда модалки уже нет */
-    const cleanup = () => {
-      if(!STATE.lightbox){
-        document.removeEventListener('keydown', keyHandler);
-      } else {
-        setTimeout(cleanup, 200);
-      }
-    };
-    setTimeout(cleanup, 200);
-  }, 0);
+  /* Снимаем обработчик от предыдущего рендера лайтбокса, если он остался,
+     и запоминаем текущий — так дубликаты не накапливаются. */
+  if(STATE._lightboxKeyHandler){
+    document.removeEventListener('keydown', STATE._lightboxKeyHandler);
+  }
+  STATE._lightboxKeyHandler = onKey;
+  document.addEventListener('keydown', onKey);
 
   const url = photos[idx];
   const rotation = getPhotoRotation(url);
 
+  /* Координаты начала касания — для распознавания свайп/тап на тач-устройствах */
+  let touchStartX = 0, touchStartY = 0, touchStartT = 0;
   const backdrop = el('div', {
     style:{
       position:'fixed', inset:'0', background:'rgba(0,0,0,0.95)', zIndex:'10000',
@@ -5820,8 +5826,40 @@ function modalLightbox(){
       padding:'20px'
     },
     onclick: (ev) => {
-      /* Клик по фону (не по img/кнопкам) — закрываем */
+      /* Клик мышью по фону (не по img/кнопкам) — закрываем.
+         Тап по фото на десктопе обрабатывается отдельным onclick на самой img.
+         На тач-устройствах закрытие/листание идёт через touch-логику ниже. */
       if(ev.target === ev.currentTarget) close();
+    },
+    ontouchstart: (ev) => {
+      if(ev.touches && ev.touches.length === 1){
+        touchStartX = ev.touches[0].clientX;
+        touchStartY = ev.touches[0].clientY;
+        touchStartT = Date.now();
+      } else {
+        /* Мультитач (пинч-зум) — не считаем жестом листания/тапа */
+        touchStartT = 0;
+      }
+    },
+    ontouchend: (ev) => {
+      if(!touchStartT) return;
+      const t = (ev.changedTouches && ev.changedTouches[0]) || null;
+      if(!t) return;
+      const dx = t.clientX - touchStartX;
+      const dy = t.clientY - touchStartY;
+      const dt = Date.now() - touchStartT;
+      touchStartT = 0;
+      /* Если тап пришёлся на кнопку (стрелка/поворот/крестик) — у них свой
+         onclick со stopPropagation, сюда мы не дойдём. Здесь — фон или фото. */
+      if(Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy)){
+        /* Горизонтальный свайп — листаем, НЕ закрываем */
+        if(dx < 0) goNext(); else goPrev();
+      } else if(Math.abs(dx) <= 50 && Math.abs(dy) <= 50 && dt < 500){
+        /* Короткий жест без значимого сдвига — это тап: закрываем просмотр */
+        close();
+      }
+      /* Иначе (например долгий зажим или вертикальная прокрутка большого
+         фото) — ничего не делаем. */
     }
   });
 
@@ -5844,8 +5882,14 @@ function modalLightbox(){
   }, label);
 
   const topBar = el('div', {
+    /* padding учитывает safe-area сверху/справа — крестик и кнопки
+       не уезжают под «чёлку»/статус-бар телефона. */
     style:{
-      position:'absolute', top:'0', left:'0', right:'0', padding:'14px 20px',
+      position:'absolute', top:'0', left:'0', right:'0',
+      paddingTop:'max(14px, env(safe-area-inset-top))',
+      paddingRight:'max(20px, env(safe-area-inset-right))',
+      paddingBottom:'14px',
+      paddingLeft:'max(20px, env(safe-area-inset-left))',
       display:'flex', justifyContent:'space-between', alignItems:'center',
       background:'linear-gradient(180deg, rgba(0,0,0,0.6), transparent)',
       gap:'10px', flexWrap:'wrap'
@@ -5858,12 +5902,16 @@ function modalLightbox(){
       canRotate ? rotateBtn(false, 'Повернуть против часовой', '⟲') : null,
       canRotate ? rotateBtn(true,  'Повернуть по часовой',     '⟳') : null,
       el('button', {
+        /* Единственная кнопка закрытия — крупная и заметная, в верхнем углу.
+           Учтён safe-area сверху/справа, чтобы крестик не уезжал под «чёлку». */
         style:{
-          background:'rgba(255,255,255,0.15)', color:'#fff', border:'none',
-          width:'40px', height:'40px', borderRadius:'50%', fontSize:'20px',
-          cursor:'pointer'
+          background:'rgba(255,255,255,0.92)', color:'#111', border:'none',
+          width:'52px', height:'52px', borderRadius:'50%', fontSize:'30px',
+          lineHeight:'1', fontWeight:'700', cursor:'pointer', zIndex:'3',
+          boxShadow:'0 4px 16px rgba(0,0,0,0.4)',
+          display:'flex', alignItems:'center', justifyContent:'center'
         },
-        onclick: close, title:'Закрыть (Esc)'
+        onclick: (ev) => { ev.stopPropagation(); close(); }, title:'Закрыть (Esc)'
       }, '×'))
   );
   backdrop.append(topBar);
@@ -5890,6 +5938,13 @@ function modalLightbox(){
       transition:'transform 0.2s ease'
     }
   }));
+  /* Десктоп: клик мышью по самому фото тоже закрывает просмотр (раньше
+     закрытие срабатывало только по тонкой рамке фона вокруг фото).
+     На тач-устройствах тап/свайп по фото обрабатывает touch-логика backdrop. */
+  imgWrap.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    close();
+  });
   backdrop.append(imgWrap);
 
   /* Навигация — слева/справа стрелки, если есть куда листать */
