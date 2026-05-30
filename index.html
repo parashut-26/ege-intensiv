@@ -27241,7 +27241,13 @@ function renderWarmupBlockStudent(b){
       '⤢ тапни — на весь экран');
     imgs.forEach((u, i) => carousel.append(el('img', { src: imgThumb(u, 1080), alt:'',
       loading: 'lazy', decoding: 'async',
-      style:{ flex:'0 0 100%', maxHeight:'75vh', objectFit:'contain',
+      /* width:'100%' и minWidth:0 — критично для iOS Safari:
+         без width Safari рендерит картинку в её НАТУРАЛЬНОЙ ширине,
+         flex:'0 0 100%' не помогает (там flex-basis, а не размер).
+         Из-за этого широкие чек-листы обрезались по правому краю.
+         Прецедент 30.05.2026. */
+      style:{ flex:'0 0 100%', width:'100%', minWidth:0,
+              maxHeight:'75vh', objectFit:'contain',
               scrollSnapAlign:'start', cursor:'zoom-in' },
       onclick: () => openInLightbox(i)
     })));
