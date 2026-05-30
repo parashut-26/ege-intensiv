@@ -1097,6 +1097,7 @@ window.editorIsOpen = function(){
   return STATE.editingBlockId != null
       || STATE.addingPostToDayId != null
       || STATE.addingPostToIntensiveOrd != null
+      || STATE.addingPostToWalkKey != null   /* добавлено 30.05.2026 для walk-постов */
       || STATE.editingWarmupDayId != null
       /* Прецедент 25.05.2026: Ольга редактировала вопрос в банке задания 22
          (modalQuickEditQuestion) — при нажатии Enter после «6) риторическое
@@ -10364,11 +10365,21 @@ function walkBlock(d){
   const isTeacher = STATE.view === 'teacher' || STATE.view === 'curator';
   const locked = _walkLockedForStudent(d);
 
-  return el('div', { class:'card', 'data-day-anchor': String(d.id),
+  /* Догружаем посты прогулочного дня, если разблокирован */
+  if(!locked && (!STATE.walkPostsByKey || !STATE.walkPostsByKey[d.id])){
+    loadWalkPosts(d.id).then(render);
+  }
+
+  const card = el('div', { class:'card', 'data-day-anchor': String(d.id),
     style:{ marginBottom:'16px',
             background: locked ? '#F3F4F6' : '#FCE7F3',
             border: '1px solid ' + (locked ? '#D1D5DB' : '#FBCFE8'),
-            opacity: locked ? 0.75 : 1 }},
+            opacity: locked ? 0.75 : 1 }});
+
+  const posts = (!locked && STATE.walkPostsByKey && STATE.walkPostsByKey[d.id])
+    ? filterWarmupForRole(STATE.walkPostsByKey[d.id]) : [];
+
+  card.append(
     el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }},
       el('div', { style:{ fontSize:'40px', filter: locked ? 'grayscale(1)' : 'none' }}, d.emoji || '🌸'),
       el('div', { style:{ flex:1, minWidth:'200px' }},
@@ -10378,14 +10389,32 @@ function walkBlock(d){
         el('p', { style:{ color:'var(--ink-2)', marginTop:'4px' }},
           locked
             ? 'Материалы появятся ' + d.date
-            : (d.date + ' — подкасты, музыка, картинки и ссылки от учителя'))),
+            : (d.date + (posts.length
+                ? ' — ' + posts.length + ' пост' + (posts.length === 1 ? '' : posts.length < 5 ? 'а' : 'ов')
+                : ' — материалы от учителя')))),
       locked
         ? el('button', { class:'btn btn-secondary', disabled:'',
             style:{ opacity:0.6, cursor:'not-allowed' }
           }, '🔒 Закрыто')
-        : el('button', { class:'btn btn-p',
-            onclick: () => { STATE.walkMaterialsOpen = d.id; render(); }
-          }, isTeacher ? '📎 Управлять материалами' : '📎 Открыть материалы')));
+        : el('button', { class:'btn btn-secondary btn-sm',
+            onclick: () => { STATE.walkMaterialsOpen = d.id; render(); },
+            title: 'Старые материалы (подкасты/аудио/ссылки)'
+          }, '📎')));
+
+  /* Посты прогулочного дня — выводим как у Разогрева */
+  if(!locked){
+    if(posts.length){
+      const postsWrap = el('div', { style:{ marginTop:'14px' }});
+      posts.forEach(p => postsWrap.append(renderWarmupBlockStudent(p)));
+      card.append(postsWrap);
+    } else if(STATE.walkPostsByKey && STATE.walkPostsByKey[d.id] != null){
+      /* Загружено, но пусто */
+      card.append(el('p', { style:{ marginTop:'10px', color:'var(--ink-3)',
+                                     fontSize:'13px', fontStyle:'italic' }},
+        '✨ Сегодня учитель не оставил постов. Можешь посмотреть старые материалы по кнопке выше или просто отдохнуть.'));
+    }
+  }
+  return card;
 }
 
 function examBlock(){
@@ -25707,13 +25736,32 @@ async function loadIntensivePosts(dayOrd){
   try {
     const list = await restRequest('GET',
       '/warmup_blocks?intensive_day_ord=eq.' + dayOrd +
-      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord,is_published,publish_at,created_at&order=ord.asc');
+      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord,walk_id,is_published,publish_at,created_at&order=ord.asc');
     if(!STATE.intensivePostsByOrd) STATE.intensivePostsByOrd = {};
     STATE.intensivePostsByOrd[dayOrd] = list || [];
   } catch(e){
     console.error('loadIntensivePosts', e);
     if(!STATE.intensivePostsByOrd) STATE.intensivePostsByOrd = {};
     STATE.intensivePostsByOrd[dayOrd] = [];
+  }
+}
+
+/* Загрузить посты для прогулочного дня (walk1/walk2/walk3).
+   Прецедент 30.05.2026: учитель хочет постить в прогулочные дни тот же
+   контент, что и в дни интенсива/разогрева — текст, картинки, видео, игры.
+   Архитектура: переиспользуем warmup_blocks с новой колонкой walk_id. */
+async function loadWalkPosts(walkKey){
+  if(!walkKey) return;
+  try {
+    const list = await restRequest('GET',
+      '/warmup_blocks?walk_id=eq.' + encodeURIComponent(walkKey) +
+      '&select=id,ord,type,title,body,url,game_id,emoji,image_url,image_urls,config,day_id,intensive_day_ord,walk_id,is_published,publish_at,created_at&order=ord.asc');
+    if(!STATE.walkPostsByKey) STATE.walkPostsByKey = {};
+    STATE.walkPostsByKey[walkKey] = list || [];
+  } catch(e){
+    console.error('loadWalkPosts', e);
+    if(!STATE.walkPostsByKey) STATE.walkPostsByKey = {};
+    STATE.walkPostsByKey[walkKey] = [];
   }
 }
 
@@ -25804,18 +25852,29 @@ async function updateWarmupDayMeta(day, fields){
 }
 
 async function addWarmupBlock(target, payload){
-  /* target — либо { dayId } для warmup, либо { intensiveOrd } для интенсива */
+  /* target — { dayId } (разогрев), { intensiveOrd } (день интенсива) или
+     { walkKey } (прогулочный день — walk1/walk2/walk3, добавлено 30.05.2026). */
   try {
     if(target.intensiveOrd){
       payload.intensive_day_ord = target.intensiveOrd;
       payload.day_id = null;
+      payload.walk_id = null;
       if(payload.ord == null){
         const cur = (STATE.intensivePostsByOrd && STATE.intensivePostsByOrd[target.intensiveOrd]) || [];
+        payload.ord = cur.length;
+      }
+    } else if(target.walkKey){
+      payload.walk_id = target.walkKey;
+      payload.day_id = null;
+      payload.intensive_day_ord = null;
+      if(payload.ord == null){
+        const cur = (STATE.walkPostsByKey && STATE.walkPostsByKey[target.walkKey]) || [];
         payload.ord = cur.length;
       }
     } else {
       payload.day_id = target.dayId;
       payload.intensive_day_ord = null;
+      payload.walk_id = null;
       if(payload.ord == null){
         const cur = (STATE.warmupBlocksByDay && STATE.warmupBlocksByDay[target.dayId]) || [];
         payload.ord = cur.length;
@@ -25824,9 +25883,11 @@ async function addWarmupBlock(target, payload){
     if(!payload.type) payload.type = 'mixed';
     await restRequest('POST', '/warmup_blocks', payload, { prefer: 'return=minimal' });
     if(target.intensiveOrd) await loadIntensivePosts(target.intensiveOrd);
+    else if(target.walkKey) await loadWalkPosts(target.walkKey);
     else await loadWarmupBlocks(target.dayId);
     STATE.addingPostToDayId = null;
     STATE.addingPostToIntensiveOrd = null;
+    STATE.addingPostToWalkKey = null;
     showToast('✓ Пост добавлен');
     /* Push-уведомление ученикам — если пост сразу опубликован */
     if(payload.is_published !== false){
@@ -27080,6 +27141,7 @@ function renderAddBlockForm(day, editingBlock, target){
             onclick: () => {
               STATE.addingPostToDayId = null;
               STATE.addingPostToIntensiveOrd = null;
+              STATE.addingPostToWalkKey = null;
               render();
             }
           }, '✕ Отмена')));
@@ -34464,23 +34526,82 @@ function viewTeacherDays(){
     wrap.append(det);
   });
 
-  /* Прогулочные / мотивационные дни — отдельным блоком, с кнопкой «Материалы» */
+  /* Прогулочные / мотивационные дни — теперь с полноценными постами.
+     30.05.2026: используем те же warmup_blocks (новая колонка walk_id),
+     что и в Разогреве/Днях интенсива. Поддерживают картинки, видео, игры. */
   const walkDays = DAYS.filter(d => d.kind === 'walk');
   if(walkDays.length){
     wrap.append(el('h3', { style:{ marginTop:'24px', marginBottom:'10px' }}, '🌿 Прогулочные дни'));
     wrap.append(el('p', { style:{ color:'var(--ink-2)', fontSize:'13px', marginBottom:'14px' }},
-      'Загружайте подкасты, музыку, картинки и ссылки для лёгких дней между интенсивами.'));
+      'Лёгкие дни между интенсивами — посты с картинками, видео и играми. Старые материалы (аудио, ссылки) тоже доступны через кнопку справа.'));
     walkDays.forEach(d => {
-      wrap.append(el('div', { class:'card', style:{ marginBottom:'10px', background:'#FCE7F3', border:'1px solid #FBCFE8' }},
-        el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }},
-          el('div', { style:{ fontSize:'36px' }}, d.emoji || '🌸'),
-          el('div', { style:{ flex:1, minWidth:'200px' }},
-            el('div', { style:{ fontWeight:'700', fontSize:'15px' }}, d.title),
-            el('div', { style:{ color:'var(--ink-2)', fontSize:'13px', marginTop:'2px' }},
-              d.date + ' · ' + (d.subtitle || 'мотивация'))),
-          el('button', { class:'btn btn-p',
-            onclick: () => { STATE.walkMaterialsOpen = d.id; render(); }
-          }, '📎 Управлять материалами'))));
+      /* Догружаем посты прогулочного дня, если ещё не были загружены */
+      if(!STATE.walkPostsByKey || !STATE.walkPostsByKey[d.id]){
+        loadWalkPosts(d.id).then(render);
+      }
+      const det = el('details', { class:'card',
+        style:{ marginBottom:'12px', background:'#FCE7F3', border:'1px solid #FBCFE8' }});
+      if(STATE.teacherWalkOpen && STATE.teacherWalkOpen[d.id]) det.setAttribute('open', 'open');
+      det.addEventListener('toggle', () => {
+        if(!STATE.teacherWalkOpen) STATE.teacherWalkOpen = {};
+        STATE.teacherWalkOpen[d.id] = det.open;
+      });
+      det.append(
+        el('summary', { style:{ cursor:'pointer', listStyle:'none',
+                                 display:'flex', alignItems:'center', gap:'14px',
+                                 justifyContent:'space-between', flexWrap:'wrap' }},
+          el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', minWidth:0 }},
+            el('div', { style:{ fontSize:'36px' }}, d.emoji || '🌸'),
+            el('div', null,
+              el('div', { style:{ fontWeight:'700', fontSize:'15px' }}, d.title),
+              el('div', { style:{ color:'var(--ink-2)', fontSize:'13px', marginTop:'2px' }},
+                d.date + ' · ' + (d.subtitle || 'мотивация')))),
+          el('div', { style:{ display:'flex', gap:'6px', alignItems:'center' }},
+            el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }},
+              ((STATE.walkPostsByKey && STATE.walkPostsByKey[d.id]) || []).length + ' постов'),
+            el('button', { class:'btn btn-secondary btn-sm',
+              onclick: (ev) => {
+                ev.preventDefault();
+                ev.stopPropagation();
+                STATE.walkMaterialsOpen = d.id;
+                render();
+              }
+            }, '📎 Старые материалы'))));
+      /* Блок постов прогулочного дня */
+      const postsBox = el('div', { style:{ marginTop:'12px', padding:'12px',
+        background:'#fff', borderRadius:'10px',
+        border:'1px solid #FBCFE8' }});
+      postsBox.append(el('div', { style:{ fontSize:'12px', fontWeight:'700',
+        color:'#9D174D', marginBottom:'8px',
+        textTransform:'uppercase', letterSpacing:'.05em' }}, '📝 Посты этого дня'));
+      if(STATE.walkPostsByKey && STATE.walkPostsByKey[d.id]){
+        const posts = STATE.walkPostsByKey[d.id];
+        if(!posts.length){
+          postsBox.append(el('div', { style:{ padding:'8px 0',
+            color:'var(--ink-3)', fontSize:'13px' }},
+            'Пока ни одного поста. Добавь первый — пост с картинкой, видео или игрой.'));
+        } else {
+          posts.forEach(b => postsBox.append(renderWarmupBlockTeacher(b, { id: d.id, walkKey: d.id })));
+        }
+        /* Кнопка / форма добавления */
+        if(STATE.addingPostToWalkKey === d.id){
+          postsBox.append(renderAddBlockForm({ id: d.id }, null, { walkKey: d.id }));
+        } else {
+          postsBox.append(el('div', { style:{ marginTop:'10px', textAlign:'center' }},
+            el('button', { class:'btn btn-teal',
+              onclick: () => {
+                STATE.addingPostToWalkKey = d.id;
+                STATE.editingBlockId = null;
+                render();
+              }
+            }, '＋ Добавить пост в этот день')));
+        }
+      } else {
+        postsBox.append(el('div', { style:{ padding:'8px 0', color:'var(--ink-3)' }},
+          '⏳ загружаю посты…'));
+      }
+      det.append(postsBox);
+      wrap.append(det);
     });
   }
 
