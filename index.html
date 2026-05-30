@@ -29078,16 +29078,17 @@ async function ensureLiveAttempt(){
   if(STATE.liveAttemptId) return STATE.liveAttemptId;
   if(!MY_PROFILE || !MY_PROFILE.id) return null;
   /* === Защита от дублей попыток ===
-     Прецедент 29.05.2026: у Софии и Ульяны в варианте 37 две строки —
-     «сдал» (finished_at + полный набор ответов) И «решает сейчас» (пустой).
-     Причина: ученицы открыли уже сданный вариант повторно (посмотреть свой
-     результат / случайный клик по ссылке) → ensureLiveAttempt не нашёл live
-     в STATE.myVariantAttempts (поиск делается по !finished_at) и создал
-     новую запись. У учителя в Сводке Варианта она показывалась как «🔴 live»
-     второй строкой.
-     Решение: если у ученика для этого variant_id уже есть finished_at
-     И это НЕ явный retry (solverParentAttemptId пуст) — не создаём новую,
-     возвращаем null. Перерешать можно только через кнопку «Решить заново». */
+     1) Прецедент 29.05.2026: у Софии и Ульяны в варианте 37 две строки —
+        «сдал» (finished_at + полный набор ответов) И «решает сейчас» (пустой).
+        Решение: если уже есть finished_at и это не явный retry — возвращаем null.
+     2) Прецедент 29.05.2026 (18:00, DDoS): у Ангелины Евдокимовой 4 попытки,
+        у других 2-3 — каждое обновление страницы во время затыка прокси
+        создавало новую запись, потому что STATE.myVariantAttempts могла
+        быть пустой из-за таймаутов, а локальный STATE.liveAttemptId
+        сбрасывался между перезагрузками.
+        Решение: явный SELECT в БД перед INSERT. Если у ученика есть
+        unfinished attempt для этого variant_id (и тот же parent_attempt_id) —
+        переподключаемся к ней, не плодим дубли. */
   if(!STATE.solverParentAttemptId && Array.isArray(STATE.myVariantAttempts)){
     const alreadyFinished = STATE.myVariantAttempts.find(a =>
       a && a.variant_id === STATE.solverVariantId && a.finished_at);
@@ -29096,6 +29097,33 @@ async function ensureLiveAttempt(){
         'уже сдан попыткой', alreadyFinished.id, '— новую не создаю');
       return null;
     }
+  }
+  /* Серверная проверка: вдруг есть неоконченная попытка, о которой
+     локально не знаем (после обновления страницы, кеш не подтянулся и т.д.) */
+  try {
+    const parentFilter = STATE.solverParentAttemptId
+      ? '&parent_attempt_id=eq.' + STATE.solverParentAttemptId
+      : '&parent_attempt_id=is.null';
+    const existing = await restRequest('GET',
+      '/test_variant_attempts?profile_id=eq.' + MY_PROFILE.id +
+      '&variant_id=eq.' + STATE.solverVariantId +
+      '&finished_at=is.null' +
+      parentFilter +
+      '&select=id,started_at,parent_attempt_id&order=started_at.desc&limit=1');
+    if(Array.isArray(existing) && existing.length){
+      const found = existing[0];
+      console.log('[live] нашла существующую неоконченную попытку',
+        found.id, '— переподключаюсь без создания дубля');
+      STATE.liveAttemptId = found.id;
+      if(found.started_at){
+        STATE.solverStartedAt = new Date(found.started_at).getTime();
+      }
+      saveSolverDraft();
+      return found.id;
+    }
+  } catch(e){
+    console.warn('[live] серверная проверка unfinished упала:', e.message,
+      '— продолжаю с INSERT (рискую дублем)');
   }
   try {
     const att = await restRequest('POST', '/test_variant_attempts', {
@@ -29116,38 +29144,110 @@ async function ensureLiveAttempt(){
   }
 }
 
-/* Запись live-ответа: UPSERT в test_variant_answers (через saveAnswerField
-   с дополнительными колонками). Если строки нет — INSERT, иначе UPDATE.
-   Не блокирующая — выполняется в фоне, ошибку только логируем. */
+/* === Очередь pending-сейвов ===
+   Прецедент 29.05.2026 (18:00, DDoS): прокси reg.ru задыхался, у учеников
+   последние «Проверить» на заданиях 24-26 не доходили до БД. UI считал ответ
+   сохранённым, но в test_variant_answers строк не появлялось.
+   Теперь каждый ответ кладётся в очередь _pendingLiveSaves. Попытка отправить
+   ждёт ответ от БД; если упало — оставляем в очереди, шлём ещё раз через
+   3/9/27 секунд. drainPendingSaves() ждёт пока все долетят — вызывается
+   перед «Сдать пробник». */
+const _pendingLiveSaves = new Map();  // num -> { payload, attempts, nextRetryTs }
+let _pendingDrainTimer = null;
+function _setPendingTimer(delayMs){
+  if(_pendingDrainTimer) clearTimeout(_pendingDrainTimer);
+  _pendingDrainTimer = setTimeout(() => {
+    _pendingDrainTimer = null;
+    _flushPendingLiveSaves().catch(()=>{});
+  }, delayMs);
+}
+async function _flushPendingLiveSaves(){
+  if(_pendingLiveSaves.size === 0) return;
+  const now = Date.now();
+  const ready = [];
+  for(const [num, item] of _pendingLiveSaves.entries()){
+    if(!item.nextRetryTs || item.nextRetryTs <= now) ready.push(num);
+  }
+  for(const num of ready){
+    const item = _pendingLiveSaves.get(num);
+    if(!item) continue;
+    try {
+      await _doSaveLiveAnswer(num, item.payload);
+      _pendingLiveSaves.delete(num);
+      console.log('[live] pending num=' + num + ' долетел (попытка ' + (item.attempts + 1) + ')');
+    } catch(e){
+      item.attempts = (item.attempts || 0) + 1;
+      /* Бэкофф: 3 → 9 → 27 → 60 сек, потом каждые 60 сек */
+      const delays = [3000, 9000, 27000, 60000];
+      const delayMs = delays[Math.min(item.attempts - 1, delays.length - 1)] || 60000;
+      item.nextRetryTs = Date.now() + delayMs;
+      console.warn('[live] pending num=' + num + ' попытка ' + item.attempts +
+        ' упала, повтор через ' + Math.round(delayMs/1000) + 'с:', e.message);
+    }
+  }
+  if(_pendingLiveSaves.size > 0){
+    /* Ещё есть кого досылать — планируем следующую попытку на минимальный nextRetryTs */
+    let minNext = Infinity;
+    for(const item of _pendingLiveSaves.values()){
+      if(item.nextRetryTs && item.nextRetryTs < minNext) minNext = item.nextRetryTs;
+    }
+    const delay = Math.max(500, minNext - Date.now());
+    _setPendingTimer(delay);
+  }
+}
+/* Само сетевое сохранение — PATCH, если не нашёл — INSERT. */
+async function _doSaveLiveAnswer(num, payload){
+  const resp = await restRequest('PATCH',
+    '/test_variant_answers?attempt_id=eq.' + payload.attempt_id +
+    '&question_num=eq.' + num,
+    { user_answer: payload.user_answer, points: payload.points, max_points: payload.max_points },
+    { prefer: 'return=representation' });
+  if(Array.isArray(resp) && resp.length > 0) return;
+  /* PATCH не нашёл строку — INSERT */
+  await restRequest('POST', '/test_variant_answers', payload,
+    { prefer: 'return=representation' });
+}
+/* Дождаться, пока все pending-сейвы долетят. Возвращает {ok, pending}.
+   Вызывается перед «Сдать пробник» — гарантирует, что все ответы записаны. */
+async function drainPendingLiveSaves(maxWaitMs){
+  const deadline = Date.now() + (maxWaitMs || 15000);
+  while(_pendingLiveSaves.size > 0 && Date.now() < deadline){
+    await _flushPendingLiveSaves();
+    if(_pendingLiveSaves.size === 0) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
+  return { ok: _pendingLiveSaves.size === 0, pending: _pendingLiveSaves.size };
+}
+/* Публичная функция: записать live-ответ. Кладёт в очередь и сразу пробует
+   отправить. Если упадёт — останется в очереди для авто-ретраев. */
 async function saveLiveAnswer(num, userAnswer, points, max){
   const attId = await ensureLiveAttempt();
   if(!attId) return;
+  const payload = {
+    attempt_id: attId,
+    question_num: num,
+    user_answer: userAnswer || null,
+    points: Number(points) || 0,
+    max_points: Number(max) || 0
+  };
+  _pendingLiveSaves.set(num, { payload, attempts: 0, nextRetryTs: 0 });
   try {
-    /* PATCH сразу со всеми полями. is_correct НЕ ставим — в БД она обычно
-       generated column на основе points >= max_points; явная установка ломает
-       INSERT. Остальное (user_answer, points, max_points) ставим как обычно. */
-    const patch = {
-      user_answer: userAnswer || null,
-      points: Number(points) || 0,
-      max_points: Number(max) || 0
-    };
-    const resp = await restRequest('PATCH',
-      '/test_variant_answers?attempt_id=eq.' + attId +
-      '&question_num=eq.' + num,
-      patch, { prefer: 'return=representation' });
-    if(Array.isArray(resp) && resp.length > 0){
-      console.log('[live] saved (patch) num=' + num + ' pts=' + patch.points + '/' + patch.max_points);
-      return;
-    }
-    /* PATCH не нашёл строку — INSERT */
-    const insertResp = await restRequest('POST', '/test_variant_answers', {
-      attempt_id: attId, question_num: num, ...patch
-    }, { prefer: 'return=representation' });
-    console.log('[live] saved (insert) num=' + num,
-      Array.isArray(insertResp) ? insertResp.length + ' rows' : 'ok');
+    await _doSaveLiveAnswer(num, payload);
+    _pendingLiveSaves.delete(num);
+    console.log('[live] saved num=' + num + ' pts=' + payload.points + '/' + payload.max_points);
   } catch(e){
-    console.error('[live] saveLiveAnswer FAIL num=' + num + ':', e.message, e);
-    showToast('⚠ live: ' + e.message);
+    /* Не удалось с первого раза — оставляем в очереди, ретрай через 3 сек */
+    const item = _pendingLiveSaves.get(num);
+    if(item){
+      item.attempts = 1;
+      item.nextRetryTs = Date.now() + 3000;
+    }
+    _setPendingTimer(3000);
+    console.warn('[live] saveLiveAnswer num=' + num + ' упал, в очереди:', e.message);
+    /* Показываем тост только если очередь раздулась — иначе лишний шум */
+    if(_pendingLiveSaves.size >= 3){
+      showToast('⚠ Не все ответы успели сохраниться, повторяем…');
+    }
   }
 }
 
@@ -30820,6 +30920,32 @@ async function finishSolvingAndSave(){
     return;
   }
   if(!MY_PROFILE){ showToast('Нет профиля — авторизуйся'); return; }
+  /* === Финальная синхронизация очереди pending-сейвов ===
+     Прецедент 29.05.2026 (18:00, DDoS): у учеников последние «Проверить» на
+     заданиях 24-26 не доходили до БД из-за лежащего прокси. UI считал ответ
+     сохранённым, но в test_variant_answers строк не появлялось → у учителя
+     в таблице эти задания были пустыми «—», даже у тех кто «сдал».
+     Теперь перед финализацией ждём, пока вся очередь долетит. Если за 15 сек
+     не успели — предупреждаем ученика и даём возможность подождать ещё. */
+  if(typeof drainPendingLiveSaves === 'function' && _pendingLiveSaves.size > 0){
+    showToast('⏳ Сохраняю последние ответы (' + _pendingLiveSaves.size + ')…');
+    const drain = await drainPendingLiveSaves(15000);
+    if(!drain.ok){
+      const msg = '⚠ Не удалось дослать ' + drain.pending + ' ответа(ов).\n\n' +
+        'Если нажмёшь «Сдать сейчас» — они продолжат сохраняться в фоне,\n' +
+        'но если связь не вернётся, могут потеряться.\n\n' +
+        'OK = подождать ещё 30 секунд (рекомендую).\n' +
+        'Отмена = всё равно сдать сейчас.';
+      const waitMore = confirm(msg);
+      if(waitMore){
+        showToast('⏳ Ждём ещё 30 секунд…');
+        const second = await drainPendingLiveSaves(30000);
+        if(!second.ok){
+          showToast('⚠ ' + second.pending + ' ответа(ов) всё ещё не сохранены, сдаю как есть');
+        }
+      }
+    }
+  }
   STATE.solverFinishedAt = Date.now();
   const data = STATE.solverData;
   const filterNums = STATE.solverFilteredNums;
@@ -30921,7 +31047,24 @@ async function finishSolvingAndSave(){
         '/test_variant_answers?on_conflict=attempt_id,question_num',
         answersPayload,
         { prefer: 'resolution=merge-duplicates,return=minimal' });
-    } catch(e){ console.warn('answers save error', e.message); }
+    } catch(e){
+      /* Прецедент 29.05.2026: финальный batch-save мог упасть из-за прокси,
+         и тогда ответы терялись (попытка финализирована, но строк в БД нет).
+         Теперь сыплем в _pendingLiveSaves очередь — она будет добивать
+         каждый ответ по отдельности с экспоненциальным бэкоффом,
+         пока не сохранятся все. */
+      console.warn('answers save error → кладу в очередь pending:', e.message);
+      answersPayload.forEach(p => {
+        if(p.question_num >= 27) return;   /* 27 — сочинение, без поинтов */
+        _pendingLiveSaves.set(p.question_num, {
+          payload: p,
+          attempts: 0,
+          nextRetryTs: 0
+        });
+      });
+      _setPendingTimer(3000);
+      showToast('⚠ Часть ответов досохраняется в фоне — не закрывай страницу ~1 мин');
+    }
   }
   clearSolverDraft();
   STATE.solverResult = result;
