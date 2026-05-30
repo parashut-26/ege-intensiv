@@ -26720,26 +26720,20 @@ function renderWarmupBlockTeacher(b, day){
       render();
     };
     const grid = el('div', { style:{ display:'flex', flexWrap:'wrap', gap:'4px', marginBottom:'8px' }});
-    imgs.forEach((u, i) => {
-      const img = el('img', { src: imgThumb(u, 900), alt:'',
-        loading: 'lazy', decoding: 'async',
-        style:{ width:'100%', height:'100%', objectFit:'contain', cursor:'zoom-in' },
-        title: 'Открыть на весь экран',
-        onclick: () => openInLightboxTeacher(i)
-      });
-      if(imgs.length === 1){
-        /* Одиночное фото: резерв высоты через aspect-ratio (как у ученика) —
-           иначе превью учителя тоже «прыгает» при подгрузке. */
-        grid.append(el('div', { style:{ width:'100%', aspectRatio:'4 / 3',
-          background:'#0f172a', borderRadius:'6px', overflow:'hidden' }}, img));
-      } else {
-        /* Несколько фото: миниатюры фикс. 120×120 — высота и так известна. */
-        img.style.width = '120px'; img.style.height = '120px';
-        img.style.objectFit = 'cover'; img.style.background = '#0f172a';
-        img.style.borderRadius = '6px';
-        grid.append(img);
-      }
-    });
+    imgs.forEach((u, i) => grid.append(el('img', { src: imgThumb(u, 900), alt:'',
+      loading: 'lazy', decoding: 'async',
+      style:{
+        width:  imgs.length === 1 ? '100%' : '120px',
+        height: imgs.length === 1 ? 'auto' : '120px',
+        maxHeight: imgs.length === 1 ? '60vh' : '120px',
+        objectFit: 'contain',
+        background: '#0f172a',
+        borderRadius:'6px',
+        cursor:'zoom-in'
+      },
+      title: 'Открыть на весь экран',
+      onclick: () => openInLightboxTeacher(i)
+    })));
     card.append(grid);
   }
   if(b.title) card.append(el('div', { style:{ fontWeight:'700', marginBottom:'4px' }}, b.title));
@@ -27320,31 +27314,18 @@ function renderWarmupBlockStudent(b){
     render();
   };
   if(imgs.length === 1){
-    /* Резервируем место под фото ДО загрузки через aspect-ratio контейнер.
-       Иначе img с width:100% и height:auto до подгрузки занимает 0 по высоте,
-       а после загрузки резко раздвигается и толкает контент вниз — у ученика
-       при открытии дня страницу «дёргает», пока грузятся фото (layout shift).
-       Соотношение 4:3 фиксированное (реальные размеры фото в БД не хранятся);
-       фото внутри object-fit:contain — видно целиком, тёмный фон скрывает поля,
-       клик открывает на весь экран. Прецедент 30.05.2026 (Ольга). */
-    const frame = el('div', { style:{ width:'100%', aspectRatio:'4 / 3',
-      background:'#0f172a', cursor:'zoom-in', overflow:'hidden' },
-      onclick: () => openInLightbox(0),
-      title: 'Открыть на весь экран' });
-    frame.append(el('img', { src: imgThumb(imgs[0], 1080), alt: b.title || '',
+    card.append(el('img', { src: imgThumb(imgs[0], 1080), alt: b.title || '',
       loading: 'lazy', decoding: 'async',
-      style:{ display:'block', width:'100%', height:'100%', objectFit:'contain' }
+      style:{ display:'block', width:'100%', maxHeight:'75vh',
+              objectFit:'contain', background:'#0f172a', cursor:'zoom-in' },
+      onclick: () => openInLightbox(0),
+      title: 'Открыть на весь экран'
     }));
-    card.append(frame);
   } else if(imgs.length > 1){
-    /* Горизонтальный скролл-карусель + счётчик «N / M» в углу.
-       aspectRatio:4/3 на самом контейнере резервирует высоту ДО загрузки фото
-       (иначе карусель схлопнута в 0 и при подгрузке толкает контент — тот же
-       layout shift, что и для одиночного фото). */
+    /* Горизонтальный скролл-карусель + счётчик «N / M» в углу. */
     const wrap = el('div', { style:{ position:'relative' }});
     const carousel = el('div', { style:{ display:'flex', overflowX:'auto', gap:'4px',
-                                          scrollSnapType:'x mandatory', background:'#0f172a',
-                                          aspectRatio:'4 / 3' }});
+                                          scrollSnapType:'x mandatory', background:'#0f172a' }});
     const counter = el('div', { style:{ position:'absolute', top:'10px', right:'12px',
                                          background:'rgba(0,0,0,0.55)', color:'#fff',
                                          padding:'4px 10px', borderRadius:'999px',
@@ -27366,7 +27347,7 @@ function renderWarmupBlockStudent(b){
          Из-за этого широкие чек-листы обрезались по правому краю.
          Прецедент 30.05.2026. */
       style:{ flex:'0 0 100%', width:'100%', minWidth:0,
-              height:'100%', objectFit:'contain',
+              maxHeight:'75vh', objectFit:'contain',
               scrollSnapAlign:'start', cursor:'zoom-in' },
       onclick: () => openInLightbox(i)
     })));
