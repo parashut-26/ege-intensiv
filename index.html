@@ -29704,17 +29704,49 @@ function parseTask22Matching(questionText){
         случайные одиночные буквы-слова внутри предложений (В, А, И…).
         Fallback на «принять без скобки» оставлен только если ни у одной
         буквы скобки нет (раритетный случай порчи PDF). */
-  const hasAnyParenLetter = markers.some(mk => mk.type === 'letter' && mk.hasParen);
-  let cleanMarkers = markers;
-  if(hasAnyParenLetter){
-    cleanMarkers = cleanMarkers.filter(mk => mk.type !== 'letter' || mk.hasParen);
-  }
-  let firstNumIdx = -1;
-  for(let i = 0; i < cleanMarkers.length; i++){
-    if(cleanMarkers[i].type === 'num'){ firstNumIdx = i; break; }
-  }
-  if(firstNumIdx >= 0){
-    cleanMarkers = cleanMarkers.filter((mk, i) => !(i > firstNumIdx && mk.type === 'letter'));
+  /* === Отбор маркеров: убираем ложные одиночные буквы, но НЕ теряем
+     легитимную букву с потерянной скобкой ===
+     Прецедент 30.05.2026, «вариант 37» задания 8: в исходнике было
+     «Г) нарушение … с причастным оборотом Д неправильное построение …» —
+     у буквы Д при импорте отвалилась скобка. Старый фильтр (после прецедента
+     29.05) выбрасывал ВСЕ буквы без скобки, если хоть у одной скобка была,
+     и убивал эту Д: её текст приклеивался к Г, а сам пункт Д исчезал
+     («в задании 8 нет буквы Д»).
+     Новое правило для буквы БЕЗ скобки — принимаем её, только если:
+       1) она продолжает алфавитный ряд А→Б→В→Г→Д (следующая за последней
+          принятой буквой) и ещё не встречалась со скобкой;
+       2) до неё идёт существенный текст категории (≥10 символов от конца
+          предыдущего маркера). Это отсекает предлог/инициал «В», «А»,
+          стоящий в САМОМ НАЧАЛЕ текста буквы (прецедент 29.05: «А) В открытом
+          море…» — там «В» вплотную к «А)», разрыв ~1 символ), но пропускает
+          настоящую потерявшую скобку Д после развёрнутой формулировки Г.
+     Буквенные маркеры после первого числового (блок предложений 1-9) по-
+     прежнему отбрасываем — там букв-категорий уже не бывает. */
+  const SEQ = 'АБВГД';
+  const seenParenLetters = new Set(
+    markers.filter(mk => mk.type === 'letter' && mk.hasParen).map(mk => mk.val));
+  const cleanMarkers = [];
+  let lastLetterSeq = -1;
+  let numSeen = false;
+  for(const mk of markers){
+    if(mk.type === 'num'){ numSeen = true; cleanMarkers.push(mk); continue; }
+    /* После блока цифр буквенных категорий не бывает — это случайная буква
+       внутри предложения (старый firstNumIdx-фильтр). */
+    if(numSeen) continue;
+    if(mk.hasParen){
+      cleanMarkers.push(mk);
+      lastLetterSeq = SEQ.indexOf(mk.val);
+      continue;
+    }
+    /* Буква без скобки — проверяем оба условия. */
+    const seq = SEQ.indexOf(mk.val);
+    const prev = cleanMarkers[cleanMarkers.length - 1];
+    const gap = prev ? (mk.start - prev.end) : mk.start;
+    if(seq === lastLetterSeq + 1 && !seenParenLetters.has(mk.val) && gap >= 10){
+      cleanMarkers.push(mk);
+      lastLetterSeq = seq;
+    }
+    /* иначе — ложный одиночный буквенный маркер, пропускаем */
   }
   /* Сортируем по позиции (на случай если regex выдал в порядке матчей,
      но в тексте они стоят по-другому — крайне редкий случай) */
