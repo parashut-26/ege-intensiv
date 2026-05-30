@@ -26229,6 +26229,35 @@ async function voteWarmupPoll(blockId, optionIndex){
    render() с сохранением позиции скролла и значения активного
    текстового поля (чтобы пользователь не терял ввод). */
 let _postsPollHash = '';
+
+/* ===== Кэш DOM-узлов <img> для фото постов (анти-мигание) =====
+   Поллинг постов каждые 12 секунд вызывает render() — полную перерисовку SPA,
+   при которой пересоздаются ВСЕ DOM-узлы, включая <img>. При пересоздании
+   <img> браузер заново загружает/декодирует картинку, отсюда «мигание» фото
+   первую минуту, пока изображения не закэшируются на уровне браузера.
+
+   Решение: кэшируем сам DOM-узел <img> по его url (src стабилен, т.к. imgThumb
+   сейчас возвращает оригинальный url без изменений). При повторной перерисовке
+   возвращаем ТОТ ЖЕ самый <img>-элемент — старый родитель выбрасывается,
+   узел перевешивается в новый родитель через append(). Поскольку это тот же
+   самый элемент с тем же src, браузер картинку НЕ перезагружает => мигание уходит.
+
+   Стили и onclick применяем КАЖДЫЙ раз заново: стили идентичны, а onclick
+   должен ссылаться на свежее замыкание (актуальный индекс/openInLightbox). */
+const _imgNodeCache = new Map();
+function getCachedPostImg(url, attrs, styleObj, onclick){
+  let node = _imgNodeCache.get(url);
+  if(!node){
+    /* Первое создание узла для этого url — кладём в кэш. */
+    node = el('img', Object.assign({ src: url }, attrs));
+    _imgNodeCache.set(url, node);
+  }
+  /* Применяем стили и обработчик заново при каждой перерисовке. */
+  if(styleObj) Object.assign(node.style, styleObj);
+  node.onclick = onclick || null;
+  return node;
+}
+
 function startPostsPolling(){
   if(STATE._postsPollIntervalId) return;
   STATE._postsPollIntervalId = setInterval(async () => {
@@ -27314,13 +27343,14 @@ function renderWarmupBlockStudent(b){
     render();
   };
   if(imgs.length === 1){
-    card.append(el('img', { src: imgThumb(imgs[0], 1080), alt: b.title || '',
-      loading: 'lazy', decoding: 'async',
-      style:{ display:'block', width:'100%', maxHeight:'75vh',
-              objectFit:'contain', background:'#0f172a', cursor:'zoom-in' },
-      onclick: () => openInLightbox(0),
-      title: 'Открыть на весь экран'
-    }));
+    /* Переиспользуем закэшированный <img>-узел по url, чтобы фото не мигало
+       при перерисовке от поллинга. Стили/onclick — те же, что и раньше. */
+    card.append(getCachedPostImg(imgThumb(imgs[0], 1080),
+      { alt: b.title || '', loading: 'lazy', decoding: 'async',
+        title: 'Открыть на весь экран' },
+      { display:'block', width:'100%', maxHeight:'75vh',
+        objectFit:'contain', background:'#0f172a', cursor:'zoom-in' },
+      () => openInLightbox(0)));
   } else if(imgs.length > 1){
     /* Горизонтальный скролл-карусель + счётчик «N / M» в углу. */
     const wrap = el('div', { style:{ position:'relative' }});
@@ -27339,18 +27369,18 @@ function renderWarmupBlockStudent(b){
                                       fontSize:'11px', fontWeight:'600',
                                       pointerEvents:'none', zIndex:'1', opacity:'0.85' }},
       '⤢ тапни — на весь экран');
-    imgs.forEach((u, i) => carousel.append(el('img', { src: imgThumb(u, 1080), alt:'',
-      loading: 'lazy', decoding: 'async',
-      /* width:'100%' и minWidth:0 — критично для iOS Safari:
-         без width Safari рендерит картинку в её НАТУРАЛЬНОЙ ширине,
-         flex:'0 0 100%' не помогает (там flex-basis, а не размер).
-         Из-за этого широкие чек-листы обрезались по правому краю.
-         Прецедент 30.05.2026. */
-      style:{ flex:'0 0 100%', width:'100%', minWidth:0,
-              maxHeight:'75vh', objectFit:'contain',
-              scrollSnapAlign:'start', cursor:'zoom-in' },
-      onclick: () => openInLightbox(i)
-    })));
+    /* Переиспользуем закэшированный <img>-узел по url (анти-мигание).
+       width:'100%' и minWidth:0 — критично для iOS Safari:
+       без width Safari рендерит картинку в её НАТУРАЛЬНОЙ ширине,
+       flex:'0 0 100%' не помогает (там flex-basis, а не размер).
+       Из-за этого широкие чек-листы обрезались по правому краю.
+       Прецедент 30.05.2026. */
+    imgs.forEach((u, i) => carousel.append(getCachedPostImg(imgThumb(u, 1080),
+      { alt:'', loading: 'lazy', decoding: 'async' },
+      { flex:'0 0 100%', width:'100%', minWidth:0,
+        maxHeight:'75vh', objectFit:'contain',
+        scrollSnapAlign:'start', cursor:'zoom-in' },
+      () => openInLightbox(i))));
     /* Обновляем счётчик на скролле */
     carousel.addEventListener('scroll', () => {
       const idx = Math.round(carousel.scrollLeft / carousel.clientWidth) + 1;
