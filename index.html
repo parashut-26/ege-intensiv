@@ -1472,6 +1472,7 @@ const STATE = {
   theoryOpen: null,        // номер задания
   taskTab: 'theory',       // 'theory' | 'practice' — какая вкладка открыта в карточке задания
   attendanceOpen: false,   // открыта модалка посещаемости
+  attendanceView: 'day',   // 'day' | 'table' — режим вкладки «Посещаемость»: дневной вид / сводная таблица
   scoresK: {}, errors: {}, essayComment: '', essayVoiceUrl: null,
   studentEssayResultOpen: null,
   sampleOpen: null,
@@ -19093,19 +19094,141 @@ function attendRow(s){
    ======================================================================= */
 function viewTeacherAttendance(){
   const wrap = el('div', { class:'fade-in' });
+  /* Переключатель режима: «День» (существующий вид) / «Вся таблица» (сводка).
+     По умолчанию STATE.attendanceView === 'day' — поведение без переключения прежнее. */
+  const view = STATE.attendanceView === 'table' ? 'table' : 'day';
+  const modeBtn = (key, label) => el('button', {
+    class: 'btn btn-sm ' + (view === key ? 'btn-y' : 'btn-secondary'),
+    onclick: () => { STATE.attendanceView = key; render(); }
+  }, label);
+
   wrap.append(
     el('h1', null, '👥 Посещаемость'),
-    el('p', { style:{ color:'var(--ink-2)', marginBottom:'20px' }},
+    el('p', { style:{ color:'var(--ink-2)', marginBottom:'14px' }},
       'Отметка по дням и активностям. Ученики могут отметиться сами кнопкой «Я на уроке», а вы быстро досматриваете.'),
-    el('div', { class:'card' },
-      el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px' }},
-        el('h3', null, 'День 1 · Вебинар 13:00'),
-        el('button', { class:'btn btn-y btn-sm',
-          onclick: () => { STATE.attendanceOpen = true; render(); }
-        }, 'Открыть быструю отметку')),
-      el('div', { class:'attend-list' },
-        STUDENTS.filter(s => s.status !== 'pending').map(s => attendRow(s)))));
+    el('div', { style:{ display:'flex', gap:'8px', marginBottom:'20px' }},
+      modeBtn('day', '📅 День'),
+      modeBtn('table', '📊 Вся таблица')));
+
+  if(view === 'table'){
+    wrap.append(attendanceSummaryTable());
+  } else {
+    wrap.append(
+      el('div', { class:'card' },
+        el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:'14px' }},
+          el('h3', null, 'День 1 · Вебинар 13:00'),
+          el('button', { class:'btn btn-y btn-sm',
+            onclick: () => { STATE.attendanceOpen = true; render(); }
+          }, 'Открыть быструю отметку')),
+        el('div', { class:'attend-list' },
+          STUDENTS.filter(s => s.status !== 'pending').map(s => attendRow(s)))));
+  }
   return wrap;
+}
+
+/* Сводная таблица посещаемости на весь интенсив (read-only).
+   Строки — ученики, столбцы — вебинары интенсива (по дням), ячейки — значок
+   статуса. Данные берём из уже загруженного ATTENDANCE_BY_ACT (тот же источник,
+   что и дневной вид). Статусы реальные: 'teacher' — отмечен вами (✓ зелёный),
+   'self' — отметился сам (🐝 зелёный), нет записи — пусто/серый.
+   По ячейкам нет редактирования — отметка остаётся в дневном виде, чтобы не
+   трогать путь сохранения и не плодить случайные нажатия. */
+function attendanceSummaryTable(){
+  /* Страховка: если посещаемость по всем вебинарам ещё не подгружена
+     (например, не сработал loadAllAttendance при старте) — дозагрузим её
+     тем же запросом и перерисуем. Существующую загрузку не трогаем. */
+  if(WEBINARS.length){
+    const anyLoaded = WEBINARS.some(w => ATTENDANCE_BY_ACT[w.id] !== undefined);
+    if(!anyLoaded){
+      loadAllAttendance().then(() => render());
+    }
+  }
+
+  if(!WEBINARS.length){
+    return el('div', { class:'card' },
+      el('p', { style:{ color:'var(--ink-2)', margin:0 }},
+        '⚠ Вебинары ещё не загружены. Прогоните sql/add_attendance_setup.sql в Supabase.'));
+  }
+
+  const studs = STUDENTS.filter(s => s.status !== 'pending').slice()
+    .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'ru'));
+
+  const card = el('div', { class:'card', style:{ padding:0, overflowX:'auto', overflowY:'hidden', WebkitOverflowScrolling:'touch' }});
+  const scroll = el('div', { style:{ overflowX:'auto', overflowY:'hidden', WebkitOverflowScrolling:'touch' }});
+  const tbl = el('table', { class:'table', style:{ fontSize:'13px', minWidth:(180 + WEBINARS.length * 52 + 120) + 'px' }});
+
+  /* === Шапка: «Ученик» (sticky) + по столбцу на день + «Итого» === */
+  const head = el('tr', null,
+    el('th', { style:{ position:'sticky', left:0, background:'var(--surface)', zIndex:2, minWidth:'180px', textAlign:'left' }}, 'Ученик'));
+  WEBINARS.forEach(w => {
+    const label = 'Д' + (w.dayOrd != null ? w.dayOrd : '?');
+    const titleParts = [];
+    if(w.dayTitle) titleParts.push(w.dayTitle);
+    else if(w.title) titleParts.push(w.title);
+    if(w.dayDate) titleParts.push(w.dayDate);
+    head.append(el('th', {
+      style:{ textAlign:'center', padding:'8px 6px', minWidth:'44px' },
+      title: titleParts.join(' · ')
+    }, label));
+  });
+  head.append(el('th', { style:{ textAlign:'center', minWidth:'120px' }}, 'Итого'));
+  tbl.append(el('thead', null, head));
+
+  /* === Тело: по строке на ученика === */
+  const tbody = el('tbody', null);
+  studs.forEach(s => {
+    const tr = el('tr', null);
+    tr.append(el('td', {
+      style:{ position:'sticky', left:0, background:'var(--surface)', zIndex:1, fontWeight:'700', minWidth:'180px' }},
+      s.name || '—'));
+    let present = 0, self = 0, missed = 0;
+    WEBINARS.forEach(w => {
+      const status = (ATTENDANCE_BY_ACT[w.id] || {})[s.id];
+      let icon, bg, fg;
+      if(status === 'teacher'){
+        icon = '✓'; bg = '#DCFCE7'; fg = '#166534'; present++;
+      } else if(status === 'self'){
+        icon = '🐝'; bg = '#DCFCE7'; fg = '#166534'; self++;
+      } else {
+        icon = ''; bg = 'transparent'; fg = 'var(--ink-3)'; missed++;
+      }
+      tr.append(el('td', {
+        style:{ textAlign:'center', padding:'6px', background: bg, color: fg,
+                fontWeight:'700', cursor:'pointer', userSelect:'none' },
+        title: 'День ' + (w.dayOrd != null ? w.dayOrd : '?') + ' · ' +
+          (status === 'teacher' ? 'отмечен вами' : status === 'self' ? 'отметился сам' : 'не отмечен') +
+          ' · тап — отметить/снять',
+        onclick: async () => {
+          /* Тот же путь, что в attendRow: тап ставит teacher-отметку,
+             повторный тап снимает (пчёлки за самоотметку при снятии не трогаем). */
+          const cur = (ATTENDANCE_BY_ACT[w.id] || {})[s.id];
+          try {
+            if(cur){
+              await unmarkStudentAttendance(s.id, w.id);
+            } else {
+              const r = await markStudentAttendance(s.id, w.id, 'teacher');
+              if(r && !r.alreadyMarked){
+                showToast('🎙️ ' + (s.name || '').split(' ')[0] + ' · +' +
+                  ((WEBINARS.find(x => x.id === w.id) || { maxBee: 3 }).maxBee) + ' 🐝');
+              }
+            }
+          } catch(e){ showToast('⚠ ' + e.message); }
+          render();
+        }
+      }, icon));
+    });
+    /* «Итого»: сколько был (включая самоотметку) и сколько пропустил */
+    const attended = present + self;
+    tr.append(el('td', {
+      style:{ textAlign:'center', fontWeight:'700', fontSize:'12px', whiteSpace:'nowrap' },
+      title: 'Был: ' + attended + ' · Пропустил: ' + missed
+    }, attended + ' ✓ / ' + missed + ' ✗'));
+    tbody.append(tr);
+  });
+  tbl.append(tbody);
+  scroll.append(tbl);
+  card.append(scroll);
+  return card;
 }
 
 /* =======================================================================
