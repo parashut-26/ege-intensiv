@@ -26470,16 +26470,25 @@ function toDatetimeLocalValue(iso){
 async function updateWarmupBlock(blockId, payload){
   try {
     await restRequest('PATCH', '/warmup_blocks?id=eq.' + blockId, payload, { prefer: 'return=minimal' });
-    /* Найдём, где живёт этот пост — в warmup-дне или в дне интенсива */
-    let warmupDayId = null, intensiveOrd = null;
+    /* Найдём, где живёт этот пост — в warmup-дне, дне интенсива или
+       прогулочном дне — и перечитаем именно этот источник. */
+    let warmupDayId = null, intensiveOrd = null, walkKey = null;
     Object.keys(STATE.warmupBlocksByDay || {}).forEach(d => {
       if((STATE.warmupBlocksByDay[d] || []).some(b => b.id === blockId)) warmupDayId = parseInt(d, 10);
     });
     Object.keys(STATE.intensivePostsByOrd || {}).forEach(o => {
       if((STATE.intensivePostsByOrd[o] || []).some(b => b.id === blockId)) intensiveOrd = parseInt(o, 10);
     });
+    /* Прогулочные/мотивационные дни: посты в STATE.walkPostsByKey (ключ walk_id).
+       Без этого перечитывания после правки оставалась СТАРАЯ версия поста —
+       например выставленное «отложить до 1 июня» не отображалось, и пост
+       выглядел опубликованным сразу. Прецедент 31.05.2026. */
+    Object.keys(STATE.walkPostsByKey || {}).forEach(wk => {
+      if((STATE.walkPostsByKey[wk] || []).some(b => b.id === blockId)) walkKey = wk;
+    });
     if(warmupDayId != null)   await loadWarmupBlocks(warmupDayId);
     if(intensiveOrd != null)  await loadIntensivePosts(intensiveOrd);
+    if(walkKey != null)       await loadWalkPosts(walkKey);
     showToast('✓ Сохранено');
     STATE.editingBlockId = null;
     render();
