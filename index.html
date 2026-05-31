@@ -17278,7 +17278,19 @@ function modalStudentDetail(){
                 const vars = b.variants || b.options || [];
                 const opt = userArr[k];
                 const has = (typeof opt === 'number');
-                const word = has ? (vars[opt] != null ? String(vars[opt]) : ('вариант ' + (opt + 1))) : '…';
+                /* Если ученик ещё не выбрал — показываем САМО слово (базовую форму
+                   в скобках), как видит ученик до выбора, а не «…». Иначе учитель
+                   не понимал, с каким словом работает ученик. Логика как в
+                   решателе (строка ~11668): «(НЕ)ДОЧИТАННАЯ». Прецедент 31.05.2026. */
+                const baseWord = () => {
+                  const v0 = (vars[0] != null) ? String(vars[0]) : '';
+                  if(!v0) return '(?)';
+                  const segs = v0.split(/[\s-]/);
+                  return '(' + segs[0] + ')' + segs.slice(1).join('');
+                };
+                const word = has
+                  ? (vars[opt] != null ? String(vars[opt]) : ('вариант ' + (opt + 1)))
+                  : baseWord();
                 const corr = (typeof b.correct === 'number') ? (opt === b.correct) : null;
                 sent.append(el('span', { style:{ fontWeight:'700', padding:'1px 6px',
                   borderRadius:'5px', margin:'0 1px',
