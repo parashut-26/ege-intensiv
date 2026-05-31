@@ -18419,6 +18419,11 @@ function modalEssayResult(essayId){
       el('button', { class:'x', onclick: close }, '×')));
 
   const body = el('div', { class:'modal-body' });
+  /* Две колонки — как в кабинете учителя: слева работа + комментарий + баллы +
+     разбор 27, справа список замечаний учителя. Блоки складываем в leftCol;
+     rightCol соберём ниже. На узком экране .essay-grid сам схлопнется в 1
+     колонку (media-query). Прецедент 31.05.2026. */
+  const leftCol = el('div', { style:{ minWidth:0 }});
 
   /* Полный текст или фото работы с замечаниями */
   const isPhotoEssay = essay.format === 'photo';
@@ -18480,7 +18485,7 @@ function modalEssayResult(essayId){
             : '💡 Кликни по выделенному фрагменту, чтобы прочитать замечание учителя.')
       : null,
     bodyEl);
-  body.append(textBlock);
+  leftCol.append(textBlock);
 
   const rTxt = safeComment(r.general_comment);
   const rVu = safeVoiceUrl(r.voice_url);
@@ -18490,7 +18495,7 @@ function modalEssayResult(essayId){
   const isImportOnly = rTxt && String(rTxt).startsWith('Импорт из Excel') && !rVu;
   if(isImportOnly){
     const theme = String(rTxt).replace(/^Импорт из Excel(\s*—\s*|\s*-\s*|\s*:\s*)?/, '').trim();
-    body.append(el('div', { style:{ marginBottom:'10px', padding:'4px 8px',
+    leftCol.append(el('div', { style:{ marginBottom:'10px', padding:'4px 8px',
       background:'#F3F4F6', border:'1px solid var(--border-2)', borderRadius:'6px',
       fontSize:'10px', color:'var(--ink-3)', display:'inline-block',
       textTransform:'uppercase', letterSpacing:'.04em', fontWeight:'700' },
@@ -18498,7 +18503,7 @@ function modalEssayResult(essayId){
     },
       '📊 Балл из OTP-таблицы' + (theme ? ' · ' + theme : '')));
   } else if(rTxt || rVu){
-    body.append(el('div', { class:'card', style:{ background:'var(--p-soft)', border:'1px solid var(--p-2)', marginBottom:'10px' }},
+    leftCol.append(el('div', { class:'card', style:{ background:'var(--p-soft)', border:'1px solid var(--p-2)', marginBottom:'10px' }},
       el('h4', null, '💬 Комментарий учителя'),
       rTxt
         ? el('p', { style:{ marginTop:'6px', whiteSpace:'pre-wrap', lineHeight:'1.5', fontSize:'14px' }}, rTxt)
@@ -18509,7 +18514,7 @@ function modalEssayResult(essayId){
             el('audio', { controls:'controls', src: rVu, style:{ width:'100%', height:'36px' }}))
         : null));
   }
-  body.append(
+  leftCol.append(
     el('h4', { style:{ marginTop:'4px' }}, '📊 Баллы по критериям'),
     list);
 
@@ -18579,19 +18584,68 @@ function modalEssayResult(essayId){
           '(учитель ещё не заполнил задание 27 в этом варианте)'));
       }
     }
-    body.append(card);
+    leftCol.append(card);
   }
+
+  /* === Правая колонка: список замечаний учителя (read-only) === */
+  const rightCol = el('div', { style:{ minWidth:0 }});
+  /* Read-only строка замечания для ученика: номер пина (для фото) / цитата,
+     тип ошибки и текст комментария. Клик подсвечивает место в работе. */
+  const studentCommentRow = (c, idx) => {
+    const meta = errKindMeta(c.kind);
+    const isPhotoC = !!c.photo_anchor;
+    const where = isPhotoC ? ('стр. ' + ((c.photo_anchor.page || 0) + 1))
+                           : ('«' + (c.fragment || '') + '»');
+    const row = el('div', { class:'card',
+      style:{ marginBottom:'8px', padding:'10px 12px', cursor:'pointer',
+              borderLeft:'4px solid ' + (meta.bg || 'var(--border-2)') },
+      onclick: () => {
+        /* Подсветить место: для фото — открыть тултип у пина, для текста — у mark */
+        const sel = isPhotoC
+          ? bodyEl.querySelectorAll('[data-cid="' + c.id + '"], .pin[data-cid="' + c.id + '"]')
+          : bodyEl.querySelectorAll('mark[data-id="' + c.id + '"]');
+        const target = sel && sel[0];
+        if(target){
+          target.scrollIntoView({ behavior:'smooth', block:'center' });
+          try { showStudentCommentTooltip(c, target); } catch(_){}
+        }
+      }
+    },
+      el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'4px', flexWrap:'wrap' }},
+        el('span', { style:{ fontSize:'11px', fontWeight:'700', padding:'2px 6px', background: meta.bg, borderRadius:'5px', whiteSpace:'nowrap' }},
+          (isPhotoC ? (idx + 1) + ' · ' : '') + meta.crit + ' · ' + meta.label),
+        el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', fontStyle:'italic', wordBreak:'break-word' }}, where)),
+      el('div', { style:{ fontSize:'13px', lineHeight:'1.45' }},
+        safeComment(c.comment) || el('span', { style:{ color:'var(--ink-3)' }}, safeVoiceUrl(c.voice_url) ? '(голосовое)' : '(без пояснения)'),
+        safeVoiceUrl(c.voice_url) ? el('span', { style:{ marginLeft:'6px' }}, '🎤') : null));
+    return row;
+  };
+  rightCol.append(el('h4', { style:{ marginBottom:'8px' }},
+    '📝 Замечания учителя' + (commentsForView.length ? ' (' + commentsForView.length + ')' : '')));
+  if(commentsForView.length){
+    /* Тот же порядок, что и пины: текстовые по позиции, фото по странице/y
+       (loadEssayComments уже отсортировал). */
+    commentsForView.forEach((c, i) => rightCol.append(studentCommentRow(c, i)));
+  } else {
+    rightCol.append(el('div', { class:'card', style:{ color:'var(--ink-3)', fontSize:'13px', fontStyle:'italic' }},
+      'Учитель не оставил отдельных замечаний по тексту — смотри общий комментарий и баллы слева.'));
+  }
+
+  /* Собираем две колонки. essay-grid: слева ~1.2fr, справа 1fr (как у учителя);
+     на узком экране схлопывается в одну колонку автоматически. */
+  body.append(el('div', { class:'essay-grid' }, leftCol, rightCol));
 
   const foot = el('div', { class:'modal-foot' },
     el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }},
       'Оценка по критериям ФИПИ К1–К10'),
     el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть'));
 
-  /* В fullscreen модалка занимает почти весь экран — удобно читать длинное
-     фото-сочинение и разбор целиком. По умолчанию — компактное окно. */
+  /* Окно шире (как у учителя), чтобы помещались две колонки: работа+баллы и
+     замечания. На узком экране .essay-grid схлопнется в одну колонку (media).
+     В fullscreen — почти весь экран. */
   const modalStyle = isFullscreen
     ? { maxWidth:'none', width:'calc(100vw - 24px)', maxHeight:'calc(100vh - 24px)', height:'calc(100vh - 24px)' }
-    : { maxWidth:'620px' };
+    : { maxWidth:'1040px' };
   return el('div', { class:'modal-bg', style: isFullscreen ? { padding:'12px' } : null,
     onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
   }, el('div', { class:'modal', style: modalStyle }, head, body, foot));
