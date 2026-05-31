@@ -15673,6 +15673,7 @@ function studentEssaysCard(){
     card.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'10px 0' }}, '⏳ Загружаю работы…'));
     return card;
   }
+  ensureVariantsListLoaded();   /* для названия работы по варианту */
   if(!myEssays.length){
     card.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'13px', padding:'10px 0' }},
       'Ты ещё не сдавала сочинения. Можешь сдать через карточку дня или из карточки задания 27.'));
@@ -15699,9 +15700,14 @@ function studentEssaysCard(){
       ? { label: '📝 Учитель проверяет', color:'#92400E', bg:'#FEF3C7' }
       : { label: '⏳ На проверке', color:'var(--p-deep)', bg:'var(--p-soft)' };
 
-    const preview = e.format === 'photo'
-      ? '📸 ' + ((e.photoUrls || []).length) + ' стр.'
-      : (e.text || '').slice(0, 60).replace(/\s+/g, ' ').trim() + ((e.text || '').length > 60 ? '…' : '');
+    /* Название работы: по варианту / проблемному вопросу. Фото-метка (число
+       страниц) уходит во вторичную строку, если название есть. */
+    const workName = essayDisplayName(e);
+    const fmtHint = e.format === 'photo' ? '📸 ' + ((e.photoUrls || []).length) + ' стр.' : null;
+    const preview = workName
+      || fmtHint
+      || ((e.text || '').slice(0, 60).replace(/\s+/g, ' ').trim() + ((e.text || '').length > 60 ? '…' : ''));
+    const fmtSub = workName && fmtHint ? fmtHint : null;
     const finalScore = e.finalScore != null ? e.finalScore : (e.review && e.review.total);
 
     const row = el('div', {
@@ -15731,6 +15737,9 @@ function studentEssaysCard(){
               '🐝 ' + finalScore + ' / 22')
           : null),
       el('div', { style:{ fontSize:'13px', color:'var(--ink)', lineHeight:'1.4' }}, preview),
+      fmtSub
+        ? el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'2px' }}, fmtSub)
+        : null,
       e.status === 'done'
         ? el('div', { style:{ fontSize:'11px', color:'var(--p)', marginTop:'4px' }}, '👁 Кликни — посмотреть проверку')
         : null);
@@ -16466,17 +16475,60 @@ function weakTopicRow(t){
     el('span', { style:{ textAlign:'right', fontWeight:'800', color: colorMap[t.level] }}, t.pct + '%'));
 }
 
+/* ── Название работы для списков и заголовков ──────────────────────────
+   Раньше работа подписывалась по тексту (или «📸 N стр.» для фото), и понять,
+   что это за сочинение, было нельзя. Теперь даём осмысленное имя:
+   1) по варианту, к которому привязана работа (его title);
+   2) иначе — по проблемному вопросу, который сформулировал ученик.
+   Если ни того, ни другого нет — возвращаем null (показываем старое превью).
+   Прецедент 31.05.2026. */
+function essayVariantTitle(e){
+  const vid = e && (e.sourceVariantId || e.source_variant_id);
+  if(!vid) return null;
+  const vl = STATE.variantsList;
+  if(Array.isArray(vl) && vl.length){
+    const v = vl.find(x => String(x.id) === String(vid));
+    if(v && v.title && String(v.title).trim()) return String(v.title).trim();
+  }
+  return null;
+}
+function essayDisplayName(e){
+  const vt = essayVariantTitle(e);
+  if(vt) return vt;
+  const prob = String((e && (e.sourceProblem || e.source_problem)) || '')
+    .replace(/<[^>]+>/g, ' ').replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ').trim();
+  if(prob) return prob.length > 90 ? prob.slice(0, 90).trim() + '…' : prob;
+  return null;
+}
+/* Догрузка списка вариантов (нужен для названия по варианту). Guarded, чтобы
+   не плодить запросы при многократном render(). */
+let _variantsListLoading = false;
+function ensureVariantsListLoaded(){
+  if(STATE.variantsListLoaded || _variantsListLoading) return;
+  if(typeof loadVariantsList !== 'function') return;
+  _variantsListLoading = true;
+  loadVariantsList()
+    .then(() => { _variantsListLoading = false; render(); })
+    .catch(() => { _variantsListLoading = false; });
+}
+
 function essayRow(e, isCurator){
+  ensureVariantsListLoaded();
   let stChip;
   if(e.status === 'new' || e.status === 'submitted') stChip = chip('новое', 'red');
   else if(e.status === 'in_progress') stChip = chip('в работе', 'warn');
   else if(e.status === 'pre_checked') stChip = chip('🤝 куратор: ' + (e.preScore != null ? e.preScore + '/22' : 'проверено'), 'teal');
   else stChip = chip('✓ ' + (e.finalScore != null ? e.finalScore + '/22' : 'готово'), 'green');
 
-  /* Превью: для реальных DB-сочинений берём первые 80 символов body_text;
-     для фото-работ — спецметка; для моков — text + when. */
+  /* Превью: в первую очередь — название работы (по варианту / проблемному
+     вопросу). Если названия нет — старое поведение: фото-метка или текст. */
   let preview;
-  if(e.format === 'photo'){
+  const workName = essayDisplayName(e);
+  const fmtHint = e.format === 'photo' ? '📸 фото · ' + (e.photoUrls || []).length + ' стр.' : null;
+  if(workName){
+    preview = workName + (fmtHint ? ' · ' + fmtHint : '');
+  } else if(e.format === 'photo'){
     preview = '📸 фото-работа · ' + (e.photoUrls || []).length + ' стр.';
   } else if(e.text && e.text.length > 60){
     preview = e.text.slice(0, 80).replace(/\s+/g, ' ') + '…';
@@ -18539,8 +18591,9 @@ function modalEssayResult(essayId){
   if(isPhotoEssay) subtitleParts.push('📸 ' + (essay.photoUrls || []).length + ' стр.');
   if(essay.submittedAt) subtitleParts.push('сдано ' + new Date(essay.submittedAt).toLocaleString('ru-RU', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }));
 
+  ensureVariantsListLoaded();   /* для названия работы по варианту */
   const textBlock = el('div', { class:'card', style:{ marginBottom:'12px' }},
-    el('h4', { style:{ marginBottom:'8px' }}, '📝 Твоя работа'),
+    el('h4', { style:{ marginBottom:'8px' }}, '📝 ' + (essayDisplayName(essay) || 'Твоя работа')),
     el('div', { style:{ fontSize:'12px', color:'var(--ink-3)', marginBottom:'8px' }}, subtitleParts.join(' · ') || '—'),
     legend,
     (commentsForView && commentsForView.length)
@@ -20325,9 +20378,11 @@ function modalEssayReview(essayId){
   /* Ищем сначала в реальных DB_ESSAYS, потом в моках */
   const essay = DB_ESSAYS.find(e => e.id === essayId) || ESSAYS.find(e => e.id === essayId);
   if(!essay) return null;
-  /* Ярлык сочинения: для DB-работы это «Сочинение по тексту…» (берём начало body), для мока — essay.text */
+  /* Ярлык сочинения: название по варианту / проблемному вопросу; иначе —
+     «Сочинение» (DB-работа) или текст мока. */
   const isDb = DB_ESSAYS.find(e => e.id === essayId);
-  const essayLabel = isDb ? 'Сочинение' : essay.text;
+  ensureVariantsListLoaded();   /* для названия по варианту */
+  const essayLabel = isDb ? (essayDisplayName(essay) || 'Сочинение') : essay.text;
   /* Подзаголовок с датой */
   let whenLabel = essay.when;
   if(!whenLabel && essay.submittedAt){
