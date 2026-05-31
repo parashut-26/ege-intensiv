@@ -21364,10 +21364,40 @@ function critRow(c, lockK2K3){
     right = select;
   }
 
+  /* Для критериев «по ошибкам» (К7-К10) показываем ЖИВУЮ подпись по
+     фактическому числу ошибок и текущему баллу, а не статичное «0 ошибок = 3».
+     Напр. «Допущено 3 пунктуационные ошибки — 1 балл». Прецедент 31.05.2026. */
+  let desc;
+  if(isLocked){
+    desc = 'Заблокировано: К1 = 0';
+  } else if(c.byErrors){
+    const n = STATE.errors[c.id] != null ? +STATE.errors[c.id] : 0;
+    /* Прилагательное-тип ошибки в трёх формах: [1 → ед.ч., 2-4 → мн.ч., 5+ → род.мн.].
+       Согласуется с «ошибка / ошибки / ошибок» и глаголом «Допущена / Допущено». */
+    const ERR_ADJ = {
+      K7:  ['орфографическая', 'орфографические', 'орфографических'],
+      K8:  ['пунктуационная',  'пунктуационные',  'пунктуационных'],
+      K9:  ['грамматическая',  'грамматические',  'грамматических'],
+      K10: ['речевая',         'речевые',         'речевых'],
+    };
+    const forms = ERR_ADJ[c.id] || ['', '', ''];
+    const ball = ruPlural(value, 'балл', 'балла', 'баллов');
+    if(n === 0){
+      desc = 'Ошибок нет — ' + value + ' ' + ball;
+    } else {
+      const adj  = ruPlural(n, forms[0], forms[1], forms[2]);
+      const noun = ruPlural(n, 'ошибка', 'ошибки', 'ошибок');
+      const verb = (n % 10 === 1 && n % 100 !== 11) ? 'Допущена' : 'Допущено';
+      desc = verb + ' ' + n + ' ' + adj + ' ' + noun + ' — ' + value + ' ' + ball;
+    }
+  } else {
+    desc = c.hint.split('.')[0];
+  }
+
   return el('div', { class: 'crit ' + (isLocked ? 'locked' : ''), title: c.hint },
     el('div', { style:{ minWidth:0, flex:1 }},
       el('div', { class:'nm' }, c.id + ' · ' + c.name),
-      el('div', { class:'desc' }, isLocked ? 'Заблокировано: К1 = 0' : c.hint.split('.')[0])),
+      el('div', { class:'desc' }, desc)),
     right);
 }
 
