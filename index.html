@@ -15263,6 +15263,17 @@ function viewStudentGames(){
     el('p', { style:{ color:'var(--ink-2)', marginBottom:'18px' }},
       'Мини-тренажёры по темам ЕГЭ. Проходи в удобном темпе — баллы попадают в твою статистику.'));
 
+  /* Мои результаты — пройденные сборки и игры с баллами (та же функция, что в
+     карточке ученика у учителя). Показываем над каталогом. Прецедент 31.05.2026. */
+  if(MY_PROFILE && /^[0-9a-f-]{36}$/i.test(MY_PROFILE.id || '')){
+    studentResultsSections(MY_PROFILE.id, {
+      asmTitle: '🧩 Мои сборки',
+      gamesTitle: '🎮 Мои пройденные игры',
+      asmEmpty: 'Ты ещё не проходил(а) сборок от учителя.',
+      gamesEmpty: 'Ты ещё не проходил(а) игр. Выбери любую ниже и сыграй!'
+    }).forEach(c => wrap.append(c));
+  }
+
   if(!STATE.studentGamesList){
     loadStudentGamesList().then(render);
     wrap.append(el('div', { style:{ color:'var(--ink-3)', padding:'40px', textAlign:'center' }},
@@ -17235,6 +17246,128 @@ function studentRow(s){
 /* =======================================================================
    УЧИТЕЛЬ · ДЕТАЛЬНАЯ КАРТОЧКА УЧЕНИКА (история попыток + слабые темы)
    ======================================================================= */
+/* Секции «Сборки» и «Игры» с результатами по ученику (sid). Используется и в
+   карточке ученика у учителя, и в кабинете самого ученика. Возвращает массив
+   карточек (можно body.append каждую). Ленивая загрузка с кэшем по sid.
+   Прецедент 31.05.2026. */
+function studentResultsSections(sid, opts){
+  opts = opts || {};
+  const out = [];
+  if(!/^[0-9a-f-]{36}$/i.test(sid)) return out;
+
+  /* 🧩 Сборки — попытки по сборкам учителя (attempts с assembled_variant_id) */
+  const asmCard = el('div', { class:'card', style:{ marginBottom:'14px' }});
+  asmCard.append(el('h4', { style:{ marginBottom:'8px' }}, opts.asmTitle || '🧩 Сборки'));
+  if(STATE.assembledVariants === undefined && sb){
+    STATE.assembledVariants = null;
+    loadAssembledVariants().then(arr => { STATE.assembledVariants = arr; render(); });
+  }
+  const avTitleById = {};
+  (STATE.assembledVariants || []).forEach(av => { if(av) avTitleById[av.id] = av.title || 'Без названия'; });
+  const aCache = STATE.studentAssembledAttempts || (STATE.studentAssembledAttempts = {});
+  let aList = aCache[sid];
+  if(aList === undefined){
+    aCache[sid] = null;
+    asmCard.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'8px' }}, '⏳ Загружаю…'));
+    (async () => {
+      try {
+        const atts = await restRequest('GET',
+          '/attempts?student_id=eq.' + sid +
+          '&assembled_variant_id=not.is.null' +
+          '&select=id,score,max_score,bee_earned,created_at,assembled_variant_id' +
+          '&order=created_at.desc&limit=200');
+        aCache[sid] = Array.isArray(atts) ? atts : [];
+        render();
+      } catch(_){ aCache[sid] = []; render(); }
+    })();
+  } else if(!aList || !aList.length){
+    asmCard.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'8px' }},
+      opts.asmEmpty || 'Пока нет пройденных сборок.'));
+  } else {
+    const tbl = el('table', { class:'table', style:{ fontSize:'12px', width:'100%' }});
+    tbl.append(el('thead', null, el('tr', null,
+      el('th', null, 'Сборка'),
+      el('th', { style:{ textAlign:'center' }}, 'Дата'),
+      el('th', { style:{ textAlign:'center' }}, '%'),
+      el('th', { style:{ textAlign:'center' }}, 'Балл'))));
+    const tbody = el('tbody', null);
+    aList.forEach(a => {
+      const title = avTitleById[a.assembled_variant_id] || ('Сборка #' + a.assembled_variant_id);
+      const date = a.created_at ? new Date(a.created_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) : '—';
+      const pctNum = a.max_score ? Math.round((a.score || 0) / a.max_score * 100) : null;
+      const pct = pctNum != null ? pctNum + '%' : '—';
+      const pctColor = pctNum == null ? 'var(--ink-3)' : pctNum >= 70 ? 'var(--green)' : pctNum >= 50 ? 'var(--warn)' : 'var(--red)';
+      tbody.append(el('tr', null,
+        el('td', null, title),
+        el('td', { style:{ textAlign:'center', color:'var(--ink-3)' }}, date),
+        el('td', { style:{ textAlign:'center', color:pctColor, fontWeight:'700' }}, pct),
+        el('td', { style:{ textAlign:'center', fontWeight:'700' }},
+          (a.score != null ? a.score : '—') + (a.max_score ? ' / ' + a.max_score : ''))));
+    });
+    tbl.append(tbody);
+    asmCard.append(tbl);
+  }
+  out.push(asmCard);
+
+  /* 🎮 Игры — завершённые попытки в HTML-играх (game_attempts) */
+  const gCard = el('div', { class:'card', style:{ marginBottom:'14px' }});
+  gCard.append(el('h4', { style:{ marginBottom:'8px' }}, opts.gamesTitle || '🎮 Игры'));
+  if(!STATE.gamesList && sb){ loadGamesList().then(render); }
+  const gCache = STATE.studentGameAttempts || (STATE.studentGameAttempts = {});
+  let gList = gCache[sid];
+  if(gList === undefined){
+    gCache[sid] = null;
+    gCard.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'8px' }}, '⏳ Загружаю…'));
+    (async () => {
+      try {
+        const atts = await restRequest('GET',
+          '/game_attempts?student_id=eq.' + sid +
+          '&select=id,game_id,score,max_score,percent,time_seconds,created_at,finished_at,payload' +
+          '&order=created_at.desc&limit=300');
+        gCache[sid] = Array.isArray(atts) ? atts : [];
+        render();
+      } catch(_){ gCache[sid] = []; render(); }
+    })();
+  } else {
+    const finished = (gList || []).filter(a => a.finished_at);
+    if(!finished.length){
+      gCard.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'8px' }},
+        opts.gamesEmpty || 'Пока нет пройденных игр.'));
+    } else {
+      const listWrap = el('div', { style:{ display:'flex', flexDirection:'column', gap:'8px' }});
+      finished.forEach(a => {
+        const g = findGame(a.game_id);
+        const title = (g ? ((g.emoji ? g.emoji + ' ' : '') + g.title) : ('Игра #' + a.game_id));
+        const date = a.created_at ? new Date(a.created_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) : '—';
+        const pctNum = a.percent != null ? Math.round(a.percent)
+                     : (a.max_score ? Math.round((a.score || 0) / a.max_score * 100) : null);
+        const pct = pctNum != null ? pctNum + '%' : '—';
+        const pctColor = pctNum == null ? 'var(--ink-3)' : pctNum >= 70 ? 'var(--green)' : pctNum >= 50 ? 'var(--warn)' : 'var(--red)';
+        const head = el('div', { style:{ display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
+          el('span', { style:{ fontWeight:'700', fontSize:'13px', flex:1, minWidth:'120px' }}, title),
+          el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, date),
+          el('span', { style:{ fontSize:'12px', fontWeight:'700', color:pctColor }}, pct),
+          el('span', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
+            (a.score != null ? a.score : '—') + (a.max_score ? ' / ' + a.max_score : '') + ' 🐝'),
+          a.time_seconds ? el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, '⏱ ' + otpFormatTime(a.time_seconds)) : null);
+        const wrong = (typeof renderGameWrongTasks === 'function') ? renderGameWrongTasks(a.payload) : null;
+        let item;
+        if(wrong){
+          item = el('details', { style:{ background:'var(--surface-soft)', borderRadius:'8px', padding:'8px 10px' }});
+          const sum = el('summary', { style:{ cursor:'pointer', listStyle:'none' }}, head);
+          item.append(sum, wrong);
+        } else {
+          item = el('div', { style:{ background:'var(--surface-soft)', borderRadius:'8px', padding:'8px 10px' }}, head);
+        }
+        listWrap.append(item);
+      });
+      gCard.append(listWrap);
+    }
+  }
+  out.push(gCard);
+  return out;
+}
+
 function modalStudentDetail(){
   const sid = STATE.studentDetailOpen;
   if(!sid) return null;
@@ -18001,6 +18134,13 @@ function modalStudentDetail(){
     }
     body.append(variantsCard);
   }
+
+  /* 🧩 Сборки и 🎮 Игры — результаты ученика (общая функция; та же выводится
+     в кабинете самого ученика). Прецедент 31.05.2026. */
+  studentResultsSections(sid, {
+    asmEmpty: 'Ученик ещё не проходил сборок.',
+    gamesEmpty: 'Ученик ещё не проходил игр.'
+  }).forEach(c => body.append(c));
 
   /* Слабые темы */
   if(weakTopics.length){
@@ -23100,6 +23240,28 @@ function modalAssembledBuilder(){
   if(!b.filterTaskN) b.filterTaskN = null;
   if(!b.filterCollection) b.filterCollection = null;
 
+  /* Карта «где уже использовано задание»: (taskN:idx) → [названия сборок].
+     Чтобы при формировании новой сборки сразу видеть, что вопрос уже брали
+     раньше, и не дублировать его. Грузим список сборок лениво (с вопросами).
+     Прецедент 31.05.2026. */
+  if(STATE.assembledVariants === undefined && sb){
+    STATE.assembledVariants = null;
+    loadAssembledVariants().then(arr => { STATE.assembledVariants = arr; render(); });
+  }
+  const usageMap = {};
+  (STATE.assembledVariants || []).forEach(av => {
+    if(!av || !Array.isArray(av.questions)) return;
+    av.questions.forEach(q => {
+      if(!q) return;
+      const tn = q._source_task_n, ix = q._source_idx;
+      if(tn == null || ix == null) return;
+      const key = tn + ':' + ix;
+      if(!usageMap[key]) usageMap[key] = [];
+      const ttl = av.title || 'Без названия';
+      if(!usageMap[key].includes(ttl)) usageMap[key].push(ttl);
+    });
+  });
+
   /* Левая колонка: фильтры + список вопросов */
   const tasksWithQs = [];
   for(let n = 1; n <= 27; n++){
@@ -23268,6 +23430,16 @@ function modalAssembledBuilder(){
       style:{ color:'var(--ink-3)', fontSize:'10px', marginBottom:'4px',
               textTransform:'uppercase', letterSpacing:'.06em', fontWeight:'700' }
     }, 'Задание ' + c.taskN + (coll ? ' · ' + coll : '')));
+    /* Бейдж: в каких сборках это задание уже использовалось */
+    const usedIn = usageMap[k];
+    if(usedIn && usedIn.length){
+      inner.append(el('div', {
+        style:{ fontSize:'10px', color:'#9A3412', background:'#FFEDD5',
+                display:'inline-block', padding:'2px 7px', borderRadius:'5px',
+                marginBottom:'4px', fontWeight:'700', whiteSpace:'normal' },
+        title: 'Это задание уже входит в сборки: ' + usedIn.join(', ')
+      }, '🧩 уже в сборках: ' + usedIn.join(', ')));
+    }
     /* Контент: каждый bit на своей строке, с переносами слов */
     bits.forEach((bit, bi) => {
       inner.append(el('div', {
