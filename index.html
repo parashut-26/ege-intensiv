@@ -23100,6 +23100,28 @@ function modalAssembledBuilder(){
   if(!b.filterTaskN) b.filterTaskN = null;
   if(!b.filterCollection) b.filterCollection = null;
 
+  /* Карта «где уже использовано задание»: (taskN:idx) → [названия сборок].
+     Чтобы при формировании новой сборки сразу видеть, что вопрос уже брали
+     раньше, и не дублировать его. Грузим список сборок лениво (с вопросами).
+     Прецедент 31.05.2026. */
+  if(STATE.assembledVariants === undefined && sb){
+    STATE.assembledVariants = null;
+    loadAssembledVariants().then(arr => { STATE.assembledVariants = arr; render(); });
+  }
+  const usageMap = {};
+  (STATE.assembledVariants || []).forEach(av => {
+    if(!av || !Array.isArray(av.questions)) return;
+    av.questions.forEach(q => {
+      if(!q) return;
+      const tn = q._source_task_n, ix = q._source_idx;
+      if(tn == null || ix == null) return;
+      const key = tn + ':' + ix;
+      if(!usageMap[key]) usageMap[key] = [];
+      const ttl = av.title || 'Без названия';
+      if(!usageMap[key].includes(ttl)) usageMap[key].push(ttl);
+    });
+  });
+
   /* Левая колонка: фильтры + список вопросов */
   const tasksWithQs = [];
   for(let n = 1; n <= 27; n++){
@@ -23268,6 +23290,16 @@ function modalAssembledBuilder(){
       style:{ color:'var(--ink-3)', fontSize:'10px', marginBottom:'4px',
               textTransform:'uppercase', letterSpacing:'.06em', fontWeight:'700' }
     }, 'Задание ' + c.taskN + (coll ? ' · ' + coll : '')));
+    /* Бейдж: в каких сборках это задание уже использовалось */
+    const usedIn = usageMap[k];
+    if(usedIn && usedIn.length){
+      inner.append(el('div', {
+        style:{ fontSize:'10px', color:'#9A3412', background:'#FFEDD5',
+                display:'inline-block', padding:'2px 7px', borderRadius:'5px',
+                marginBottom:'4px', fontWeight:'700', whiteSpace:'normal' },
+        title: 'Это задание уже входит в сборки: ' + usedIn.join(', ')
+      }, '🧩 уже в сборках: ' + usedIn.join(', ')));
+    }
     /* Контент: каждый bit на своей строке, с переносами слов */
     bits.forEach((bit, bi) => {
       inner.append(el('div', {
