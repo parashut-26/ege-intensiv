@@ -20232,6 +20232,12 @@ function modalEssayReview(essayId){
     });
   } else {
     essayBodyEl = renderEssayWithMarks(essayText, commentsForView, { readonly: false });
+    /* В редакторе проверки показываем сочинение ЦЕЛИКОМ, без внутреннего
+       окна-скролла (.essay-text по умолчанию max-height:50vh+overflow).
+       Глобальный класс не трогаем (он же на образцах/превью) — переопределяем
+       inline только здесь. Прокручивается вся модалка. Прецедент 31.05.2026. */
+    essayBodyEl.style.maxHeight = 'none';
+    essayBodyEl.style.overflowY = 'visible';
     /* pointerup покрывает мышь, тач и Apple Pencil. На iPad Safari mouseup НЕ
        срабатывает для тач-selection — раньше из-за этого Ольга не могла
        выделить ошибку на печатном тексте пальцем/пенселом. Дополнительно
@@ -20486,7 +20492,11 @@ function modalEssayReview(essayId){
     (commentsForView && commentsForView.length)
       ? el('div', { class:'card', style:{ marginTop:'12px', background:'var(--surface-soft)' }},
           el('h4', { style:{ marginBottom:'8px' }}, '🏷 Замечания (' + commentsForView.length + ')'),
-          el('div', { class:'err-comments-list' }, commentsForView.map(c => commentItemRow(essay, c))))
+          /* Список замечаний без внутреннего окна-скролла (.err-comments-list
+             по умолчанию max-height:200px). Видно все замечания сразу,
+             прокручивается вся модалка. Прецедент 31.05.2026. */
+          el('div', { class:'err-comments-list', style:{ maxHeight:'none', overflowY:'visible' }},
+            commentsForView.map(c => commentItemRow(essay, c))))
       : null);
 
   /* Правая колонка */
@@ -20682,7 +20692,10 @@ function modalEssayReview(essayId){
      STATE.essayComment + STATE.essayCommentFullscreen. */
   const commentTextarea = el('textarea', {
     placeholder: isCurator ? 'Куратор: ваш предварительный комментарий — учитель сможет его дополнить.' : 'Аня, отличная работа над комментарием…',
-    style:{ width:'100%', padding:'10px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'80px', resize:'vertical', marginTop:'8px' },
+    /* Поле комментария сделали выше (80→200px), чтобы длинный AI-разбор был
+       сразу виден без скролла. Кнопка ⛶ по-прежнему открывает на весь экран.
+       Прецедент 31.05.2026. */
+    style:{ width:'100%', padding:'10px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'200px', resize:'vertical', marginTop:'8px' },
     oninput: ev => { STATE.essayComment = ev.target.value; }
   }, STATE.essayComment || '');
   const expandCommentBtn = el('button', {
