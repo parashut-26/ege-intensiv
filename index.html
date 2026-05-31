@@ -36198,6 +36198,11 @@ function _renderNow(){
   const savedModalScroll = (document.querySelector('.modal-body') || {}).scrollTop || 0;
   const savedChatScroll = (document.querySelector('.chat-msgs') || {}).scrollTop || 0;
   const savedWindowScroll = window.scrollY || 0;
+  /* Горизонтальная прокрутка верхней навигации (.tabs). root.innerHTML='' ниже
+     пересоздаёт nav, и его scrollLeft сбрасывался в 0 — при фоновом ререндере
+     (polling/догрузка данных) полоса «прыгала» к началу. Сохраняем и вернём
+     после перерисовки. Прецедент 31.05.2026. */
+  const savedTabsScroll = (document.querySelector('.tabs') || {}).scrollLeft || 0;
   /* Сохраняем введённый текст в инпуте чата и фокус — при polling каждые
      7 сек DOM пересоздаётся, и иначе ввод пропадал прямо во время набора. */
   const _chatInputEl = document.getElementById('chat-i');
@@ -36485,6 +36490,11 @@ function _renderNow(){
   if(newModal && savedModalScroll) newModal.scrollTop = savedModalScroll;
   if(newChat && savedChatScroll) newChat.scrollTop = savedChatScroll;
   if(savedWindowScroll) window.scrollTo(0, savedWindowScroll);
+  /* Возвращаем горизонтальную прокрутку верхней навигации (см. savedTabsScroll). */
+  if(savedTabsScroll){
+    const newTabs = document.querySelector('.tabs');
+    if(newTabs) newTabs.scrollLeft = savedTabsScroll;
+  }
   /* Восстанавливаем введённый текст и фокус в чат-инпуте — иначе при
      polling каждые 7 сек юзер теряет набранное на полпути. */
   if(_chatInputValue !== null){
