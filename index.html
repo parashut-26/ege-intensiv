@@ -23908,7 +23908,7 @@ function modalEditTheory(n){
   const qs = QUIZ_BANK[n] || [];
 
   return el('div', { class:'modal-bg',
-    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.contentEditTaskN = null; if(STATE.editingTheoryGallery){ STATE.editingTheoryGallery = {}; } render(); }}
+    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.contentEditTaskN = null; if(STATE.editingTheoryGallery){ STATE.editingTheoryGallery = {}; } if(STATE.editingTheoryText){ STATE.editingTheoryText = {}; } render(); }}
   },
     el('div', { class:'modal' },
       el('div', { class:'modal-head' },
@@ -23916,7 +23916,7 @@ function modalEditTheory(n){
           el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
             '✏️ Редактирование · Задание ' + n + ' · День ' + t.day),
           el('h2', null, t.topic)),
-        el('button', { class:'x', onclick: () => { STATE.contentEditTaskN = null; if(STATE.editingTheoryGallery){ STATE.editingTheoryGallery = {}; } render(); }}, '×')),
+        el('button', { class:'x', onclick: () => { STATE.contentEditTaskN = null; if(STATE.editingTheoryGallery){ STATE.editingTheoryGallery = {}; } if(STATE.editingTheoryText){ STATE.editingTheoryText = {}; } render(); }}, '×')),
       el('div', { class:'modal-body' },
         /* Текст теории + панель форматирования + предпросмотр. */
         (function(){
@@ -23935,6 +23935,10 @@ function modalEditTheory(n){
             STATE.editingTheoryGallery[n] = initialMeta.images.slice();
           }
           const galleryImages = STATE.editingTheoryGallery[n];
+          /* Текст редактора тоже держим в STATE — чтобы полный render() (фоновый
+             или при открытии лайтбокса по клику на фото) не сбрасывал
+             несохранённые правки к сохранённой версии. Прецедент 31.05.2026. */
+          if(!STATE.editingTheoryText) STATE.editingTheoryText = {};
 
           /* WYSIWYG contenteditable — текст сразу становится жирным/цветным при
              клике кнопки. Сохраняется HTML, у ученика рендерится через innerHTML. */
@@ -23945,7 +23949,13 @@ function modalEditTheory(n){
           });
           /* Инициализируем: если уже HTML — вставляем как есть, если markdown —
              прогоняем через marked один раз. */
-          if(initialMeta.text){
+          const _savedTheoryDraft = (typeof STATE.editingTheoryText[n] === 'string')
+            ? STATE.editingTheoryText[n] : null;
+          if(_savedTheoryDraft != null){
+            /* Восстанавливаем несохранённый черновик (уже HTML из innerHTML) —
+               пережил полный render() (фон/лайтбокс). */
+            theoryEditor.innerHTML = _savedTheoryDraft;
+          } else if(initialMeta.text){
             const raw = initialMeta.text;
             if(/<\/?(b|i|u|mark|span|h1|h2|h3|h4|ul|ol|li|br|hr|p|div|strong|em|a|img|font|video|iframe|source)[\s>\/]/i.test(raw)){
               theoryEditor.innerHTML = raw;
@@ -23999,6 +24009,11 @@ function modalEditTheory(n){
             catch(_){}
           };
           /* Cmd+B/I/U */
+          /* Персистим текст в STATE на каждый ввод (и форматирование через
+             execCommand тоже шлёт 'input') — переживает полный render(). */
+          theoryEditor.addEventListener('input', () => {
+            STATE.editingTheoryText[n] = theoryEditor.innerHTML;
+          });
           theoryEditor.addEventListener('keydown', (e) => {
             if((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'B')){
               e.preventDefault(); _theoryExec('bold');
@@ -24053,7 +24068,23 @@ function modalEditTheory(n){
                 scrollSnapAlign:'start', background:'#fff'
               }});
               const img = el('img', { src: url,
-                style:{ width:'100%', height:'100%', objectFit:'cover', display:'block' }});
+                title: 'Открыть на весь экран',
+                style:{ width:'100%', height:'100%', objectFit:'cover', display:'block', cursor:'zoom-in' },
+                onclick: () => {
+                  /* Открыть фото на весь экран с листанием (modalLightbox) —
+                     чтобы учитель видел, что уже загружено, не заходя под
+                     ученика. Перед render() фиксируем текущий текст редактора в
+                     STATE (на случай правок, не пославших 'input'), чтобы он не
+                     потерялся при перерисовке. Прецедент 31.05.2026. */
+                  try { STATE.editingTheoryText[n] = theoryEditor.innerHTML; } catch(_){}
+                  if(typeof modalLightbox === 'function'){
+                    STATE.lightbox = { photos: galleryImages.slice(), idx: i };
+                    render();
+                  } else {
+                    window.open(url, '_blank');
+                  }
+                }
+              });
               const idxBadge = el('span', { style:{
                 position:'absolute', left:'4px', top:'4px',
                 background:'rgba(0,0,0,0.55)', color:'#fff',
@@ -24402,6 +24433,7 @@ function modalEditTheory(n){
                 /* После успешного сохранения чистим временное состояние —
                    следующий раз модал прочитает галерею из БД. */
                 if(STATE.editingTheoryGallery) delete STATE.editingTheoryGallery[n];
+                if(STATE.editingTheoryText) delete STATE.editingTheoryText[n];
               } catch(e){
                 console.warn(e);
                 status.textContent = '⚠ ' + e.message;
