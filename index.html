@@ -10532,8 +10532,10 @@ function walkBlock(d){
 
   /* Сворачивание мотивационных дней — тот же механизм, что у обычных дней
      (STATE.intensiveDayOpen + persist в localStorage). id прогулочных дней —
-     строки вида 'walkN', с числовыми id обычных дней не пересекаются. По
-     умолчанию свёрнут, чтобы не было «простыни». Прецедент 31.05.2026. */
+     строки вида 'walkN', с числовыми id обычных дней не пересекаются.
+     Дефолт — как у обычных дней: СЕГОДНЯШНИЙ день раскрыт, прошлые/будущие
+     свёрнуты. Иначе сегодняшний прогулочный день (напр. 31 мая) показывался
+     свёрнутым и ученики думали «нет заданий». Прецедент 31.05.2026. */
   if(!STATE.intensiveDayOpen){
     try { STATE.intensiveDayOpen = JSON.parse(localStorage.getItem('intensive-day-open') || '{}') || {}; }
     catch(_){ STATE.intensiveDayOpen = {}; }
@@ -10541,7 +10543,9 @@ function walkBlock(d){
   const persistWalkOpen = () => {
     try { localStorage.setItem('intensive-day-open', JSON.stringify(STATE.intensiveDayOpen)); } catch(_){}
   };
-  if(STATE.intensiveDayOpen[d.id] == null){ STATE.intensiveDayOpen[d.id] = false; }
+  const _realToday = getRealTodayDay();
+  const _isTodayWalk = _realToday ? _realToday.id === d.id : false;
+  if(STATE.intensiveDayOpen[d.id] == null){ STATE.intensiveDayOpen[d.id] = !!_isTodayWalk; }
   const isOpen = !!STATE.intensiveDayOpen[d.id];
 
   card.append(
