@@ -17256,6 +17256,38 @@ function modalStudentDetail(){
                 html: '✏️ ' + wordHtml
               }));
             }
+            /* Для inlineChoice (задания 13/14 «НЕ слитно/раздельно») показываем
+               САМО предложение с подставленным выбором ученика. Без этого блока
+               у всех вопросов 13 видна только общая инструкция «Кликни по
+               выделенному слову…» (она в q.q), а предложение (q.template со
+               вставками ${0}) не выводилось — учитель не понимал, что решает
+               ученик. Подсветка слова по ИНДЕКСУ выбора (не по тексту: варианты
+               «НЕДОЧИТАННАЯ» и «НЕ ДОЧИТАННАЯ» отличаются лишь пробелом).
+               Прецедент 31.05.2026. */
+            if(q && q.inlineChoice && q.template){
+              const bl = Array.isArray(q.blanks) ? q.blanks : [];
+              const userArr = Array.isArray(ans) ? ans
+                            : (typeof ans === 'number' ? [ans] : []);
+              const sent = el('div', { style:{ fontSize:'13px', lineHeight:'1.9',
+                marginBottom:'8px', whiteSpace:'pre-wrap' }});
+              String(q.template).split(/(\$\{\d+\})/g).forEach(seg => {
+                const m = seg.match(/^\$\{(\d+)\}$/);
+                if(!m){ if(seg) sent.append(document.createTextNode(seg)); return; }
+                const k = +m[1];
+                const b = bl[k] || {};
+                const vars = b.variants || b.options || [];
+                const opt = userArr[k];
+                const has = (typeof opt === 'number');
+                const word = has ? (vars[opt] != null ? String(vars[opt]) : ('вариант ' + (opt + 1))) : '…';
+                const corr = (typeof b.correct === 'number') ? (opt === b.correct) : null;
+                sent.append(el('span', { style:{ fontWeight:'700', padding:'1px 6px',
+                  borderRadius:'5px', margin:'0 1px',
+                  background: !has ? '#F3F4F6' : corr === true ? '#D1FAE5' : corr === false ? '#FECACA' : '#E5E7EB',
+                  color: !has ? 'var(--ink-3)' : corr === true ? '#065F46' : corr === false ? '#991B1B' : 'var(--ink)' }},
+                  word));
+              });
+              inner.append(sent);
+            }
             /* Для multi/single — показываем все варианты с пометкой выбранных */
             if(Array.isArray(q && q.opts) && q.opts.length){
               const ansArr = Array.isArray(ans) ? ans : (typeof ans === 'number' ? [ans] : []);
@@ -18729,6 +18761,109 @@ function modalAttemptDetail(){
         }
         body.append(card);
         return;  /* для inlineChoice дальше generic-разбор не нужен */
+      }
+
+      /* === Фолбэк для inlineChoice (задание 13/14 «слитно/раздельно»), когда
+         богатый разбор выше НЕ отработал. Так бывает у СТАРЫХ попыток: вопрос
+         не нашёлся в банке (q == null) ИЛИ в самой попытке не сохранены
+         template/blanks. В этом случае раньше управление проваливалось в
+         generic-ветку и «Ответ ученика» показывался сырым индексом (например
+         «2») без текста задания и без слова «слитно/раздельно».
+         Здесь мы по любому доступному источнику blanks (item.blanks или q.blanks)
+         расшифровываем индекс(ы) ученика в текст варианта («незнакомый») и, если
+         есть шаблон, восстанавливаем предложение. */
+      const isInlineKind = item.inlineChoice || (q && q.inlineChoice)
+                           || taskN === 13 || taskN === 14;
+      if(isInlineKind && !(inlineTemplate && inlineBlanks)){
+        /* Любой доступный набор blanks: из попытки или из банка. */
+        const fbBlanks = (Array.isArray(item.blanks) && item.blanks.length) ? item.blanks
+                       : (q && Array.isArray(q.blanks) && q.blanks.length) ? q.blanks
+                       : null;
+        /* Варианты конкретного blank: variants (банк) или options (старый формат). */
+        const fbVars = (b) => Array.isArray(b && b.variants) ? b.variants
+                            : Array.isArray(b && b.options) ? b.options
+                            : [];
+        const fbTemplate = inlineTemplate || (q && q.template) || null;
+        /* Ответ ученика — массив индексов выбранных вариантов по каждому слову. */
+        const fbUser = Array.isArray(item.user) ? item.user.map(Number)
+                     : (item.user != null && !isNaN(Number(item.user)) ? [Number(item.user)] : []);
+        const fbExp = Array.isArray(item.expected) ? item.expected.map(Number)
+                    : (fbBlanks ? fbBlanks.map(b => Number(b.correct)) : []);
+
+        /* Хелпер: индекс → слово варианта (или «вариант N», если вариантов нет). */
+        const pickWord = (blankIdx, optIdx) => {
+          const b = fbBlanks ? fbBlanks[blankIdx] : null;
+          const vars = fbVars(b);
+          if(typeof optIdx === 'number' && vars[optIdx] != null) return String(vars[optIdx]);
+          if(typeof optIdx === 'number') return 'вариант ' + (optIdx + 1);
+          return '?';
+        };
+
+        /* Если есть шаблон — показываем предложение с выбором ученика. */
+        if(fbTemplate){
+          const parts = String(fbTemplate).split(/\$\{(\d+)\}/g);
+          const sentBox = el('div', { style:{
+            padding:'12px', background:'#fff', borderRadius:'8px', marginBottom:'8px',
+            fontSize:'16px', lineHeight:'1.7', whiteSpace:'pre-wrap'
+          }});
+          parts.forEach((part, pi) => {
+            if(pi % 2 === 0){
+              if(part) sentBox.append(document.createTextNode(part));
+            } else {
+              const bIdx = Number(part);
+              const userWord = pickWord(bIdx, fbUser[bIdx]);
+              const corrIdx = fbExp[bIdx];
+              const isOk = (typeof fbUser[bIdx] === 'number' && fbUser[bIdx] === corrIdx);
+              sentBox.append(el('span', {
+                style:{ display:'inline-block', padding:'2px 10px', margin:'0 3px',
+                        borderRadius:'6px', fontWeight:'700',
+                        background: isOk ? '#D1FAE5' : '#FECACA',
+                        color: isOk ? '#065F46' : '#991B1B',
+                        border: '2px solid ' + (isOk ? 'var(--green)' : 'var(--red)') }
+              }, userWord));
+              if(!isOk){
+                sentBox.append(el('span', {
+                  style:{ display:'inline-block', padding:'1px 8px', margin:'0 3px 0 0',
+                          borderRadius:'6px', fontSize:'13px', fontWeight:'600',
+                          background:'#fff', color:'var(--green)', border:'1px dashed var(--green)' }
+                }, '→ ' + pickWord(bIdx, corrIdx)));
+              }
+            }
+          });
+          card.append(sentBox);
+        }
+
+        /* Сводка «Ответ ученика» / «Правильно» — словами, а не индексами.
+           Кол-во пропусков берём по доступному источнику; если ничего нет —
+           хотя бы по длине массива ответа ученика. */
+        const blankCount = fbBlanks ? fbBlanks.length
+                         : Math.max(fbUser.length, fbExp.length, 1);
+        const idxs = Array.from({ length: blankCount }, (_, k) => k);
+        const userHuman = idxs.map(k => pickWord(k, fbUser[k])).join(' · ') || '—';
+        const corrHuman = idxs.map(k => pickWord(k, fbExp[k])).join(' · ') || '—';
+        card.append(
+          el('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'10px', marginTop:'6px' }},
+            el('div', { style:{ background:'#fff', padding:'8px 10px', borderRadius:'8px' }},
+              el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'2px', fontWeight:'700' }}, 'Ответ ученика'),
+              el('div', { style:{ fontSize:'13px', wordBreak:'break-word' }}, userHuman)),
+            el('div', { style:{ background:'#fff', padding:'8px 10px', borderRadius:'8px' }},
+              el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginBottom:'2px', fontWeight:'700' }}, 'Правильно'),
+              el('div', { style:{ fontSize:'13px', wordBreak:'break-word', color:'var(--green)' }}, corrHuman))));
+
+        /* Если вообще нет ни шаблона, ни blanks — честно предупреждаем, что данных
+           для полной расшифровки нет (показали хотя бы «вариант N»). */
+        if(!fbTemplate && !fbBlanks){
+          card.append(el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', marginTop:'8px', fontStyle:'italic' }},
+            '⚠ Текст задания и варианты не сохранились в этой попытке и не найдены в банке — ' +
+            'показан только номер выбранного варианта.'));
+        }
+        if(q && q.expl){
+          card.append(el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'#FFFDF7', border:'1px solid #FACC15', borderRadius:'6px', fontSize:'12px' }},
+            el('div', { style:{ fontSize:'10px', fontWeight:'700', color:'#92400E', marginBottom:'4px' }}, '💡 Почему так?'),
+            el('div', { html: typeof formatExplanation === 'function' ? formatExplanation(q.expl) : String(q.expl) })));
+        }
+        body.append(card);
+        return;  /* фолбэк отработал — generic-разбор не нужен */
       }
 
       /* commaPick (задание 16): рисуем 5 предложений с подсветкой выбора +
