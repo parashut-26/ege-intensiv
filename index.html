@@ -16646,6 +16646,10 @@ function essayRow(e, isCurator){
               render();
             }}, '👁')
         : null,
+      el('button', { class:'btn-icon', title:'Перенести на другого ученика (дубль-аккаунт)',
+          style:{ background:'var(--y-soft)', color:'#92400E' },
+          onclick: (ev) => { ev.stopPropagation(); reassignEssay(e); }
+        }, '🔀'),
       /* Назначить эксперту / Снять назначение — только учителю и только для DB-работ.
          Эксперт = куратор с правом expertMode. Если у такого куратора нет
          назначений — он не видит чужие сочинения. После проверки учитель снимает
