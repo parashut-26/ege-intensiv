@@ -2198,9 +2198,14 @@ function renderTheoryGallery(urls){
     const img = el('img', { src: proxiedUrl, alt: 'Фото к теории',
       style:{ maxWidth:'100%', maxHeight:'500px', display:'block', cursor:'zoom-in', objectFit:'contain' },
       onclick: () => {
-        /* Открыть в lightbox — если в платформе есть STATE.lightbox.
-           Lightbox сам тоже проксифицирует через imgThumb (см. modalLightbox). */
-        if(STATE.lightbox !== undefined){
+        /* Открыть в полноэкранном просмотре (modalLightbox): крупно, с
+           листанием стрелками/свайпом/клавишами, зумом и счётчиком.
+           Раньше условие `STATE.lightbox !== undefined` НЕ выполнялось (поле
+           не инициализировано в STATE → undefined), поэтому фото открывалось
+           в новой вкладке, где листать карусель уже нельзя. Проверяем наличие
+           самой функции — она в платформе есть. modalLightbox сам проксирует
+           URL через proxifyUrl. Прецедент 31.05.2026. */
+        if(typeof modalLightbox === 'function'){
           STATE.lightbox = { photos: list, idx: i };
           render();
         } else {
