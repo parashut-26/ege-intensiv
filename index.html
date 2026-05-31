@@ -17256,6 +17256,38 @@ function modalStudentDetail(){
                 html: '✏️ ' + wordHtml
               }));
             }
+            /* Для inlineChoice (задания 13/14 «НЕ слитно/раздельно») показываем
+               САМО предложение с подставленным выбором ученика. Без этого блока
+               у всех вопросов 13 видна только общая инструкция «Кликни по
+               выделенному слову…» (она в q.q), а предложение (q.template со
+               вставками ${0}) не выводилось — учитель не понимал, что решает
+               ученик. Подсветка слова по ИНДЕКСУ выбора (не по тексту: варианты
+               «НЕДОЧИТАННАЯ» и «НЕ ДОЧИТАННАЯ» отличаются лишь пробелом).
+               Прецедент 31.05.2026. */
+            if(q && q.inlineChoice && q.template){
+              const bl = Array.isArray(q.blanks) ? q.blanks : [];
+              const userArr = Array.isArray(ans) ? ans
+                            : (typeof ans === 'number' ? [ans] : []);
+              const sent = el('div', { style:{ fontSize:'13px', lineHeight:'1.9',
+                marginBottom:'8px', whiteSpace:'pre-wrap' }});
+              String(q.template).split(/(\$\{\d+\})/g).forEach(seg => {
+                const m = seg.match(/^\$\{(\d+)\}$/);
+                if(!m){ if(seg) sent.append(document.createTextNode(seg)); return; }
+                const k = +m[1];
+                const b = bl[k] || {};
+                const vars = b.variants || b.options || [];
+                const opt = userArr[k];
+                const has = (typeof opt === 'number');
+                const word = has ? (vars[opt] != null ? String(vars[opt]) : ('вариант ' + (opt + 1))) : '…';
+                const corr = (typeof b.correct === 'number') ? (opt === b.correct) : null;
+                sent.append(el('span', { style:{ fontWeight:'700', padding:'1px 6px',
+                  borderRadius:'5px', margin:'0 1px',
+                  background: !has ? '#F3F4F6' : corr === true ? '#D1FAE5' : corr === false ? '#FECACA' : '#E5E7EB',
+                  color: !has ? 'var(--ink-3)' : corr === true ? '#065F46' : corr === false ? '#991B1B' : 'var(--ink)' }},
+                  word));
+              });
+              inner.append(sent);
+            }
             /* Для multi/single — показываем все варианты с пометкой выбранных */
             if(Array.isArray(q && q.opts) && q.opts.length){
               const ansArr = Array.isArray(ans) ? ans : (typeof ans === 'number' ? [ans] : []);
