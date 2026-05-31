@@ -1480,7 +1480,8 @@ const STATE = {
   testOpen: null,
   essayOpen: null,
   essayBy: null,           // 'curator' | 'teacher' — кто проверяет
-  essayFullscreen: false,  // ⛶ раскрытый модал проверки сочинения
+  essayFullscreen: false,  // ⛶ раскрытый модал проверки сочинения (учитель)
+  essayResultFullscreen: false,  // ⛶ раскрытый модал результата сочинения (ученик)
   variantEditFullscreen: false,  // ⛶ раскрытый модал редактирования варианта
   essayDraftOpen: false,   // открыта форма сдачи сочинения у ученика
   essayDraftText: '',      // черновик текста
@@ -18360,30 +18361,62 @@ function modalEssayResult(essayId){
   const essay = DB_ESSAYS.find(e => e.id === essayId);
   if(!essay || !essay.review) return null;
   const r = essay.review;
-  const close = () => { STATE.studentEssayResultOpen = null; render(); };
+  const close = () => { STATE.studentEssayResultOpen = null; STATE.essayResultFullscreen = false; render(); };
+
+  /* Подпись по числу ошибок для К7-К10 — как в кабинете учителя. Берём
+     сохранённое в review число ошибок (k7_errors..k10_errors). Согласование
+     глагола/прилагательного как в критериях ФИПИ. */
+  const ERR_ADJ = {
+    K7:  ['орфографическая', 'орфографические', 'орфографических'],
+    K8:  ['пунктуационная',  'пунктуационные',  'пунктуационных'],
+    K9:  ['грамматическая',  'грамматические',  'грамматических'],
+    K10: ['речевая',         'речевые',         'речевых'],
+  };
+  const errLabel = (cid, value) => {
+    const n = r[cid.toLowerCase() + '_errors'];
+    if(n == null) return null;   /* учитель не вводил число ошибок — подписи нет */
+    const ball = ruPlural(value, 'балл', 'балла', 'баллов');
+    if(+n === 0) return 'Ошибок нет — ' + value + ' ' + ball;
+    const forms = ERR_ADJ[cid] || ['', '', ''];
+    const adj  = ruPlural(+n, forms[0], forms[1], forms[2]);
+    const noun = ruPlural(+n, 'ошибка', 'ошибки', 'ошибок');
+    const verb = ruPlural(+n, 'Допущена', 'Допущены', 'Допущено');
+    return verb + ' ' + n + ' ' + adj + ' ' + noun + ' — ' + value + ' ' + ball;
+  };
 
   /* Список баллов по К1-К10 */
   const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'6px', marginTop:'10px' }});
   CRIT.forEach(c => {
     const v = r[c.id.toLowerCase()];
+    const value = v != null ? v : 0;
     const sec = c.sec;
     const colorMap = { 'Содержание':'var(--p-soft)', 'Речь':'var(--y-soft)', 'Грамотность':'var(--green-soft)' };
+    /* Для К7-К10 показываем человекочитаемую подпись «Допущено N … — M баллов»,
+       для остальных — секцию (Содержание/Речь/Грамотность). */
+    const subLabel = (c.byErrors ? errLabel(c.id, value) : null) || sec;
     list.append(el('div', {
-      style:{ display:'flex', justifyContent:'space-between', alignItems:'center',
+      style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px',
               padding:'10px 12px', background:colorMap[sec] || 'var(--surface-soft)', borderRadius:'10px' }
     },
-      el('div', null,
+      el('div', { style:{ minWidth:0 }},
         el('div', { style:{ fontWeight:'700', fontSize:'13px' }}, c.id + ' · ' + c.name),
-        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, sec)),
-      el('div', { style:{ fontWeight:'800', fontSize:'15px' }}, (v != null ? v : 0) + ' / ' + c.max)));
+        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, subLabel)),
+      el('div', { style:{ fontWeight:'800', fontSize:'15px', whiteSpace:'nowrap' }}, value + ' / ' + c.max)));
   });
 
+  const isFullscreen = !!STATE.essayResultFullscreen;
   const head = el('div', { class:'modal-head' },
     el('div', null,
       el('div', { style:{ fontSize:'11px', color:'var(--ink-3)', textTransform:'uppercase', letterSpacing:'.08em', fontWeight:'700' }},
         'Результат проверки · сочинение'),
       el('h2', { style:{ marginTop:'4px' }}, '🐝 ' + (r.total != null ? r.total : 0) + ' / 22 баллов')),
-    el('button', { class:'x', onclick: close }, '×'));
+    el('div', { style:{ display:'flex', gap:'4px', alignItems:'center' }},
+      el('button', { class:'btn-icon',
+        title: isFullscreen ? 'Свернуть' : 'Раскрыть на весь экран',
+        style:{ fontSize:'18px' },
+        onclick: () => { STATE.essayResultFullscreen = !STATE.essayResultFullscreen; render(); }
+      }, isFullscreen ? '⤡' : '⛶'),
+      el('button', { class:'x', onclick: close }, '×')));
 
   const body = el('div', { class:'modal-body' });
 
@@ -18391,6 +18424,18 @@ function modalEssayResult(essayId){
   const isPhotoEssay = essay.format === 'photo';
   /* Берём из единого кэша, чтобы не зависеть от ссылки на старый объект */
   if(!essay.comments && ESSAY_COMMENTS_CACHE[essay.id]) essay.comments = ESSAY_COMMENTS_CACHE[essay.id];
+  /* Самодостаточная подгрузка замечаний: если в кэше их нет (ученик открыл
+     модалку из пути, где предзагрузка не сработала) — тянем сами и
+     перерисовываем. Иначе у части учеников ошибки не отображались. Грузим один
+     раз (флаг в кэше), чтобы не зациклить render. Прецедент 31.05.2026. */
+  if(typeof essay.id === 'number' && sb && ESSAY_COMMENTS_CACHE[essay.id] === undefined){
+    ESSAY_COMMENTS_CACHE[essay.id] = null;   /* помечаем «грузим», чтобы не дёргать повторно */
+    loadEssayComments(essay.id).then(arr => {
+      ESSAY_COMMENTS_CACHE[essay.id] = arr || [];
+      essay.comments = ESSAY_COMMENTS_CACHE[essay.id];
+      render();
+    }).catch(() => { ESSAY_COMMENTS_CACHE[essay.id] = []; });
+  }
   const commentsForView = ESSAY_COMMENTS_CACHE[essay.id] || essay.comments || [];
   let bodyEl;
   if(isPhotoEssay){
@@ -18542,9 +18587,14 @@ function modalEssayResult(essayId){
       'Оценка по критериям ФИПИ К1–К10'),
     el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть'));
 
-  return el('div', { class:'modal-bg',
+  /* В fullscreen модалка занимает почти весь экран — удобно читать длинное
+     фото-сочинение и разбор целиком. По умолчанию — компактное окно. */
+  const modalStyle = isFullscreen
+    ? { maxWidth:'none', width:'calc(100vw - 24px)', maxHeight:'calc(100vh - 24px)', height:'calc(100vh - 24px)' }
+    : { maxWidth:'620px' };
+  return el('div', { class:'modal-bg', style: isFullscreen ? { padding:'12px' } : null,
     onclick: e => { if(e.target.classList.contains('modal-bg')) close(); }
-  }, el('div', { class:'modal', style:{ maxWidth:'620px' }}, head, body, foot));
+  }, el('div', { class:'modal', style: modalStyle }, head, body, foot));
 }
 
 function modalOnboardingName(){
