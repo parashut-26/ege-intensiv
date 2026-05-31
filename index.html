@@ -18613,8 +18613,11 @@ function modalEssayResult(essayId){
           el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#166534',
                                textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'4px' }},
             '✍️ Проблемный вопрос'),
-          el('div', { style:{ whiteSpace:'pre-wrap', fontSize:'13px', lineHeight:'1.5' }},
-            ctxPrev.q27)));
+          /* q27 может содержать HTML (<b>, &nbsp; и т.п.) — раньше выводился
+             как текст и тэги были видны. Рендерим через sanitizeQuestionHtml
+             (оставляет только b/i/u/strong/em). Прецедент 31.05.2026. */
+          el('div', { style:{ whiteSpace:'pre-wrap', fontSize:'13px', lineHeight:'1.5' },
+            html: sanitizeQuestionHtml(ctxPrev.q27) })));
       }
       if(ctxPrev.sourceText){
         const det = el('details', { style:{ marginBottom:'8px' }});
@@ -20594,8 +20597,10 @@ function modalEssayReview(essayId){
             el('div', { style:{ fontSize:'11px', fontWeight:'700', color:'#166534',
                                  textTransform:'uppercase', letterSpacing:'.06em', marginBottom:'4px' }},
               '✍️ Проблемный вопрос (задание 27)'),
-            el('div', { style:{ whiteSpace:'pre-wrap', fontSize:'13px', lineHeight:'1.5' }},
-              ctxPrev.q27)));
+            /* q27 содержит HTML — рендерим через sanitizeQuestionHtml, иначе
+               видны сырые теги <b>/&nbsp;. Прецедент 31.05.2026. */
+            el('div', { style:{ whiteSpace:'pre-wrap', fontSize:'13px', lineHeight:'1.5' },
+              html: sanitizeQuestionHtml(ctxPrev.q27) })));
         }
         /* Исходный текст — свёрнут по умолчанию */
         if(ctxPrev.sourceText && !ownText){
