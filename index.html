@@ -17380,15 +17380,32 @@ function modalStudentDetail(){
                ученик — «ю» — это один и тот же ответ. */
             const normForCmp = (x) => String(x || '').toLowerCase()
               .replace(/ё/g, 'е').replace(/[\s,]/g, '');
-            const isCorrect = (inlineOk != null)
-              ? inlineOk
+            /* Текстовый ответ (задания 6, 24, пары паронимов) часто имеет
+               НЕСКОЛЬКО приемлемых синонимов — q.a это массив. Раньше сравнивали
+               со склеенной строкой «доставляют, приносят, дарят», и верный
+               синоним «приносят» считался ошибкой. Чиним: совпадение по ЛЮБОМУ
+               из приемлемых вариантов. Прецедент 31.05.2026. */
+            let textOk = null;
+            if(q && q.text && !q.fillNn && !q.match){
+              const accept = Array.isArray(q.a) ? q.a : (q.a != null ? [q.a] : []);
+              const u = normForCmp(ansLabel);
+              textOk = isSubmitted && u !== '' && accept.some(a => normForCmp(a) === u);
+            }
+            const isCorrect = (inlineOk != null) ? inlineOk
+              : (textOk != null) ? textOk
               : (isSubmitted && correctLabel &&
                  normForCmp(ansLabel) === normForCmp(correctLabel));
             const rowBg = !isAnswered ? '#F9FAFB'
                         : !isSubmitted ? '#FEF9C3'
                         : isCorrect ? '#D1FAE5'
                         : '#FEE2E2';
-            const qText = (q && q.text) || (q && q.q) || (q && q.question_text) || '';
+            /* ВАЖНО: q.text у коротких ответов (задания 6, 24) — это булев ФЛАГ
+               (true), а не текст. Раньше он попадал в qText и в ревью выводилось
+               буквально «true». Сам текст вопроса лежит в q.q. q.text берём
+               только если это строка (бывает у fillNn — текст с пропусками).
+               Прецедент 31.05.2026. */
+            const qText = (q && q.q) || (q && q.question_text)
+                          || (q && typeof q.text === 'string' ? q.text : '') || '';
             const qContext = q && (q.context || q.sourceText || q.source_text) || '';
             const row = el('div', {
               style:{ padding:'10px 12px', background: rowBg,
@@ -18719,9 +18736,24 @@ function modalAttemptDetail(){
   const studentName = isMine
     ? 'Моя попытка'
     : (student ? student.name : (MY_PROFILE && MY_PROFILE.full_name) || 'Ученик');
-  const pct = attempt.max_score ? Math.round(attempt.score / attempt.max_score * 100) : 0;
   const dt = new Date(attempt.created_at);
   const dateStr = dt.toLocaleDateString('ru-RU', { day:'numeric', month:'long' }) + ' в ' + dt.toTimeString().slice(0, 5);
+  /* Показываем ТОЛЬКО решённые (отвеченные) вопросы. Старые попытки (до
+     31.05.2026) сохраняли весь банк → в истории было «5/290». Фильтруем на
+     отображении: и старые, и новые покажут «верно / решено». Новые попытки
+     и так содержат только решённые, для них фильтр — no-op. */
+  const _isAnsItem = (u) => {
+    if(u == null) return false;
+    if(Array.isArray(u)) return u.length > 0 && u.some(v => v != null && v !== '');
+    if(typeof u === 'object') return Object.keys(u).length > 0;
+    return String(u).trim().length > 0;
+  };
+  const answeredItems = items.filter(it => _isAnsItem(it && it.user));
+  /* Если вдруг не распознали ни одного ответа — не прячем всё, показываем как есть. */
+  const viewItems = answeredItems.length ? answeredItems : items;
+  const dScore = viewItems.filter(it => it && it.ok).length;
+  const dMax = viewItems.length;
+  const pct = dMax ? Math.round(dScore / dMax * 100) : 0;
 
   /* Хелпер: ищем оригинал вопроса в QUIZ_BANK по src + дополнительным признакам.
      ВАЖНО: q.src — это часто collection-имя («Орфограмма НЕ», «ОБЗ ФИПИ · 2026»),
@@ -18775,18 +18807,18 @@ function modalAttemptDetail(){
 
   const summary = el('div', { class:'card', style:{ marginBottom:'14px', display:'flex', gap:'10px', alignItems:'center', flexWrap:'wrap' }},
     chip('🐝 ' + (attempt.bee_earned || 0), 'y'),
-    chip('Результат: ' + attempt.score + ' / ' + attempt.max_score,
+    chip('Результат: ' + dScore + ' / ' + dMax,
       pct >= 80 ? 'green' : pct >= 60 ? 'warn' : 'red'),
     chip(pct + '%', pct >= 80 ? 'green' : pct >= 60 ? 'warn' : 'red'));
 
   const body = el('div', { class:'modal-body' });
   body.append(summary);
 
-  if(!items.length){
+  if(!viewItems.length){
     body.append(el('p', { style:{ color:'var(--ink-3)', fontStyle:'italic' }},
       'Детальные данные не сохранились (возможно старая попытка).'));
   } else {
-    items.forEach((item, idx) => {
+    viewItems.forEach((item, idx) => {
       const q = findQuestion(item);
       const ok = !!item.ok;
       const card = el('div', { class:'card', style:{
@@ -19291,7 +19323,7 @@ function modalAttemptDetail(){
 
   const foot = el('div', { class:'modal-foot' },
     el('span', { style:{ fontSize:'12px', color:'var(--ink-3)' }},
-      items.length + ' вопросов · ' + items.filter(i => i.ok).length + ' верно'),
+      viewItems.length + ' решено · ' + viewItems.filter(i => i.ok).length + ' верно'),
     el('div', { style:{ display:'flex', gap:'8px' }},
       deleteBtn,
       el('button', { class:'btn btn-secondary', onclick: close }, 'Закрыть')));
