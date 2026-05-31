@@ -5424,7 +5424,7 @@ async function loadEssaysFromDb(){
   try {
     /* Берём сочинения и подтягиваем имя ученика. У essays три FK к profiles
        (student_id, pre_checked_by, finalized_by) — указываем явно через !essays_student_id_fkey. */
-    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,photo_urls,word_count,status,submitted_at,format,assigned_curator_id,source_text,source_problem,source_variant_id,student:profiles!essays_student_id_fkey(full_name,email),review:essay_reviews(total,general_comment,is_pre_check,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10)&order=submitted_at.desc&limit=200');
+    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,photo_urls,word_count,status,submitted_at,format,assigned_curator_id,source_text,source_problem,source_variant_id,student:profiles!essays_student_id_fkey(full_name,email),review:essay_reviews(total,general_comment,voice_url,is_pre_check,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10,k7_errors,k8_errors,k9_errors,k10_errors)&order=submitted_at.desc&limit=200');
     if(Array.isArray(arr)){
       DB_ESSAYS = arr.map(e => {
         const r = e.review && (Array.isArray(e.review) ? e.review[0] : e.review);
@@ -18391,9 +18391,12 @@ function modalEssayResult(essayId){
     const value = v != null ? v : 0;
     const sec = c.sec;
     const colorMap = { 'Содержание':'var(--p-soft)', 'Речь':'var(--y-soft)', 'Грамотность':'var(--green-soft)' };
-    /* Для К7-К10 показываем человекочитаемую подпись «Допущено N … — M баллов»,
-       для остальных — секцию (Содержание/Речь/Грамотность). */
-    const subLabel = (c.byErrors ? errLabel(c.id, value) : null) || sec;
+    /* Подпись под критерием — как у учителя:
+       К7-К10 → живая по числу ошибок («Допущено N … — M баллов»);
+       К1-К6 → первое предложение из hint («Позиция автора… — 1 балл»),
+       чтобы ученику было понятно, за что и почему такой балл. Секцию
+       (Содержание/Речь/Грамотность) показываем только в крайнем случае. */
+    const subLabel = (c.byErrors ? errLabel(c.id, value) : (c.hint ? c.hint.split('.')[0] : null)) || sec;
     list.append(el('div', {
       style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px',
               padding:'10px 12px', background:colorMap[sec] || 'var(--surface-soft)', borderRadius:'10px' }
