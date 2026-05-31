@@ -18593,42 +18593,30 @@ function modalEssayResult(essayId){
   /* === Правая колонка: список замечаний учителя (read-only) === */
   const rightCol = el('div', { style:{ minWidth:0 }});
   /* Read-only строка замечания для ученика: номер пина (для фото) / цитата,
-     тип ошибки и текст комментария. Клик подсвечивает место в работе. */
-  const studentCommentRow = (c, idx) => {
-    const meta = errKindMeta(c.kind);
+     тип ошибки и текст комментария. Клик подсвечивает место в работе.
+     Используем общий commentCardRow (тот же вид, что у учителя), onClick —
+     подсветка пина/выделения в работе. */
+  const highlightInWork = (c) => {
     const isPhotoC = !!c.photo_anchor;
-    const where = isPhotoC ? ('стр. ' + ((c.photo_anchor.page || 0) + 1))
-                           : ('«' + (c.fragment || '') + '»');
-    const row = el('div', { class:'card',
-      style:{ marginBottom:'8px', padding:'10px 12px', cursor:'pointer',
-              borderLeft:'4px solid ' + (meta.bg || 'var(--border-2)') },
-      onclick: () => {
-        /* Подсветить место: для фото — открыть тултип у пина, для текста — у mark */
-        const sel = isPhotoC
-          ? bodyEl.querySelectorAll('[data-cid="' + c.id + '"], .pin[data-cid="' + c.id + '"]')
-          : bodyEl.querySelectorAll('mark[data-id="' + c.id + '"]');
-        const target = sel && sel[0];
-        if(target){
-          target.scrollIntoView({ behavior:'smooth', block:'center' });
-          try { showStudentCommentTooltip(c, target); } catch(_){}
-        }
-      }
-    },
-      el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'4px', flexWrap:'wrap' }},
-        el('span', { style:{ fontSize:'11px', fontWeight:'700', padding:'2px 6px', background: meta.bg, borderRadius:'5px', whiteSpace:'nowrap' }},
-          (isPhotoC ? (idx + 1) + ' · ' : '') + meta.crit + ' · ' + meta.label),
-        el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', fontStyle:'italic', wordBreak:'break-word' }}, where)),
-      el('div', { style:{ fontSize:'13px', lineHeight:'1.45' }},
-        safeComment(c.comment) || el('span', { style:{ color:'var(--ink-3)' }}, safeVoiceUrl(c.voice_url) ? '(голосовое)' : '(без пояснения)'),
-        safeVoiceUrl(c.voice_url) ? el('span', { style:{ marginLeft:'6px' }}, '🎤') : null));
-    return row;
+    const sel = isPhotoC
+      ? bodyEl.querySelectorAll('[data-cid="' + c.id + '"], .pin[data-cid="' + c.id + '"]')
+      : bodyEl.querySelectorAll('mark[data-id="' + c.id + '"]');
+    const target = sel && sel[0];
+    if(target){
+      target.scrollIntoView({ behavior:'smooth', block:'center' });
+      try { showStudentCommentTooltip(c, target); } catch(_){}
+    }
   };
   rightCol.append(el('h4', { style:{ marginBottom:'8px' }},
     '📝 Замечания учителя' + (commentsForView.length ? ' (' + commentsForView.length + ')' : '')));
   if(commentsForView.length){
+    /* Счётчик ошибок по типам — те же цветные плашки, что у учителя. */
+    const cnt = errorCountBlock(commentsForView);
+    if(cnt) rightCol.append(cnt);
     /* Тот же порядок, что и пины: текстовые по позиции, фото по странице/y
        (loadEssayComments уже отсортировал). */
-    commentsForView.forEach((c, i) => rightCol.append(studentCommentRow(c, i)));
+    commentsForView.forEach((c, i) => rightCol.append(
+      commentCardRow(c, i, { onClick: () => highlightInWork(c) })));
   } else {
     rightCol.append(el('div', { class:'card', style:{ color:'var(--ink-3)', fontSize:'13px', fontStyle:'italic' }},
       'Учитель не оставил отдельных замечаний по тексту — смотри общий комментарий и баллы слева.'));
@@ -20599,11 +20587,24 @@ function modalEssayReview(essayId){
     (commentsForView && commentsForView.length)
       ? el('div', { class:'card', style:{ marginTop:'12px', background:'var(--surface-soft)' }},
           el('h4', { style:{ marginBottom:'8px' }}, '🏷 Замечания (' + commentsForView.length + ')'),
-          /* Список замечаний без внутреннего окна-скролла (.err-comments-list
-             по умолчанию max-height:200px). Видно все замечания сразу,
-             прокручивается вся модалка. Прецедент 31.05.2026. */
-          el('div', { class:'err-comments-list', style:{ maxHeight:'none', overflowY:'visible' }},
-            commentsForView.map(c => commentItemRow(essay, c))))
+          /* Счётчик ошибок по типам + карточки «как у ученика» (белый фон,
+             цветная полоса слева) с кнопкой удаления. Прецедент 31.05.2026. */
+          errorCountBlock(commentsForView),
+          el('div', { style:{ marginTop:'4px' }},
+            commentsForView.map((c, i) => commentCardRow(c, i, {
+              onDelete: async (cc) => {
+                if(!confirm('Удалить замечание?')) return;
+                try {
+                  await deleteEssayComment(cc.id);
+                  const filtered = (ESSAY_COMMENTS_CACHE[essay.id] || essay.comments || [])
+                    .filter(x => x.id !== cc.id);
+                  essay.comments = filtered;
+                  ESSAY_COMMENTS_CACHE[essay.id] = filtered;
+                  recomputeErrorsFromComments(filtered);
+                  render();
+                } catch(e){ alert('⚠ ' + e.message); }
+              }
+            }))))
       : null);
 
   /* Правая колонка */
@@ -21392,6 +21393,58 @@ function showExistingCommentPopup(essay, c, markEl){
 }
 
 /* Строка в списке замечаний */
+/* Блок «строка типов ошибок + счётчик» — цветные плашки по каждому типу
+   замечаний с количеством. Используется и у ученика, и у учителя. */
+function errorCountBlock(comments){
+  const list = comments || [];
+  if(!list.length) return null;
+  /* Считаем по виду ошибки в порядке ERR_KINDS */
+  const counts = {};
+  list.forEach(c => { counts[c.kind] = (counts[c.kind] || 0) + 1; });
+  const chips = ERR_KINDS.filter(k => counts[k.id]).map(k =>
+    el('span', { style:{ fontSize:'12px', fontWeight:'700', padding:'4px 10px',
+      background: k.bg, color:'var(--ink)', borderRadius:'999px', whiteSpace:'nowrap' }},
+      k.label + ' · ' + counts[k.id]));
+  return el('div', { style:{ display:'flex', gap:'6px', flexWrap:'wrap', alignItems:'center',
+    marginBottom:'10px' }},
+    el('span', { style:{ fontSize:'12px', fontWeight:'700', color:'var(--ink-2)' }},
+      'Ошибок: ' + list.length + ' ·'),
+    ...chips);
+}
+
+/* Карточка замечания «как у ученика»: белый фон, цветная полоса слева,
+   шапка (тип + место) и текст. opts.onDelete — если задан, показываем
+   крестик удаления (учительский режим). opts.onClick — клик по карточке. */
+function commentCardRow(c, idx, opts){
+  opts = opts || {};
+  const meta = errKindMeta(c.kind);
+  const isPhotoC = !!c.photo_anchor;
+  const where = isPhotoC ? ('стр. ' + ((c.photo_anchor.page || 0) + 1))
+                         : ('«' + (c.fragment || '') + '»');
+  const card = el('div', { class:'card',
+    style:{ marginBottom:'8px', padding:'10px 12px',
+            borderLeft:'4px solid ' + (meta.bg || 'var(--border-2)'),
+            cursor: opts.onClick ? 'pointer' : 'default',
+            display:'flex', gap:'10px', alignItems:'flex-start' },
+    onclick: opts.onClick || null
+  },
+    el('div', { style:{ flex:1, minWidth:0 }},
+      el('div', { style:{ display:'flex', gap:'8px', alignItems:'center', marginBottom:'4px', flexWrap:'wrap' }},
+        el('span', { style:{ fontSize:'11px', fontWeight:'700', padding:'2px 6px', background: meta.bg, borderRadius:'5px', whiteSpace:'nowrap' }},
+          (isPhotoC && idx != null ? (idx + 1) + ' · ' : '') + meta.crit + ' · ' + meta.label),
+        el('span', { style:{ fontSize:'11px', color:'var(--ink-3)', fontStyle:'italic', wordBreak:'break-word' }}, where)),
+      el('div', { style:{ fontSize:'13px', lineHeight:'1.45' }},
+        safeComment(c.comment) || el('span', { style:{ color:'var(--ink-3)' }}, safeVoiceUrl(c.voice_url) ? '(голосовое)' : '(без пояснения)'),
+        safeVoiceUrl(c.voice_url) ? el('span', { style:{ marginLeft:'6px' }}, '🎤') : null)),
+    opts.onDelete
+      ? el('button', { class:'btn-icon', title:'Удалить',
+          style:{ background:'var(--red-soft)', color:'var(--red)', flexShrink:0 },
+          onclick: (ev) => { ev.stopPropagation(); opts.onDelete(c); }
+        }, '×')
+      : null);
+  return card;
+}
+
 function commentItemRow(essay, c){
   const meta = errKindMeta(c.kind);
   const where = c.photo_anchor ? '📸 стр. ' + ((c.photo_anchor.page || 0) + 1) : ('«' + (c.fragment || '') + '»');
