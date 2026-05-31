@@ -21387,7 +21387,9 @@ function critRow(c, lockK2K3){
     } else {
       const adj  = ruPlural(n, forms[0], forms[1], forms[2]);
       const noun = ruPlural(n, 'ошибка', 'ошибки', 'ошибок');
-      const verb = (n % 10 === 1 && n % 100 !== 11) ? 'Допущена' : 'Допущено';
+      /* Глагол согласуем с числом: 1 → «Допущена» (ед.ж.), 2-4 → «Допущены»
+         (мн.), 5+ → «Допущено» (с род.мн.). Как в формулировке критериев ЕГЭ. */
+      const verb = ruPlural(n, 'Допущена', 'Допущены', 'Допущено');
       desc = verb + ' ' + n + ' ' + adj + ' ' + noun + ' — ' + value + ' ' + ball;
     }
   } else {
