@@ -10530,8 +10530,24 @@ function walkBlock(d){
   const posts = (!locked && STATE.walkPostsByKey && STATE.walkPostsByKey[d.id])
     ? filterWarmupForRole(STATE.walkPostsByKey[d.id]) : [];
 
+  /* Сворачивание мотивационных дней — тот же механизм, что у обычных дней
+     (STATE.intensiveDayOpen + persist в localStorage). id прогулочных дней —
+     строки вида 'walkN', с числовыми id обычных дней не пересекаются. По
+     умолчанию свёрнут, чтобы не было «простыни». Прецедент 31.05.2026. */
+  if(!STATE.intensiveDayOpen){
+    try { STATE.intensiveDayOpen = JSON.parse(localStorage.getItem('intensive-day-open') || '{}') || {}; }
+    catch(_){ STATE.intensiveDayOpen = {}; }
+  }
+  const persistWalkOpen = () => {
+    try { localStorage.setItem('intensive-day-open', JSON.stringify(STATE.intensiveDayOpen)); } catch(_){}
+  };
+  if(STATE.intensiveDayOpen[d.id] == null){ STATE.intensiveDayOpen[d.id] = false; }
+  const isOpen = !!STATE.intensiveDayOpen[d.id];
+
   card.append(
-    el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap' }},
+    el('div', { style:{ display:'flex', alignItems:'center', gap:'14px', flexWrap:'wrap', cursor:'pointer' },
+      onclick: () => { STATE.intensiveDayOpen[d.id] = !STATE.intensiveDayOpen[d.id]; persistWalkOpen(); render(); }},
+      el('span', { style:{ fontSize:'20px', color:'var(--ink-3)', flexShrink:0 }}, isOpen ? '▾' : '▸'),
       el('div', { style:{ fontSize:'40px', filter: locked ? 'grayscale(1)' : 'none' }}, d.emoji || '🌸'),
       el('div', { style:{ flex:1, minWidth:'200px' }},
         chip(locked ? ('🔒 Откроется ' + d.date) : (d.subtitle || 'мотивация'),
@@ -10548,12 +10564,12 @@ function walkBlock(d){
             style:{ opacity:0.6, cursor:'not-allowed' }
           }, '🔒 Закрыто')
         : el('button', { class:'btn btn-secondary btn-sm',
-            onclick: () => { STATE.walkMaterialsOpen = d.id; render(); },
+            onclick: (ev) => { ev.stopPropagation(); STATE.walkMaterialsOpen = d.id; render(); },
             title: 'Старые материалы (подкасты/аудио/ссылки)'
           }, '📎')));
 
-  /* Посты прогулочного дня — выводим как у Разогрева */
-  if(!locked){
+  /* Посты прогулочного дня — выводим как у Разогрева (только если развёрнут) */
+  if(!locked && isOpen){
     if(posts.length){
       const postsWrap = el('div', { style:{ marginTop:'14px' }});
       posts.forEach(p => postsWrap.append(renderWarmupBlockStudent(p)));
