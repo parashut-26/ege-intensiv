@@ -17187,13 +17187,34 @@ function modalStudentDetail(){
               }
               else if(typeof correctVal === 'number') correctLabel = String(correctVal + 1);
             }
+            /* Для inlineChoice (13/14) правильный ответ лежит в
+               q.blanks[k].correct (индекс), а НЕ в q.a — поэтому стандартная
+               логика выше давала пустой correctLabel и считала ответ неверным
+               (строка-итог «2 ✗»), хотя слово в предложении подсвечено зелёным.
+               Считаем ответ/правильность по blanks: ответ и эталон — словами,
+               правильность — по совпадению индексов. Прецедент 31.05.2026. */
+            let inlineOk = null;
+            if(q && q.inlineChoice && Array.isArray(q.blanks)){
+              const uArr = Array.isArray(ans) ? ans : (typeof ans === 'number' ? [ans] : []);
+              const wordOf = (k, idx) => {
+                const b = q.blanks[k] || {};
+                const vars = b.variants || b.options || [];
+                if(typeof idx === 'number') return vars[idx] != null ? String(vars[idx]) : ('вариант ' + (idx + 1));
+                return '—';
+              };
+              if(isAnswered) ansLabel = q.blanks.map((b, k) => wordOf(k, uArr[k])).join(' · ');
+              correctLabel = q.blanks.map((b, k) => wordOf(k, b.correct)).join(' · ');
+              inlineOk = isSubmitted && q.blanks.every((b, k) => uArr[k] === b.correct);
+            }
             /* Сравнение: для letterGap — case-insensitive + ё→е (как в
                normalizeAnswer на бэкенде), потому что учитель ввёл «Ю», а
                ученик — «ю» — это один и тот же ответ. */
             const normForCmp = (x) => String(x || '').toLowerCase()
               .replace(/ё/g, 'е').replace(/[\s,]/g, '');
-            const isCorrect = isSubmitted && correctLabel &&
-              normForCmp(ansLabel) === normForCmp(correctLabel);
+            const isCorrect = (inlineOk != null)
+              ? inlineOk
+              : (isSubmitted && correctLabel &&
+                 normForCmp(ansLabel) === normForCmp(correctLabel));
             const rowBg = !isAnswered ? '#F9FAFB'
                         : !isSubmitted ? '#FEF9C3'
                         : isCorrect ? '#D1FAE5'
