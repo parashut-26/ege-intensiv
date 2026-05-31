@@ -6818,8 +6818,10 @@ function buildShuffledLetterGapBank(taskN, n, collection){
   }
   const sh = shuffleArray(unseen);
   const picked = want >= sh.length ? sh : sh.slice(0, want);
-  /* Помечаем как «виденные» сразу при выборке */
-  quizSeenAdd(taskN, collection, picked.map(quizQuestionKey));
+  /* НЕ помечаем «виденными» при выборке — только при сохранении результата
+     (markAnsweredQuestionsSeen), и только реально отвеченные вопросы. Иначе
+     случайный выход «сжигал» нерешённые: они помечались виденными и больше
+     не выпадали, хотя ученик их не делал. Прецедент 31.05.2026. */
   return picked;
 }
 
@@ -6827,8 +6829,35 @@ function buildShuffledLetterGapBank(taskN, n, collection){
 function quizQuestionKey(q){
   if(!q) return '';
   if(q.word) return q.word;
+  /* Для inlineChoice (13/14) q.q — это ОДНА И ТА ЖЕ инструкция «Кликни по
+     выделенному слову…» у всех 1000 вопросов, поэтому как ключ не годится
+     (иначе после первого же вопроса вся тысяча считалась бы «виденной»).
+     Берём текст предложения (template) — он уникален. Прецедент 31.05.2026. */
+  if(q.inlineChoice && q.template) return 'T:' + q.template;
   if(q.src && q.src.indexOf(' · ') >= 0) return q.src;
+  /* multi/single без уникального src: ключ = формулировка + первые варианты,
+     чтобы разные вопросы не схлопывались в один ключ. */
+  if(Array.isArray(q.opts) && q.opts.length){
+    return 'Q:' + (q.q || '') + '|' + q.opts.slice(0, 2).join('~');
+  }
   return q.q || '';
+}
+/* Помечаем «виденными» только те вопросы подборки, на которые ученик ОТВЕТИЛ
+   (а не все показанные). Зовётся при сохранении результата — чтобы при следующей
+   случайной выборке отвеченные не повторялись, а неотвеченные (в т.ч. при
+   случайном выходе) могли выпасть снова. taskN/collection берём из STATE. */
+function markAnsweredQuestionsSeen(bank){
+  if(!Array.isArray(bank) || !bank.length) return;
+  const taskN = STATE.testOpen;
+  const collection = STATE.testCollection || null;
+  const keys = [];
+  bank.forEach((q, i) => {
+    const ans = STATE.testAnswers ? STATE.testAnswers[i] : null;
+    const has = ans != null && (Array.isArray(ans) ? ans.length > 0
+      : (typeof ans === 'object' ? Object.keys(ans).length > 0 : String(ans).trim().length > 0));
+    if(has){ const k = quizQuestionKey(q); if(k) keys.push(k); }
+  });
+  if(keys.length) quizSeenAdd(taskN, collection, keys);
 }
 function quizSeenStorageKey(taskN, collection){
   return 'zebrus_seenQ_' + taskN + '_' + (collection || '__any__');
@@ -12348,8 +12377,114 @@ function modalTest(taskN){
     body.append(block);
   });
 
+  /* === Единая фиксация попытки ===
+     Начисляет пчёл за верные ответы (correct = верные среди ОТВЕЧЕННЫХ,
+     поэтому частичное прохождение засчитывается), пишет попытку в БД
+     (saveAttempt сам игнорит полностью пустые) и закрывает тренажёр.
+     Зовётся и кнопкой «Сохранить и закрыть», и диалогом выхода (×/клик мимо).
+     Прецедент 31.05.2026: ученик решал ~900 заданий, случайно вышел —
+     результат и пчёлки пропали, потому что зачёт был только по «Завершить». */
+  async function commitAndClose(){
+    if(STATE.testSaving) return;
+    STATE.testSaving = true;
+    const beeEarned = correct * 2;
+    ME_STUDENT.bee += beeEarned;           /* мгновенный фидбек в UI */
+    /* Помечаем РЕШЁННЫЕ (отвеченные) вопросы как пройденные — чтобы в след.
+       случайной выборке они не повторялись. Только после сохранения. */
+    try { markAnsweredQuestionsSeen(bank); } catch(_){}
+    try {
+      await saveAttempt({
+        taskN, bank,
+        getUser: i => STATE.testAnswers[i] ?? null,
+        isCorrect, beeEarned,
+        limit: STATE.testLimit, shuffled: STATE.testShuffle,
+        assembledVariantId: STATE.assembledRunning ? STATE.assembledRunning.id : null
+      });
+    } catch(e){ console.warn(e); }
+    /* 🧳 Чемодан: фиксируем ошибки/верные по letterGap-вопросам (пропуски не считаем). */
+    try {
+      const promises = bank.map((q, i) => {
+        if(!q || !q.letterGap) return null;
+        const word = String(q.word || '').trim();
+        const corr = String(q.correct || '').trim();
+        if(!corr) return null;
+        const ans = STATE.testAnswers[i];
+        const ansStr = ans == null ? '' : String(ans).trim();
+        if(!ansStr) return null;
+        const payload = { taskN, kind: 'letterGap', question_text: q.q || null,
+          word, correct: corr, explanation: q.expl || null };
+        return isCorrect(q, i) ? recordCorrectForBank(payload) : recordMistakeForBank(payload);
+      }).filter(Boolean);
+      if(promises.length) await Promise.allSettled(promises);
+    } catch(e){ console.warn('[bank] flush fail:', e.message); }
+    if(STATE.attemptsByTask) delete STATE.attemptsByTask[taskN];
+    STATE.testOpen = null; STATE.testAnswers = {}; STATE.testChecked = false;
+    STATE.testInstantSubmitted = {}; STATE.testShuffle = null; STATE.testLimit = null;
+    STATE.shuffledBank = null; STATE.assembledRunning = null; STATE.testSaving = false;
+    showToast('Сохранено · +' + beeEarned + ' 🐝 на счёт');
+    render();
+  }
+  /* Закрыть, отложив прогресс (черновик в localStorage+БД остаётся — при след.
+     заходе восстановится). Ответы в памяти чистим, БД-черновик НЕ трогаем. */
+  function closeTrainerLater(){
+    STATE.testOpen = null; STATE.testAnswers = {}; STATE.testChecked = false;
+    STATE.testInstantSubmitted = {}; STATE.testShuffle = null; STATE.testLimit = null;
+    STATE.shuffledBank = null; render();
+  }
+  /* Закрыть и стереть прогресс (и БД-черновик) — «выйти без сохранения». */
+  function closeTrainerDiscard(){
+    try { clearTestProgress(); } catch(_){}
+    STATE.testOpen = null; STATE.testAnswers = {}; STATE.testChecked = false;
+    STATE.testInstantSubmitted = {}; STATE.testShuffle = null; STATE.testLimit = null;
+    STATE.shuffledBank = null; STATE.assembledRunning = null; render();
+  }
+  /* Диалог выхода: спрашиваем сохранить / отложить / выйти без сохранения.
+     Показывается по × и по клику мимо окна — чтобы случайный тап не терял
+     прогресс. Если не отвечено ни одного вопроса — просто закрываем. */
+  function showExitDialog(){
+    const answered = Object.keys(STATE.testAnswers || {}).filter(k => {
+      const u = STATE.testAnswers[k];
+      if(u == null) return false;
+      if(Array.isArray(u)) return u.length > 0;
+      if(typeof u === 'object') return Object.keys(u).length > 0;
+      return String(u).trim().length > 0;
+    }).length;
+    if(!answered){ closeTrainerLater(); return; }
+    const beePreview = correct * 2;
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px;';
+    const box = document.createElement('div');
+    box.style.cssText = 'background:#fff;border-radius:16px;padding:22px;max-width:440px;width:100%;box-shadow:0 10px 40px rgba(0,0,0,.3);font-family:inherit;';
+    const head = document.createElement('div');
+    head.style.cssText = 'font-size:17px;font-weight:800;margin-bottom:8px;color:#111';
+    head.textContent = 'Выйти из тренажёра?';
+    const msg = document.createElement('div');
+    msg.style.cssText = 'font-size:14px;color:#555;line-height:1.5;margin-bottom:18px';
+    msg.textContent = 'Отвечено: ' + answered + ' из ' + bank.length +
+      '. Можно сохранить результат и получить пчёлки за верные ответы, отложить (продолжить позже) или выйти без сохранения.';
+    box.append(head, msg);
+    const kill = () => { if(overlay.parentNode) document.body.removeChild(overlay); };
+    const mkBtn = (label, bg, fg, cb) => {
+      const b = document.createElement('button');
+      b.textContent = label;
+      b.style.cssText = 'display:block;width:100%;padding:12px;margin-bottom:8px;border-radius:10px;border:none;font-size:14px;font-weight:700;cursor:pointer;background:' + bg + ';color:' + fg + ';';
+      b.onclick = cb; return b;
+    };
+    box.append(
+      mkBtn('💾 Сохранить результат (+' + beePreview + ' 🐝)', 'var(--p)', '#fff', () => { kill(); commitAndClose(); }),
+      mkBtn('⏸ Продолжить позже', '#F3F4F6', '#374151', () => { kill(); closeTrainerLater(); }),
+      mkBtn('Выйти без сохранения', '#fff', 'var(--red)', () => { kill(); closeTrainerDiscard(); })
+    );
+    const cancel = mkBtn('Отмена', 'transparent', '#9CA3AF', kill);
+    cancel.style.fontWeight = '600'; cancel.style.marginBottom = '0';
+    box.append(cancel);
+    overlay.append(box);
+    overlay.onclick = (e) => { if(e.target === overlay) kill(); };
+    document.body.append(overlay);
+  }
+
   return el('div', { class:'modal-bg',
-    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.testOpen = null; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = null; STATE.testLimit = null; STATE.shuffledBank = null; render(); }}
+    onclick: e => { if(e.target.classList.contains('modal-bg')){ showExitDialog(); }}
   },
     el('div', { class:'modal', style:{ maxWidth:'700px' }},
       el('div', { class:'modal-head' },
@@ -12383,8 +12518,8 @@ function modalTest(taskN){
             })(),
             '⚡ Мгновенная проверка')),
         el('button', { class:'x', style:{ flexShrink:0, marginLeft:'10px' },
-          title: 'Отложить — прогресс сохранится, можно продолжить позже',
-          onclick: () => { STATE.testOpen = null; STATE.testAnswers = {}; STATE.testChecked = false; STATE.testInstantSubmitted = {}; STATE.testShuffle = null; STATE.testLimit = null; STATE.shuffledBank = null; render(); }
+          title: 'Выход — спросим, сохранить результат или отложить',
+          onclick: () => { showExitDialog(); }
         }, '×')),
       body,
       el('div', { class:'modal-foot' },
@@ -12441,95 +12576,48 @@ function modalTest(taskN){
             ? el('button', { class:'btn btn-y',
                 disabled: STATE.testSaving || undefined,
                 style: STATE.testSaving ? { opacity:'.6', cursor:'wait' } : null,
-                onclick: async (ev) => {
-                  /* Защита от двойного клика: пока идёт сохранение — игнорируем
-                     повторные нажатия (раньше из-за этого записывались 2 попытки). */
+                onclick: (ev) => {
+                  /* Защита от двойного клика — визуально гасим кнопку, дальше
+                     всё делает commitAndClose (он же ставит/снимает testSaving). */
                   if(STATE.testSaving) return;
-                  STATE.testSaving = true;
-                  /* Сразу отключаем кнопку визуально, не дожидаясь render() */
                   if(ev && ev.currentTarget){
                     ev.currentTarget.disabled = true;
                     ev.currentTarget.style.opacity = '.6';
                     ev.currentTarget.style.cursor = 'wait';
                     ev.currentTarget.textContent = '⏳ Сохраняем…';
                   }
-                  const beeEarned = correct * 2;
-                  ME_STUDENT.bee += beeEarned;          /* мгновенный фидбек в UI */
-                  /* Сохраняем попытку в БД (если онлайн с реальным профилем). Не блокируем UI ошибкой. */
-                  try {
-                    await saveAttempt({
-                      taskN, bank,
-                      getUser: i => STATE.testAnswers[i] ?? null,
-                      isCorrect, beeEarned,
-                      limit: STATE.testLimit, shuffled: STATE.testShuffle,
-                      assembledVariantId: STATE.assembledRunning ? STATE.assembledRunning.id : null
-                    });
-                  } catch(e){ console.warn(e); }
-                  /* 🧳 Чемодан без ручки: для каждого letterGap-вопроса записываем
-                     ошибку или подтверждаем правильный ответ (если был в чемодане).
-                     ВАЖНО: пустые ответы (ученик пропустил) НЕ считаем ошибкой —
-                     просто игнорируем, чтобы чемодан не засорялся пропусками.
-                     Все запросы параллельно через Promise.allSettled — не блокирует UI. */
-                  try {
-                    const promises = bank.map((q, i) => {
-                      if(!q || !q.letterGap) return null;
-                      const word = String(q.word || '').trim();
-                      const corr = String(q.correct || '').trim();
-                      if(!corr) return null;
-                      /* Пропуск (пустой ответ) — не считаем как ошибку */
-                      const ans = STATE.testAnswers[i];
-                      const ansStr = ans == null ? '' : String(ans).trim();
-                      if(!ansStr) return null;
-                      const right = isCorrect(q, i);
-                      const payload = {
-                        taskN, kind: 'letterGap',
-                        question_text: q.q || null,
-                        word, correct: corr,
-                        explanation: q.expl || null,
-                      };
-                      return right ? recordCorrectForBank(payload) : recordMistakeForBank(payload);
-                    }).filter(Boolean);
-                    if(promises.length) await Promise.allSettled(promises);
-                  } catch(e){ console.warn('[bank] flush fail:', e.message); }
-                  /* Сбрасываем кэш истории попыток, чтобы при след. открытии перечитать.
-                     Именно delete (а не = null), иначе условие подгрузки `list === undefined`
-                     не сработает и блок «Мои попытки» зависнет на «Загружаем…». */
-                  if(STATE.attemptsByTask) delete STATE.attemptsByTask[taskN];
-                  STATE.testOpen = null;
-                  STATE.testAnswers = {};
-                  STATE.testChecked = false;
-                  STATE.testInstantSubmitted = {};
-                  STATE.testShuffle = null;
-                  STATE.testLimit = null;
-                  STATE.shuffledBank = null;
-                  STATE.assembledRunning = null;
-                  STATE.testSaving = false;
-                  showToast('Сохранено · +' + beeEarned + ' 🐝 на счёт');
-                  render();
+                  commitAndClose();
                 }
               }, STATE.testSaving ? '⏳ Сохраняем…' : 'Сохранить и закрыть')
             : el('button', { class:'btn btn-p',
                 onclick: () => {
-                  /* Берём свежее состояние — на случай если ввод текста не вызвал ререндер */
-                  const allNow = bank.every(isAnswered);
-                  if(!allNow){ showToast('Заполните все вопросы'); return; }
+                  /* Раньше «Проверить» было заблокировано, пока не отвечены ВСЕ
+                     вопросы — на длинных подборках (500+) это мешало зафиксировать
+                     частичный результат. Теперь: если отвечено хоть что-то —
+                     завершаем и засчитываем отвеченное; если совсем пусто — просим
+                     ответить. Прецедент 31.05.2026. */
+                  const answeredNow = bank.filter((q, i) => isAnswered(q, i)).length;
+                  if(answeredNow === 0){ showToast('Ответьте хотя бы на один вопрос'); return; }
                   STATE.testChecked = true; render();
                   /* Через RAF — DOM уже обновлён, можем измерять getBoundingClientRect.
-                     Пускаем пчёлку из каждого правильного ответа к счётчику
-                     с шагом 130мс (лесенкой), и салют при 100%. */
+                     Пускаем пчёлку от правильных ответов к счётчику, НО не больше
+                     лимита: при 500 верных 500 пчёл по 130мс = больше минуты. Шлём
+                     до 12 пчёл (от первых видимых верных), остальное мгновенно
+                     прибавляется к счётчику внутри flyBeeToCounter-цепочки. */
                   requestAnimationFrame(() => {
+                    const MAX_BEES = 12;
                     let flown = 0;
-                    bank.forEach((q, i) => {
-                      if(!isCorrect(q, i)) return;
+                    for(let i = 0; i < bank.length && flown < MAX_BEES; i++){
+                      if(!isCorrect(bank[i], i)) continue;
                       const block = document.querySelector('[data-q-i="' + i + '"]');
-                      if(!block) return;
+                      if(!block) continue;
                       const rect = block.getBoundingClientRect();
                       setTimeout(() => flyBeeToCounter(rect), flown * 130);
                       flown++;
-                    });
+                    }
                     const correctNow = bank.filter(isCorrect).length;
+                    /* Салют — при 100% верных (и когда подборка целиком отвечена). */
                     if(correctNow === bank.length && bank.length > 0){
-                      /* Салют запускаем после того как последняя пчёлка прилетит */
                       setTimeout(celebrateBees, flown * 130 + 600);
                     }
                   });
