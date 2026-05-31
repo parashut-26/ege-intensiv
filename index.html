@@ -748,34 +748,41 @@ function _testProgressKey(){
   const uid = (MY_PROFILE && MY_PROFILE.id) ? MY_PROFILE.id : 'anon';
   return 'zebrus_test_progress_' + uid;
 }
+/* Снимок текущего состояния тренажёра в payload (или null, если закрыт).
+   Вынесено отдельно, чтобы переиспользовать в closeTrainerLater (там надо
+   вернуть черновик в localStorage после того, как render его сотрёт). */
+function _buildTestProgressPayload(){
+  if(!STATE.testOpen) return null;
+  return {
+    v: 1,
+    _t: Date.now(),
+    testOpen:             STATE.testOpen,
+    testAnswers:          STATE.testAnswers || {},
+    testChecked:          !!STATE.testChecked,
+    testInstantSubmitted: STATE.testInstantSubmitted || {},
+    testShuffle:          STATE.testShuffle || null,
+    testLimit:            STATE.testLimit || null,
+    testCollection:       STATE.testCollection || null,
+    /* ВАЖНО: shuffledBank — без него ответы привяжутся к другим
+       случайно вытянутым вопросам, потеряется смысл. */
+    shuffledBank:         STATE.shuffledBank || null,
+    /* commaPick — отдельная map расставленных запятых */
+    testCommas:           _serializeTestCommas(STATE.testCommas),
+  };
+}
 function persistTestProgress(){
   try {
     if(!STATE.testOpen){
-      /* Тренажёр закрыт ИЛИ ещё не открыт. Чистим только localStorage —
-         в БД запись НЕ трогаем. Иначе после перезагрузки страницы (когда
-         STATE.testOpen ещё null) мы бы стёрли свой же прогресс из БД,
-         и на других устройствах нечего было бы подтянуть.
-         БД-запись удаляется только явным clearTestProgress (при завершении
-         тренажёра / нажатии «Начать заново»). */
-      localStorage.removeItem(_testProgressKey());
+      /* Тренажёр закрыт ИЛИ ещё не открыт — НЕ трогаем сохранённый черновик.
+         Раньше здесь делали localStorage.removeItem, но это стирало отложенный
+         черновик («Продолжить позже») на следующем же рендере (навигация),
+         и кнопка «↩ Продолжить» исчезала. Черновик удаляется ТОЛЬКО явно —
+         через clearTestProgress (завершение / «Выйти без сохранения» /
+         «Сбросить»). Протухшие по TTL чистит tryRestoreTestProgress.
+         Прецедент 31.05.2026. */
       return;
     }
-    const payload = {
-      v: 1,
-      _t: Date.now(),
-      testOpen:             STATE.testOpen,
-      testAnswers:          STATE.testAnswers || {},
-      testChecked:          !!STATE.testChecked,
-      testInstantSubmitted: STATE.testInstantSubmitted || {},
-      testShuffle:          STATE.testShuffle || null,
-      testLimit:            STATE.testLimit || null,
-      testCollection:       STATE.testCollection || null,
-      /* ВАЖНО: shuffledBank — без него ответы привяжутся к другим
-         случайно вытянутым вопросам, потеряется смысл. */
-      shuffledBank:         STATE.shuffledBank || null,
-      /* commaPick — отдельная map расставленных запятых */
-      testCommas:           _serializeTestCommas(STATE.testCommas),
-    };
+    const payload = _buildTestProgressPayload();
     localStorage.setItem(_testProgressKey(), JSON.stringify(payload));
     /* === Синхронизация в БД (между устройствами) ===
        Прецедент 25.05.2026: ученики жаловались на потерю прогресса при
@@ -868,6 +875,31 @@ function tryRestoreTestProgress(){
     console.warn('[testProgress] restore failed:', err && err.message);
     return false;
   }
+}
+
+/* Возвращает сохранённый черновик для задания n, если он валиден (тот же
+   testOpen, не протух по TTL и есть хотя бы один ответ). Иначе null.
+   Используется для кнопки «↩ Продолжить незаконченное» в карточке тренажёра. */
+function getTestDraft(n){
+  try {
+    const raw = localStorage.getItem(_testProgressKey());
+    if(!raw) return null;
+    const p = JSON.parse(raw);
+    if(!p || p.testOpen !== n) return null;
+    if(p._t && (Date.now() - p._t) > TEST_PROGRESS_TTL_MS) return null;
+    const ans = (p.testAnswers && typeof p.testAnswers === 'object')
+      ? Object.keys(p.testAnswers).length : 0;
+    if(!ans) return null;
+    return p;
+  } catch(_){ return null; }
+}
+/* Возобновляет незаконченную попытку задания n из черновика. */
+function resumeTestDraft(n){
+  const p = getTestDraft(n);
+  if(!p) return false;
+  _applyTestProgressPayload(p);
+  STATE.theoryOpen = null;
+  return true;
 }
 
 /* Применяет payload в STATE — вынесено отдельно, чтобы реиспользовать
@@ -2220,7 +2252,21 @@ async function saveTheoryToDb(n, text){
    ======================================================================= */
 async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, shuffled, assembledVariantId }){
   if(!sb || !MY_PROFILE) return null;  /* демо-режим — не сохраняем */
-  const items = bank.map((q, i) => {
+  /* Решён ли вопрос (есть непустой ответ ученика). Используем и для фильтра
+     «только решённые», и для старой защиты от пустых попыток. */
+  const _isAns = (u) => {
+    if(u == null) return false;
+    if(Array.isArray(u)) return u.length > 0 && u.some(v => v != null && v !== '');
+    if(typeof u === 'object') return Object.keys(u).length > 0;
+    return String(u).trim().length > 0;
+  };
+  const items = [];
+  bank.forEach((q, i) => {
+    /* «Только решённые»: в историю и статистику кладём лишь вопросы, на которые
+       ученик реально ответил. Пропущенные не засоряют результат (раньше при
+       частичной попытке выходило «5/290 = 2%»). Прецедент 31.05.2026. */
+    const user = getUser(i);
+    if(!_isAns(user)) return;
     /* expected: правильный ответ. Раньше для inlineChoice клали q.a — но у
        inlineChoice такого поля нет, правильные ответы лежат в q.blanks[k].correct.
        Чиним: явно строим массив правильных индексов. */
@@ -2241,7 +2287,7 @@ async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, 
 
     const item = {
       src: q.src || null,
-      user: getUser(i),
+      user,
       expected,
       ok: !!isCorrect(q, i)
     };
@@ -2262,6 +2308,24 @@ async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, 
         return { variants: vars, options: vars, correct: b.correct };
       });
     }
+    /* Для multi и прочих вопросов-с-вариантами (выбери все верные, орфоэпия,
+       паронимы…) сохраняем формулировку и сами варианты, чтобы история
+       показывала задание формата ЕГЭ целиком, даже если банк потом изменится.
+       Прецедент 31.05.2026: у заданий 14-типа multi в истории была заглушка
+       «? · ?» — текст и варианты не сохранялись. inlineChoice/letterGap уже
+       имеют свой формат выше, их не трогаем. */
+    if(!q.inlineChoice && !q.letterGap){
+      const choices = (Array.isArray(q.opts) && q.opts.length && q.opts)
+                   || (Array.isArray(q.sentences) && q.sentences.length && q.sentences)
+                   || (Array.isArray(q.words) && q.words.length && q.words)
+                   || null;
+      if(choices){
+        item.q = q.q || null;
+        item.opts = choices;
+        if(q.multi) item.multi = true;
+        if(q.expl) item.expl = q.expl;
+      }
+    }
     /* Для commaPick (задание 16) сохраняем расставленные учеником запятые,
        чтобы учитель потом мог их посмотреть в drill-down. */
     if(q.commaPick && STATE.testCommas && STATE.testCommas[i]){
@@ -2272,22 +2336,17 @@ async function saveAttempt({ taskN, bank, getUser, isCorrect, beeEarned, limit, 
       });
       if(Object.keys(commasObj).length) item.commas = commasObj;
     }
-    return item;
+    items.push(item);
   });
   const score = items.filter(x => x.ok).length;
-  const max_score = bank.length;
+  /* max_score — только по решённым вопросам (см. фильтр выше). */
+  const max_score = items.length;
 
   /* Защита от «пустых» попыток: если ученик не ответил ни на один вопрос
      (зашёл в тренажёр, нажал «Сохранить и закрыть» сразу) — не сохраняем.
      Иначе в статистике группы такая попытка считается как 0/N → 100% ошибок
      и поднимает задание в «слабые места» при полном отсутствии данных. */
-  const answeredCount = items.filter(it => {
-    const u = it && it.user;
-    if(u == null) return false;
-    if(Array.isArray(u)) return u.length > 0 && u.some(v => v != null && v !== '');
-    if(typeof u === 'object') return Object.keys(u).length > 0;
-    return String(u).trim().length > 0;
-  }).length;
+  const answeredCount = items.length;
   if(answeredCount === 0){
     console.log('saveAttempt: пустая попытка, не сохраняем');
     return null;
@@ -11081,10 +11140,23 @@ function modalTheory(n){
             render();
           };
           const wordQ = (k) => ruPlural(k, 'вопрос', 'вопроса', 'вопросов');
+          /* Незаконченная попытка (после «Продолжить позже») — даём явную кнопку
+             продолжить. Любая кнопка старта ниже начинает заново и затирает
+             черновик (persistTestProgress перезапишет его пустыми ответами). */
+          const draft = getTestDraft(n);
+          const draftAnsN = draft ? Object.keys(draft.testAnswers).length : 0;
           return el('div', { class:'card', style:{ marginBottom:'14px', background:'var(--y-soft)', border:'1px solid var(--y-2)' }},
             el('h4', null, '🎯 Тренажёр'),
             el('p', { style:{ color:'var(--ink-2)', marginTop:'4px', marginBottom:'10px' }},
               'В банке ' + bankN + ' ' + wordQ(bankN) + '. Сколько хочешь решить? Пчёлки идут за каждый верный ответ.'),
+            draft ? el('div', { style:{ marginBottom:'10px', padding:'10px 12px', background:'#fff',
+                border:'1px solid var(--p)', borderRadius:'10px', display:'flex', gap:'10px',
+                alignItems:'center', flexWrap:'wrap' }},
+              el('div', { style:{ flex:'1', minWidth:'140px', fontSize:'13px', color:'var(--ink-2)' }},
+                '⏸ Есть незаконченная попытка — отвечено ' + draftAnsN + ' ' + wordQ(draftAnsN) + '.'),
+              el('button', { class:'btn btn-p btn-sm',
+                onclick: () => { if(resumeTestDraft(n)) render(); }
+              }, '↩ Продолжить')) : null,
             el('div', { style:{ display:'flex', gap:'8px', flexWrap:'wrap' }},
               /* 5 случайных */
               bankN >= 5 ? el('button', { class:'btn btn-y',
@@ -12424,12 +12496,21 @@ function modalTest(taskN){
     showToast('Сохранено · +' + beeEarned + ' 🐝 на счёт');
     render();
   }
-  /* Закрыть, отложив прогресс (черновик в localStorage+БД остаётся — при след.
-     заходе восстановится). Ответы в памяти чистим, БД-черновик НЕ трогаем. */
+  /* Закрыть, отложив прогресс. Черновик остаётся, чтобы при повторном открытии
+     задания (даже в этой же сессии) можно было продолжить.
+     ВАЖНО: render() ниже дёргает persistTestProgress(), а тот при testOpen=null
+     СТИРАЕТ localStorage-черновик. Поэтому снимаем payload ДО обнуления и
+     возвращаем его в localStorage уже ПОСЛЕ render(). БД-копию не трогаем
+     (она и так сохранена автосейвом). */
   function closeTrainerLater(){
+    const draft = _buildTestProgressPayload();
     STATE.testOpen = null; STATE.testAnswers = {}; STATE.testChecked = false;
     STATE.testInstantSubmitted = {}; STATE.testShuffle = null; STATE.testLimit = null;
     STATE.shuffledBank = null; render();
+    if(draft){
+      try { localStorage.setItem(_testProgressKey(), JSON.stringify(draft)); } catch(_){}
+      try { _scheduleTestProgressDbSave(draft); } catch(_){}
+    }
   }
   /* Закрыть и стереть прогресс (и БД-черновик) — «выйти без сохранения». */
   function closeTrainerDiscard(){
@@ -18750,6 +18831,11 @@ function modalAttemptDetail(){
           card.append(el('div', { style:{ fontSize:'13px', marginBottom:'8px', whiteSpace:'pre-wrap', fontWeight:'600' }}, q.q));
         }
       }
+      /* Вопрос не нашёлся в банке, но текст сохранён в самой попытке (multi и др.) —
+         показываем формулировку из попытки, чтобы задание читалось целиком. */
+      if(!q && item.q){
+        card.append(el('div', { style:{ fontSize:'13px', marginBottom:'8px', whiteSpace:'pre-wrap', fontWeight:'600' }}, item.q));
+      }
 
       /* letterGap: показываем само слово с пропуском, букву ученика и правильную.
          item.word — это слово вида «пр_пятствие» (1 буква) или «оторва__ых» (НН).
@@ -18893,8 +18979,16 @@ function modalAttemptDetail(){
          Здесь мы по любому доступному источнику blanks (item.blanks или q.blanks)
          расшифровываем индекс(ы) ученика в текст варианта («незнакомый») и, если
          есть шаблон, восстанавливаем предложение. */
+      /* Раньше задание 13/14 БЕЗУСЛОВНО считалось inlineChoice. Но среди 14-х
+         есть вопросы типа multi («выберите все верные»), и их перехватывал
+         inline-фолбэк → заглушка «? · ?». Теперь, если вопрос явно multi
+         (по сохранённым в попытке opts/multi или по найденному в банке q),
+         inline-ветку не включаем. Прецедент 31.05.2026. */
+      const looksMulti = item.multi || (Array.isArray(item.opts) && item.opts.length)
+                       || (q && (q.multi || (Array.isArray(q.opts) && q.opts.length)
+                                 || (Array.isArray(q.sentences) && q.sentences.length)));
       const isInlineKind = item.inlineChoice || (q && q.inlineChoice)
-                           || taskN === 13 || taskN === 14;
+                           || ((taskN === 13 || taskN === 14) && !looksMulti);
       if(isInlineKind && !(inlineTemplate && inlineBlanks)){
         /* Любой доступный набор blanks: из попытки или из банка. */
         const fbBlanks = (Array.isArray(item.blanks) && item.blanks.length) ? item.blanks
@@ -19067,12 +19161,15 @@ function modalAttemptDetail(){
          q.opts — орфоэпия (зад. 4), паронимы (зад. 5)
          q.sentences — пунктуация и др.
          q.words — иногда */
-      const choices = (q && (
-        (Array.isArray(q.opts) && q.opts.length && q.opts) ||
-        (Array.isArray(q.sentences) && q.sentences.length && q.sentences) ||
-        (Array.isArray(q.words) && q.words.length && q.words) ||
-        null
-      )) || null;
+      /* Сначала берём варианты, сохранённые в самой попытке (item.opts) — так
+         история не зависит от текущего банка; иначе ищем в банке (q). */
+      const choices = (Array.isArray(item.opts) && item.opts.length && item.opts)
+        || (q && (
+          (Array.isArray(q.opts) && q.opts.length && q.opts) ||
+          (Array.isArray(q.sentences) && q.sentences.length && q.sentences) ||
+          (Array.isArray(q.words) && q.words.length && q.words) ||
+          null
+        )) || null;
       const isMultiSelect = choices &&
         (userIdxs.length || expectedIdxs.length);
 
