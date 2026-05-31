@@ -26808,6 +26808,15 @@ async function voteWarmupPoll(blockId, optionIndex){
       if(b.id === blockId){ block = b; intensiveOrd = parseInt(o, 10); }
     });
   });
+  /* Прогулочные/мотивационные дни хранят посты в STATE.walkPostsByKey (ключ —
+     walk_id, напр. 'walk2'). Без этого источника опрос/реакция в мотивационном
+     дне не находили блок → клик молча игнорировался (if(!block) return).
+     Прецедент 31.05.2026. */
+  Object.keys(STATE.walkPostsByKey || {}).forEach(wk => {
+    (STATE.walkPostsByKey[wk] || []).forEach(b => {
+      if(b.id === blockId){ block = b; }
+    });
+  });
   if(!block) return;
   /* Готовим новый config с обновлённым голосом */
   const newConfig = JSON.parse(JSON.stringify(block.config || {}));
@@ -26836,9 +26845,14 @@ async function voteWarmupPoll(blockId, optionIndex){
     /* Откатываем оптимистичное обновление */
     delete newConfig.poll.votes[MY_PROFILE.id];
     block.config = newConfig;
-    if(STATE.openWarmupDayId === dayId){
-      const day = (STATE.warmupDays || []).find(d => d.id === dayId);
+    /* Перерисовываем откат. Раньше здесь была переменная dayId, которой в этой
+       функции нет → ReferenceError глушил откат. Используем warmupDayId, а для
+       прочих случаев (день интенсива / прогулочный день) — общий render(). */
+    if(warmupDayId != null && STATE.openWarmupDayId === warmupDayId){
+      const day = (STATE.warmupDays || []).find(d => d.id === warmupDayId);
       if(day) renderWarmupOverlay(day);
+    } else {
+      render();
     }
   }
 }
@@ -26959,6 +26973,15 @@ async function reactWarmupPost(blockId, emoji){
   Object.keys(STATE.intensivePostsByOrd || {}).forEach(o => {
     (STATE.intensivePostsByOrd[o] || []).forEach(b => {
       if(b.id === blockId){ block = b; intensiveOrd = parseInt(o, 10); }
+    });
+  });
+  /* Прогулочные/мотивационные дни хранят посты в STATE.walkPostsByKey (ключ —
+     walk_id, напр. 'walk2'). Без этого источника опрос/реакция в мотивационном
+     дне не находили блок → клик молча игнорировался (if(!block) return).
+     Прецедент 31.05.2026. */
+  Object.keys(STATE.walkPostsByKey || {}).forEach(wk => {
+    (STATE.walkPostsByKey[wk] || []).forEach(b => {
+      if(b.id === blockId){ block = b; }
     });
   });
   if(!block) return;
