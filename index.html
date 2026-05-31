@@ -18002,6 +18002,128 @@ function modalStudentDetail(){
     body.append(variantsCard);
   }
 
+  /* 🧩 Сборки — попытки ученика по сборкам учителя (assembled_variants).
+     Прецедент 31.05.2026: учитель хочет видеть в карточке ученика, какие
+     сборки он прошёл и с каким результатом. */
+  if(/^[0-9a-f-]{36}$/i.test(sid)){
+    const asmCard = el('div', { class:'card', style:{ marginBottom:'14px' }});
+    asmCard.append(el('h4', { style:{ marginBottom:'8px' }}, '🧩 Сборки'));
+    /* Для названий сборок нужен их список (с id→title) */
+    if(STATE.assembledVariants === undefined && sb){
+      STATE.assembledVariants = null;
+      loadAssembledVariants().then(arr => { STATE.assembledVariants = arr; render(); });
+    }
+    const avTitleById = {};
+    (STATE.assembledVariants || []).forEach(av => { if(av) avTitleById[av.id] = av.title || 'Без названия'; });
+    const aCache = STATE.studentAssembledAttempts || (STATE.studentAssembledAttempts = {});
+    let aList = aCache[sid];
+    if(aList === undefined){
+      aCache[sid] = null;
+      asmCard.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'8px' }}, '⏳ Загружаю…'));
+      (async () => {
+        try {
+          const atts = await restRequest('GET',
+            '/attempts?student_id=eq.' + sid +
+            '&assembled_variant_id=not.is.null' +
+            '&select=id,score,max_score,bee_earned,created_at,assembled_variant_id' +
+            '&order=created_at.desc&limit=200');
+          aCache[sid] = Array.isArray(atts) ? atts : [];
+          render();
+        } catch(_){ aCache[sid] = []; render(); }
+      })();
+    } else if(!aList || !aList.length){
+      asmCard.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'8px' }},
+        'Ученик ещё не проходил сборок.'));
+    } else {
+      const tbl = el('table', { class:'table', style:{ fontSize:'12px', width:'100%' }});
+      tbl.append(el('thead', null, el('tr', null,
+        el('th', null, 'Сборка'),
+        el('th', { style:{ textAlign:'center' }}, 'Дата'),
+        el('th', { style:{ textAlign:'center' }}, '%'),
+        el('th', { style:{ textAlign:'center' }}, 'Балл'))));
+      const tbody = el('tbody', null);
+      aList.forEach(a => {
+        const title = avTitleById[a.assembled_variant_id] || ('Сборка #' + a.assembled_variant_id);
+        const date = a.created_at ? new Date(a.created_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) : '—';
+        const pctNum = a.max_score ? Math.round((a.score || 0) / a.max_score * 100) : null;
+        const pct = pctNum != null ? pctNum + '%' : '—';
+        const pctColor = pctNum == null ? 'var(--ink-3)' : pctNum >= 70 ? 'var(--green)' : pctNum >= 50 ? 'var(--warn)' : 'var(--red)';
+        tbody.append(el('tr', null,
+          el('td', null, title),
+          el('td', { style:{ textAlign:'center', color:'var(--ink-3)' }}, date),
+          el('td', { style:{ textAlign:'center', color:pctColor, fontWeight:'700' }}, pct),
+          el('td', { style:{ textAlign:'center', fontWeight:'700' }},
+            (a.score != null ? a.score : '—') + (a.max_score ? ' / ' + a.max_score : ''))));
+      });
+      tbl.append(tbody);
+      asmCard.append(tbl);
+    }
+    body.append(asmCard);
+  }
+
+  /* 🎮 Игры — попытки ученика в HTML-играх (game_attempts). По каждой
+     попытке — результат и раскрываемый разбор ошибок (по номерам). */
+  if(/^[0-9a-f-]{36}$/i.test(sid)){
+    const gCard = el('div', { class:'card', style:{ marginBottom:'14px' }});
+    gCard.append(el('h4', { style:{ marginBottom:'8px' }}, '🎮 Игры'));
+    if(!STATE.gamesList && sb){ loadGamesList().then(render); }
+    const gCache = STATE.studentGameAttempts || (STATE.studentGameAttempts = {});
+    let gList = gCache[sid];
+    if(gList === undefined){
+      gCache[sid] = null;
+      gCard.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'8px' }}, '⏳ Загружаю…'));
+      (async () => {
+        try {
+          const atts = await restRequest('GET',
+            '/game_attempts?student_id=eq.' + sid +
+            '&select=id,game_id,score,max_score,percent,time_seconds,created_at,finished_at,payload' +
+            '&order=created_at.desc&limit=300');
+          gCache[sid] = Array.isArray(atts) ? atts : [];
+          render();
+        } catch(_){ gCache[sid] = []; render(); }
+      })();
+    } else {
+      /* Показываем только завершённые попытки (с finished_at) — pending-записи
+         «started» (открыл игру, но не доиграл) не считаем за результат. */
+      const finished = (gList || []).filter(a => a.finished_at);
+      if(!finished.length){
+        gCard.append(el('div', { style:{ color:'var(--ink-3)', fontSize:'12px', padding:'8px' }},
+          'Ученик ещё не проходил игр.'));
+      } else {
+        const listWrap = el('div', { style:{ display:'flex', flexDirection:'column', gap:'8px' }});
+        finished.forEach(a => {
+          const g = findGame(a.game_id);
+          const title = (g ? ((g.emoji ? g.emoji + ' ' : '') + g.title) : ('Игра #' + a.game_id));
+          const date = a.created_at ? new Date(a.created_at).toLocaleDateString('ru-RU', { day:'2-digit', month:'2-digit' }) : '—';
+          const pctNum = a.percent != null ? Math.round(a.percent)
+                       : (a.max_score ? Math.round((a.score || 0) / a.max_score * 100) : null);
+          const pct = pctNum != null ? pctNum + '%' : '—';
+          const pctColor = pctNum == null ? 'var(--ink-3)' : pctNum >= 70 ? 'var(--green)' : pctNum >= 50 ? 'var(--warn)' : 'var(--red)';
+          const head = el('div', { style:{ display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }},
+            el('span', { style:{ fontWeight:'700', fontSize:'13px', flex:1, minWidth:'120px' }}, title),
+            el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, date),
+            el('span', { style:{ fontSize:'12px', fontWeight:'700', color:pctColor }}, pct),
+            el('span', { style:{ fontSize:'12px', color:'var(--ink-2)' }},
+              (a.score != null ? a.score : '—') + (a.max_score ? ' / ' + a.max_score : '') + ' 🐝'),
+            a.time_seconds ? el('span', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, '⏱ ' + otpFormatTime(a.time_seconds)) : null);
+          /* Разбор ошибок по номерам, если игра его прислала */
+          const wrong = (typeof renderGameWrongTasks === 'function') ? renderGameWrongTasks(a.payload) : null;
+          let item;
+          if(wrong){
+            item = el('details', { style:{ background:'var(--surface-soft)', borderRadius:'8px', padding:'8px 10px' }});
+            const sum = el('summary', { style:{ cursor:'pointer', listStyle:'none' }}, head);
+            item.append(sum, wrong);
+          } else {
+            item = el('div', { style:{ background:'var(--surface-soft)', borderRadius:'8px', padding:'8px 10px' }}, head);
+          }
+          listWrap.append(item);
+        });
+        gCard.append(listWrap);
+      }
+    }
+    body.append(gCard);
+  }
+
   /* Слабые темы */
   if(weakTopics.length){
     const weak = el('div', { class:'card', style:{ marginBottom:'14px', background:'#FFFBEB', border:'1px solid #FDE68A' }});
