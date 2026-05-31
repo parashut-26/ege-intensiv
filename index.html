@@ -20695,9 +20695,21 @@ function modalEssayReview(essayId){
     /* Поле комментария сделали выше (80→200px), чтобы длинный AI-разбор был
        сразу виден без скролла. Кнопка ⛶ по-прежнему открывает на весь экран.
        Прецедент 31.05.2026. */
-    style:{ width:'100%', padding:'10px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'200px', resize:'vertical', marginTop:'8px' },
-    oninput: ev => { STATE.essayComment = ev.target.value; }
+    /* Поле комментария авто-растёт под объём текста — длинный AI-разбор виден
+       ЦЕЛИКОМ без внутренней прокрутки. minHeight как стартовый размер для
+       пустого поля; overflow:hidden — внутренний скролл не нужен, страница
+       (модалка) прокручивается сама. Прецедент 31.05.2026. */
+    style:{ width:'100%', padding:'10px', borderRadius:'10px', border:'1px solid var(--border-2)', minHeight:'200px', resize:'vertical', marginTop:'8px', overflow:'hidden' },
+    oninput: ev => { STATE.essayComment = ev.target.value; autoGrowComment(ev.target); }
   }, STATE.essayComment || '');
+  /* Подгоняем высоту под содержимое: scrollHeight = реальная высота текста. */
+  const autoGrowComment = (ta) => {
+    if(!ta) return;
+    ta.style.height = 'auto';
+    ta.style.height = Math.max(200, ta.scrollHeight + 4) + 'px';
+  };
+  /* Первый расчёт — после монтирования в DOM (иначе scrollHeight = 0). */
+  requestAnimationFrame(() => autoGrowComment(commentTextarea));
   const expandCommentBtn = el('button', {
     type:'button',
     title:'Развернуть на весь экран — удобно читать длинный AI-разбор',
@@ -20796,7 +20808,12 @@ function modalEssayReview(essayId){
           onclick: () => { STATE.essayOpen = null; STATE.essayBy = null; STATE.scoresK = {}; STATE.errors = {}; STATE.essayComment = ''; STATE.essayVoiceUrl = null; render(); }
         }, '×'))),
     el('div', { class:'modal-body' },
-      el('div', { class:'essay-grid' }, leftCol, rightCol)),
+      /* В fullscreen окно широкое — даём колонкам больше воздуха: сочинение
+         (левая) занимает ~2/3, оценки/комментарий (правая) ~1/3. В обычном
+         режиме оставляем дефолт из .essay-grid (1.2fr 1fr). Прецедент 31.05.2026. */
+      el('div', { class:'essay-grid',
+        style: isFullscreen ? { gridTemplateColumns:'2fr 1fr', gap:'28px' } : null },
+        leftCol, rightCol)),
     foot);
 
   const modalBg = el('div', { class:'modal-bg', style: bgStyle,
@@ -21275,7 +21292,10 @@ function commentItemRow(essay, c){
     el('span', { style:{ fontSize:'11px', fontWeight:'700', padding:'2px 6px', background: meta.bg, borderRadius:'5px', whiteSpace:'nowrap' }},
       meta.crit),
     el('div', { style:{ flex:1, minWidth:0 }},
-      el('span', { class:'frag' }, where),
+      /* Цитату-заголовок показываем ЦЕЛИКОМ (раньше .frag обрезал в одну
+         строку с «…»). Переопределяем inline, глобальный класс не трогаем.
+         Прецедент 31.05.2026. */
+      el('span', { class:'frag', style:{ maxWidth:'none', whiteSpace:'normal', overflow:'visible', textOverflow:'clip', wordBreak:'break-word' }}, where),
       el('div', null,
         safeComment(c.comment) || el('span', { style:{ color:'var(--ink-3)' }}, safeVoiceUrl(c.voice_url) ? '(голос)' : '(без комментария)'),
         safeVoiceUrl(c.voice_url) ? el('span', { style:{ marginLeft:'6px', fontSize:'11px' }}, '🎤') : null)),
