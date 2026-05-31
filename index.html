@@ -1506,7 +1506,7 @@ const STATE = {
   taskTab: 'theory',       // 'theory' | 'practice' — какая вкладка открыта в карточке задания
   attendanceOpen: false,   // открыта модалка посещаемости
   attendanceView: 'day',   // 'day' | 'table' — режим вкладки «Посещаемость»: дневной вид / сводная таблица
-  scoresK: {}, errors: {}, essayComment: '', essayVoiceUrl: null,
+  scoresK: {}, errors: {}, essayComment: '', essayVoiceUrl: null, critComments: {},
   studentEssayResultOpen: null,
   sampleOpen: null,
   sampleEditOpen: null,  // 'new' | id — открыта форма добавления/редактирования образца
@@ -5424,7 +5424,20 @@ async function loadEssaysFromDb(){
   try {
     /* Берём сочинения и подтягиваем имя ученика. У essays три FK к profiles
        (student_id, pre_checked_by, finalized_by) — указываем явно через !essays_student_id_fkey. */
-    const arr = await restRequest('GET', '/essays?select=id,student_id,body_text,photo_urls,word_count,status,submitted_at,format,assigned_curator_id,source_text,source_problem,source_variant_id,student:profiles!essays_student_id_fkey(full_name,email),review:essay_reviews(total,general_comment,voice_url,is_pre_check,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10,k7_errors,k8_errors,k9_errors,k10_errors)&order=submitted_at.desc&limit=200');
+    const _reviewCols = 'total,general_comment,voice_url,is_pre_check,k1,k2,k3,k4,k5,k6,k7,k8,k9,k10,k7_errors,k8_errors,k9_errors,k10_errors,crit_comments';
+    const _essaySelect = (cols) => '/essays?select=id,student_id,body_text,photo_urls,word_count,status,submitted_at,format,assigned_curator_id,source_text,source_problem,source_variant_id,student:profiles!essays_student_id_fkey(full_name,email),review:essay_reviews(' + cols + ')&order=submitted_at.desc&limit=200';
+    /* Устойчивость к непрогнанной миграции: если crit_comments ещё нет в БД —
+       повторяем запрос без него, иначе у всех вообще не загрузятся сочинения. */
+    let arr;
+    try {
+      arr = await restRequest('GET', _essaySelect(_reviewCols));
+    } catch(e){
+      const msg = (e && e.message) || '';
+      if(/crit_comments/.test(msg) || /PGRST/.test(msg) || /column .* does not exist/i.test(msg) || /42703/.test(msg)){
+        console.warn('[loadEssays] crit_comments нет в БД — гружу без него. Прогони sql/add_essay_crit_comments.sql');
+        arr = await restRequest('GET', _essaySelect(_reviewCols.replace(',crit_comments','')));
+      } else { throw e; }
+    }
     if(Array.isArray(arr)){
       DB_ESSAYS = arr.map(e => {
         const r = e.review && (Array.isArray(e.review) ? e.review[0] : e.review);
@@ -6447,12 +6460,34 @@ async function saveEssayReview(essayId, nextStatus, isPreCheck){
     total: total,
     general_comment: (STATE.essayComment || '').trim() || null,
     voice_url: STATE.essayVoiceUrl || null,
+    /* Индивидуальные пояснения по критериям {K1:"...",...} — только непустые.
+       Если ни одного — пишем null (чистим прошлые). */
+    crit_comments: (() => {
+      const src = STATE.critComments || {};
+      const out = {};
+      Object.keys(src).forEach(k => { if(src[k] && String(src[k]).trim()) out[k] = String(src[k]).trim(); });
+      return Object.keys(out).length ? out : null;
+    })(),
     is_pre_check: !!isPreCheck,
     reviewer_id: MY_PROFILE.id,
     reviewed_at: new Date().toISOString()
   };
-  /* upsert через Prefer: resolution=merge-duplicates (essay_id — PK) */
-  await restRequest('POST', '/essay_reviews', payload, { prefer: 'resolution=merge-duplicates,return=minimal' });
+  /* upsert через Prefer: resolution=merge-duplicates (essay_id — PK).
+     Устойчивость к непрогнанной миграции: если колонки crit_comments ещё нет
+     в БД (PGRST204/«column ... does not exist»), повторяем сохранение без неё —
+     чтобы проверка сочинения сохранилась в любом случае. Прецедент 31.05.2026. */
+  try {
+    await restRequest('POST', '/essay_reviews', payload, { prefer: 'resolution=merge-duplicates,return=minimal' });
+  } catch(e){
+    const msg = (e && e.message) || '';
+    if(/crit_comments/.test(msg) || /PGRST204/.test(msg) || /column .* does not exist/i.test(msg)){
+      console.warn('[saveEssayReview] crit_comments нет в БД — сохраняю без него. Прогони sql/add_essay_crit_comments.sql');
+      delete payload.crit_comments;
+      await restRequest('POST', '/essay_reviews', payload, { prefer: 'resolution=merge-duplicates,return=minimal' });
+    } else {
+      throw e;
+    }
+  }
   /* теперь обновим статус самого сочинения */
   const essayUpdate = { status: nextStatus };
   if(isPreCheck) essayUpdate.pre_checked_by = MY_PROFILE.id;
@@ -16479,6 +16514,7 @@ function essayRow(e, isCurator){
     STATE.scoresK = {};
     STATE.errors = {};
     STATE.essayComment = '';
+    STATE.critComments = {};   /* {K1:"...", ...} — индивидуальные пояснения учителя по критерию */
     if(typeof e.id === 'number' && sb){
       try {
         const [r, cmts] = await Promise.all([loadEssayReview(e.id), loadEssayComments(e.id)]);
@@ -16491,6 +16527,13 @@ function essayRow(e, isCurator){
           });
           if(r.general_comment) STATE.essayComment = r.general_comment;
           if(r.voice_url) STATE.essayVoiceUrl = r.voice_url;
+          /* crit_comments — JSONB {K1:"...",...}; нормализуем ключи в верхний регистр */
+          if(r.crit_comments && typeof r.crit_comments === 'object'){
+            Object.keys(r.crit_comments).forEach(k => {
+              const val = r.crit_comments[k];
+              if(val != null && String(val).trim()) STATE.critComments[k.toUpperCase()] = String(val);
+            });
+          }
         }
         e.comments = cmts;
         ESSAY_COMMENTS_CACHE[e.id] = cmts;
@@ -18384,6 +18427,16 @@ function modalEssayResult(essayId){
     return verb + ' ' + n + ' ' + adj + ' ' + noun + ' — ' + value + ' ' + ball;
   };
 
+  /* Индивидуальные пояснения учителя по критериям {K1:"...",...}. Нормализуем
+     ключи в верхний регистр (на случай k1/K1). */
+  const critComments = {};
+  if(r.crit_comments && typeof r.crit_comments === 'object'){
+    Object.keys(r.crit_comments).forEach(k => {
+      const val = r.crit_comments[k];
+      if(val != null && String(val).trim()) critComments[k.toUpperCase()] = String(val).trim();
+    });
+  }
+
   /* Список баллов по К1-К10 */
   const list = el('div', { style:{ display:'flex', flexDirection:'column', gap:'6px', marginTop:'10px' }});
   CRIT.forEach(c => {
@@ -18397,14 +18450,23 @@ function modalEssayResult(essayId){
        чтобы ученику было понятно, за что и почему такой балл. Секцию
        (Содержание/Речь/Грамотность) показываем только в крайнем случае. */
     const subLabel = (c.byErrors ? errLabel(c.id, value) : (c.hint ? c.hint.split('.')[0] : null)) || sec;
+    const teacherNote = critComments[c.id];
     list.append(el('div', {
-      style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px',
-              padding:'10px 12px', background:colorMap[sec] || 'var(--surface-soft)', borderRadius:'10px' }
+      style:{ padding:'10px 12px', background:colorMap[sec] || 'var(--surface-soft)', borderRadius:'10px' }
     },
-      el('div', { style:{ minWidth:0 }},
-        el('div', { style:{ fontWeight:'700', fontSize:'13px' }}, c.id + ' · ' + c.name),
-        el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, subLabel)),
-      el('div', { style:{ fontWeight:'800', fontSize:'15px', whiteSpace:'nowrap' }}, value + ' / ' + c.max)));
+      el('div', { style:{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'10px' }},
+        el('div', { style:{ minWidth:0 }},
+          el('div', { style:{ fontWeight:'700', fontSize:'13px' }}, c.id + ' · ' + c.name),
+          el('div', { style:{ fontSize:'11px', color:'var(--ink-3)' }}, subLabel)),
+        el('div', { style:{ fontWeight:'800', fontSize:'15px', whiteSpace:'nowrap' }}, value + ' / ' + c.max)),
+      /* Персональное пояснение учителя — почему такой балл именно у этой работы */
+      teacherNote
+        ? el('div', { style:{ marginTop:'8px', padding:'8px 10px', background:'#fff',
+            borderRadius:'8px', borderLeft:'3px solid var(--p)', fontSize:'13px',
+            lineHeight:'1.45', whiteSpace:'pre-wrap' }},
+            el('span', { style:{ fontSize:'11px', fontWeight:'700', color:'var(--p-deep)', marginRight:'6px' }}, '✍ Учитель:'),
+            teacherNote)
+        : null));
   });
 
   const isFullscreen = !!STATE.essayResultFullscreen;
@@ -20854,6 +20916,7 @@ function modalEssayReview(essayId){
     STATE.scoresK = {};
     STATE.errors = {};
     STATE.essayComment = '';
+    STATE.critComments = {};
     STATE.essayVoiceUrl = null;
     if(msg) showToast(msg);
     render();
@@ -20913,7 +20976,7 @@ function modalEssayReview(essayId){
           onclick: () => { STATE.essayFullscreen = !STATE.essayFullscreen; render(); }
         }, isFullscreen ? '⤡' : '⛶'),
         el('button', { class:'x',
-          onclick: () => { STATE.essayOpen = null; STATE.essayBy = null; STATE.scoresK = {}; STATE.errors = {}; STATE.essayComment = ''; STATE.essayVoiceUrl = null; render(); }
+          onclick: () => { STATE.essayOpen = null; STATE.essayBy = null; STATE.scoresK = {}; STATE.errors = {}; STATE.essayComment = ''; STATE.critComments = {}; STATE.essayVoiceUrl = null; render(); }
         }, '×'))),
     el('div', { class:'modal-body' },
       /* В fullscreen окно широкое — даём колонкам больше воздуха: сочинение
@@ -20925,7 +20988,7 @@ function modalEssayReview(essayId){
     foot);
 
   const modalBg = el('div', { class:'modal-bg', style: bgStyle,
-    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.essayOpen = null; STATE.essayBy = null; STATE.scoresK = {}; STATE.errors = {}; STATE.essayComment = ''; STATE.essayVoiceUrl = null; render(); }}
+    onclick: e => { if(e.target.classList.contains('modal-bg')){ STATE.essayOpen = null; STATE.essayBy = null; STATE.scoresK = {}; STATE.errors = {}; STATE.essayComment = ''; STATE.critComments = {}; STATE.essayVoiceUrl = null; render(); }}
   }, modal);
 
   /* === Fullscreen-оверлей для «Общего комментария» === */
@@ -21556,11 +21619,40 @@ function critRow(c, lockK2K3){
     desc = c.hint.split('.')[0];
   }
 
-  return el('div', { class: 'crit ' + (isLocked ? 'locked' : ''), title: c.hint },
-    el('div', { style:{ minWidth:0, flex:1 }},
-      el('div', { class:'nm' }, c.id + ' · ' + c.name),
-      el('div', { class:'desc' }, desc)),
-    right);
+  /* Индивидуальное пояснение учителя по критерию — ученик увидит его в своём
+     результате под этим критерием. Особенно нужно для К1-К6 (содержание/речь),
+     где балл снимают без выделений в тексте. Прецедент 31.05.2026. */
+  const critCommentTa = el('textarea', {
+    placeholder: 'За что снят/выставлен балл по ' + c.id + '? (увидит ученик)',
+    value: STATE.critComments && STATE.critComments[c.id] ? STATE.critComments[c.id] : '',
+    style:{ width:'100%', marginTop:'8px', padding:'8px 10px', borderRadius:'8px',
+            border:'1px solid var(--border-2)', fontSize:'12px', fontFamily:'inherit',
+            resize:'vertical', minHeight:'34px', boxSizing:'border-box' },
+    oninput: ev => {
+      if(!STATE.critComments) STATE.critComments = {};
+      const v = ev.target.value;
+      if(v.trim()) STATE.critComments[c.id] = v;
+      else delete STATE.critComments[c.id];
+      autoGrowTa(ev.target);
+    }
+  });
+  requestAnimationFrame(() => autoGrowTa(critCommentTa));
+
+  return el('div', { class: 'crit ' + (isLocked ? 'locked' : ''), title: c.hint,
+      style:{ flexDirection:'column', alignItems:'stretch' }},
+    el('div', { style:{ display:'flex', alignItems:'center', gap:'10px', width:'100%' }},
+      el('div', { style:{ minWidth:0, flex:1 }},
+        el('div', { class:'nm' }, c.id + ' · ' + c.name),
+        el('div', { class:'desc' }, desc)),
+      right),
+    critCommentTa);
+}
+
+/* Универсальный авто-рост textarea по содержимому. */
+function autoGrowTa(ta){
+  if(!ta) return;
+  ta.style.height = 'auto';
+  ta.style.height = (ta.scrollHeight + 2) + 'px';
 }
 
 /* =======================================================================
